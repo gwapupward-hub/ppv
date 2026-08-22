@@ -54,9 +54,12 @@ jobs:
             ~/.cache/solana
             ~/.local/share/solana/install
             ~/.cargo/bin/anchor
-          key: ppv-anchor-0.30.1-solana-1.18.17-${{ runner.os }}-v1
+          key: ppv-anchor-0.30.1-solana-1.18.17-${{ runner.os }}-v2
       - name: Install pinned Rust toolchain
-        run: rustup toolchain install 1.85.1 --profile minimal
+        run: |
+          rustup toolchain install 1.85.1 --profile minimal
+          # Anchor 0.30.1's locked `time` dependency predates Rust 1.80.
+          rustup toolchain install 1.79.0 --profile minimal
       - name: Install Solana CLI 1.18.17
         run: |
           solana_bin="${HOME}/.local/share/solana/install/active_release/bin"
@@ -71,7 +74,7 @@ jobs:
              [[ "$("${HOME}/.cargo/bin/anchor" --version)" != "anchor-cli 0.30.1" ]]; then
             sudo apt-get update
             sudo apt-get install --yes libudev-dev pkg-config
-            cargo install \
+            cargo +1.79.0 install \
               --git https://github.com/solana-foundation/anchor \
               --tag v0.30.1 \
               anchor-cli \
