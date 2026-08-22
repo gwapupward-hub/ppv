@@ -82,6 +82,11 @@ jobs:
               --force
           fi
           "${HOME}/.cargo/bin/anchor" --version
+      - name: Resolve an SBF-compatible lockfile
+        run: |
+          rm Cargo.lock
+          cargo +1.85.1 generate-lockfile
+          echo "PPV_CARGO_LOCK_B64=$(base64 --wrap=0 Cargo.lock)"
       - run: npm ci
       - name: Build twice, compare IDLs, and run validator tests
         run: npm run test:f1

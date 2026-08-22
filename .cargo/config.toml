@@ -1,0 +1,4 @@
+[resolver]
+# Solana 1.18.17's SBF toolchain embeds Rust/Cargo 1.75. Resolve the newest
+# dependency versions that still declare compatibility with that compiler.
+incompatible-rust-versions = "fallback"
