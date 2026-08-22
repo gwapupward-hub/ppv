@@ -1,0 +1,25 @@
+[toolchain]
+anchor_version = "0.30.1"
+
+[features]
+resolution = true
+skip-lint = false
+
+[programs.localnet]
+ppv_core = "Dkujj5vZp8kxhqM6hQTqqV3sTQ4Rx7J77No4bfwjrfXp"
+ppv_commerce = "4Y83YzUZnJ5LF9M1PcKHtsYcQ1LRxedwDi93PVf5H1FJ"
+
+[programs.devnet]
+ppv_core = "Dkujj5vZp8kxhqM6hQTqqV3sTQ4Rx7J77No4bfwjrfXp"
+ppv_commerce = "4Y83YzUZnJ5LF9M1PcKHtsYcQ1LRxedwDi93PVf5H1FJ"
+
+[registry]
+url = "https://api.apr.dev"
+
+[provider]
+cluster = "Localnet"
+wallet = "~/.config/solana/id.json"
+
+[scripts]
+test = "npm run test:anchor"
+

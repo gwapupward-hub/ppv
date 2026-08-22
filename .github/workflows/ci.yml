@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sdk:
+    name: SDK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build:sdk
+
+  programs:
+    name: Solana programs (host)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Rust components
+        run: rustup component add rustfmt clippy --toolchain 1.79.0
+      - run: cargo fmt --all -- --check
+      - run: cargo test --workspace
+      - run: cargo clippy --workspace --all-targets
+
+  # Foundation bootstrap only: produce the first deterministic Rust lockfile.
+  # This job is removed immediately after the generated lockfile lands.
+  lockfile-bootstrap:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/feat/ppv-foundation'
+    name: Bootstrap Cargo.lock
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Rust components
+        run: rustup component add rustfmt --toolchain 1.79.0
+      - name: Generate and commit lockfile when absent
+        run: |
+          if test -f Cargo.lock; then
+            exit 0
+          fi
+          cargo generate-lockfile
+          cargo fmt --all
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.lock programs
+          git commit -m "chore: format and lock Rust dependencies"
+          git push origin "HEAD:${GITHUB_REF_NAME}"

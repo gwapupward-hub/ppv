@@ -1,0 +1,74 @@
+# PPV Foundation
+
+Private proofs and exact-version agreements for GWAP OS, implemented as two
+separately deployable Solana programs.
+
+## Foundation scope
+
+This branch intentionally contains only the smallest non-custodial protocol
+surface:
+
+- `ppv_core`: wallet-authorized proof timestamps and permanent revocation
+  markers.
+- `ppv_commerce`: bilateral agreement creation, revision, signing, execution,
+  and cancellation.
+- `@gwap/ppv-sdk`: frozen canonicalization v1 and SHA-256 helpers shared by
+  every client.
+
+Not included: invoices, token transfers, escrow, milestones, disputes,
+arbitration, protocol fees, document encryption, GNS authority, mainnet
+deployment, or any instruction that holds user funds.
+
+That exclusion is a security boundary, not an unfinished checkbox. Custody
+returns only after its signed-terms binding, legal policy, invariant tests,
+fuzzing, and external audit gates are complete.
+
+## Security properties
+
+1. Every mutable action requires the wallet authority recorded on-chain.
+2. Proof and agreement PDAs include the creating wallet, preventing a different
+   wallet from front-running a client-generated ID.
+3. A revision must name the version it expects to replace, preventing silent
+   last-write-wins negotiation races.
+4. Every revision clears both signatures. A signature can never survive a
+   content change.
+5. A signature instruction restates both the version and content hash the
+   wallet saw. A stale screen produces a clean transaction failure.
+6. Evidence accounts cannot be closed. Revocation adds history; it does not
+   erase it.
+7. No GNS name is treated as an authority. Wallets sign; names remain an
+   optional presentation-layer upgrade.
+
+## Important product claim
+
+A PPV proof demonstrates that a particular wallet committed to particular
+bytes no later than a Solana-confirmed time. It does **not** independently prove
+authorship, originality, legal ownership, or copyright registration.
+
+## Local verification
+
+Prerequisites: Rust 1.79, Anchor 0.30.1, a compatible Solana CLI, and Node 22+.
+
+```bash
+npm ci
+npm test
+cargo fmt --all -- --check
+cargo test --workspace
+anchor build
+anchor test
+```
+
+The IDs currently committed in `Anchor.toml` and `declare_id!` are build-only
+placeholders. Before any deployment, generate controlled program keypairs, run
+`anchor keys sync`, rebuild, and record the resulting IDs in the deployment
+manifest. Never deploy these placeholder IDs.
+
+## Documentation
+
+- [Architecture](docs/architecture.md)
+- [Threat model](docs/threat-model.md)
+- [Canonicalization v1](docs/canonicalization-v1.md)
+- [Deployment gates](docs/deployment-gates.md)
+- [Future arbiter policy gate](docs/arbiter-policy.md)
+- [Security policy](SECURITY.md)
+
