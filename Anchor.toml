@@ -6,10 +6,10 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-ppv_core = "JDksLsU1s3wSMzuEMtQ13fyT5ieSK1UYgcD3jBXAsYnF"
+ppv_core = "9D2JUUB2vUTtfxSZNGzrUXk1AFmvvqSbxZiXWLBYaBHB"
 
 [programs.devnet]
-ppv_core = "JDksLsU1s3wSMzuEMtQ13fyT5ieSK1UYgcD3jBXAsYnF"
+ppv_core = "9D2JUUB2vUTtfxSZNGzrUXk1AFmvvqSbxZiXWLBYaBHB"
 
 [registry]
 url = "https://api.apr.dev"
