@@ -3,9 +3,7 @@ use anchor_lang::prelude::*;
 
 pub const AGREEMENT_SCHEMA_VERSION: u8 = 1;
 
-#[derive(
-    AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq, InitSpace,
-)]
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq, InitSpace)]
 pub enum AgreementState {
     Pending,
     Executed,
@@ -54,7 +52,10 @@ impl Agreement {
     }
 
     fn require_pending_and_unexpired(&self, now: i64) -> Result<()> {
-        require!(self.state == AgreementState::Pending, CommerceError::BadState);
+        require!(
+            self.state == AgreementState::Pending,
+            CommerceError::BadState
+        );
         require!(now < self.expires_at, CommerceError::Expired);
         Ok(())
     }
@@ -69,7 +70,10 @@ impl Agreement {
     ) -> Result<u32> {
         self.require_party(&signer)?;
         self.require_pending_and_unexpired(now)?;
-        require!(expected_version == self.version, CommerceError::StaleVersion);
+        require!(
+            expected_version == self.version,
+            CommerceError::StaleVersion
+        );
         require!(
             new_content_hash.iter().any(|byte| *byte != 0),
             CommerceError::InvalidContentHash
@@ -84,10 +88,7 @@ impl Agreement {
         );
 
         let previous_version = self.version;
-        self.version = self
-            .version
-            .checked_add(1)
-            .ok_or(CommerceError::Overflow)?;
+        self.version = self.version.checked_add(1).ok_or(CommerceError::Overflow)?;
         self.content_hash = new_content_hash;
         self.terms_hash = new_terms_hash;
         self.sig_a = None;
@@ -105,7 +106,10 @@ impl Agreement {
     ) -> Result<bool> {
         self.require_party(&signer)?;
         self.require_pending_and_unexpired(now)?;
-        require!(expected_version == self.version, CommerceError::StaleVersion);
+        require!(
+            expected_version == self.version,
+            CommerceError::StaleVersion
+        );
         require!(
             expected_content_hash == self.content_hash,
             CommerceError::ContentHashMismatch
@@ -141,7 +145,10 @@ impl Agreement {
 
     pub fn cancel(&mut self, signer: Pubkey, now: i64) -> Result<()> {
         self.require_party(&signer)?;
-        require!(self.state == AgreementState::Pending, CommerceError::BadState);
+        require!(
+            self.state == AgreementState::Pending,
+            CommerceError::BadState
+        );
         self.state = AgreementState::Cancelled;
         self.cancelled_at = now;
         Ok(())
@@ -186,9 +193,7 @@ mod tests {
         agreement.sign(a, 1, CONTENT_V1, TERMS_V1, 20).unwrap();
         assert!(agreement.sig_a.is_some());
 
-        let previous = agreement
-            .revise(b, 1, CONTENT_V2, TERMS_V2, 30)
-            .unwrap();
+        let previous = agreement.revise(b, 1, CONTENT_V2, TERMS_V2, 30).unwrap();
         assert_eq!(previous, 1);
         assert_eq!(agreement.version, 2);
         assert!(agreement.sig_a.is_none());
@@ -200,12 +205,8 @@ mod tests {
         let a = Pubkey::new_unique();
         let b = Pubkey::new_unique();
         let mut agreement = pending(a, b);
-        agreement
-            .revise(a, 1, CONTENT_V2, TERMS_V2, 20)
-            .unwrap();
-        assert!(agreement
-            .revise(b, 1, [5; 32], [6; 32], 30)
-            .is_err());
+        agreement.revise(a, 1, CONTENT_V2, TERMS_V2, 20).unwrap();
+        assert!(agreement.revise(b, 1, [5; 32], [6; 32], 30).is_err());
         assert_eq!(agreement.version, 2);
         assert_eq!(agreement.content_hash, CONTENT_V2);
     }
@@ -224,17 +225,11 @@ mod tests {
         let a = Pubkey::new_unique();
         let b = Pubkey::new_unique();
         let mut agreement = pending(a, b);
-        assert!(!agreement
-            .sign(a, 1, CONTENT_V1, TERMS_V1, 20)
-            .unwrap());
-        assert!(agreement
-            .sign(b, 1, CONTENT_V1, TERMS_V1, 21)
-            .unwrap());
+        assert!(!agreement.sign(a, 1, CONTENT_V1, TERMS_V1, 20).unwrap());
+        assert!(agreement.sign(b, 1, CONTENT_V1, TERMS_V1, 21).unwrap());
         assert_eq!(agreement.state, AgreementState::Executed);
         assert_eq!(agreement.executed_at, 21);
-        assert!(agreement
-            .revise(a, 1, CONTENT_V2, TERMS_V2, 30)
-            .is_err());
+        assert!(agreement.revise(a, 1, CONTENT_V2, TERMS_V2, 30).is_err());
     }
 
     #[test]
@@ -255,12 +250,7 @@ mod tests {
         let a = Pubkey::new_unique();
         let b = Pubkey::new_unique();
         let mut agreement = pending(a, b);
-        assert!(agreement
-            .sign(a, 1, CONTENT_V1, TERMS_V1, 1_000)
-            .is_err());
-        assert!(agreement
-            .revise(a, 1, CONTENT_V2, TERMS_V2, 1_000)
-            .is_err());
+        assert!(agreement.sign(a, 1, CONTENT_V1, TERMS_V1, 1_000).is_err());
+        assert!(agreement.revise(a, 1, CONTENT_V2, TERMS_V2, 1_000).is_err());
     }
 }
-

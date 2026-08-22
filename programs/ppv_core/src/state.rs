@@ -3,9 +3,7 @@ use anchor_lang::prelude::*;
 
 pub const PROOF_SCHEMA_VERSION: u8 = 1;
 
-#[derive(
-    AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq, InitSpace,
-)]
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq, InitSpace)]
 pub enum ProofKind {
     Creation,
     Document,
@@ -15,9 +13,7 @@ pub enum ProofKind {
     Other,
 }
 
-#[derive(
-    AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq, InitSpace,
-)]
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq, InitSpace)]
 pub enum ProofStatus {
     Active,
     Revoked,
@@ -45,7 +41,10 @@ pub struct ProofRecord {
 impl ProofRecord {
     pub fn revoke(&mut self, signer: Pubkey, now: i64) -> Result<()> {
         require_keys_eq!(signer, self.authority, CoreError::Unauthorized);
-        require!(self.status == ProofStatus::Active, CoreError::AlreadyRevoked);
+        require!(
+            self.status == ProofStatus::Active,
+            CoreError::AlreadyRevoked
+        );
         self.status = ProofStatus::Revoked;
         self.revoked_at = now;
         Ok(())
@@ -90,4 +89,3 @@ mod tests {
         assert!(proof.revoke(authority, 30).is_err());
     }
 }
-

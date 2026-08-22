@@ -53,4 +53,3 @@ pub struct AgreementCancelled {
     pub version: u32,
     pub cancelled_at: i64,
 }
-

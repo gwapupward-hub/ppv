@@ -9,4 +9,3 @@ pub enum CoreError {
     #[msg("Proof is already revoked")]
     AlreadyRevoked,
 }
-

@@ -106,4 +106,3 @@ pub struct RevokeProof<'info> {
     )]
     pub proof: Account<'info, ProofRecord>,
 }
-

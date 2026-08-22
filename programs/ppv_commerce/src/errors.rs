@@ -29,4 +29,3 @@ pub enum CommerceError {
     #[msg("Arithmetic overflow")]
     Overflow,
 }
-

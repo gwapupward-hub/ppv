@@ -207,4 +207,3 @@ pub struct MutateAgreement<'info> {
     )]
     pub agreement: Account<'info, Agreement>,
 }
-
