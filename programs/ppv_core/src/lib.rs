@@ -14,10 +14,8 @@ pub mod state;
 
 use instructions::*;
 
-// BUILD-ONLY PLACEHOLDER. No private key is retained for this address.
-// CI runs `anchor keys sync` after its first build. Before any deployment,
-// generate deployment authorities securely and sync program IDs deliberately.
-declare_id!("JDksLsU1s3wSMzuEMtQ13fyT5ieSK1UYgcD3jBXAsYnF");
+// Canonical Solana devnet program ID for the PPV Founding Beta deployment.
+declare_id!("9D2JUUB2vUTtfxSZNGzrUXk1AFmvvqSbxZiXWLBYaBHB");
 
 #[program]
 pub mod ppv_core {
