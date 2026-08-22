@@ -14,7 +14,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Install Rust
+      - name: Install Rust bootstrap toolchain
         uses: dtolnay/rust-toolchain@stable
       - name: Install Solana 1.18.17
         shell: bash
@@ -28,8 +28,15 @@ jobs:
           avm install 0.30.1
           avm use 0.30.1
           echo "$HOME/.avm/bin" >> "$GITHUB_PATH"
+          rustup default 1.79.0
       - name: Install test dependencies
         run: npm install
+      - name: Generate Anchor-compatible lockfile
+        shell: bash
+        run: |
+          rm -f Cargo.lock
+          cargo generate-lockfile
+          head -n 4 Cargo.lock
       - name: First build and synchronize ephemeral program ID
         shell: bash
         run: |
