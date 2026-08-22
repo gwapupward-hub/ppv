@@ -6,9 +6,9 @@ use crate::{
 };
 use anchor_lang::prelude::*;
 
+#[event_cpi]
 #[derive(Accounts)]
 #[instruction(proof_id: [u8; 16])]
-#[event_cpi]
 pub struct CreateProof<'info> {
     #[account(mut)]
     pub owner: Signer<'info>,
@@ -64,8 +64,8 @@ pub fn create_proof(
     Ok(())
 }
 
-#[derive(Accounts)]
 #[event_cpi]
+#[derive(Accounts)]
 pub struct RevokeProof<'info> {
     pub owner: Signer<'info>,
     #[account(
