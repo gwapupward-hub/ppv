@@ -47,7 +47,7 @@ authorship, originality, legal ownership, or copyright registration.
 
 ## Local verification
 
-Prerequisites: Rust 1.79, Anchor 0.30.1, a compatible Solana CLI, and Node 22+.
+Prerequisites: Rust 1.85.1, Anchor 0.30.1, a compatible Solana CLI, and Node 22+.
 
 ```bash
 npm ci
@@ -71,4 +71,3 @@ manifest. Never deploy these placeholder IDs.
 - [Deployment gates](docs/deployment-gates.md)
 - [Future arbiter policy gate](docs/arbiter-policy.md)
 - [Security policy](SECURITY.md)
-
