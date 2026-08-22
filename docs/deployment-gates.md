@@ -13,6 +13,11 @@
 - Full local-validator tests pass for every authority, stale-version, replay,
   expiry, terminal-state, and signature-clearing path.
 - Generated IDLs are reviewed and reproducible.
+- CI uses ephemeral ignored program keypairs and never prints or persists their
+  secret material.
+
+Run the complete gate with `npm run test:f1`. Passing F1 proves build and state
+machine behavior only. It does not authorize deployment.
 
 ## Gate F2 — devnet design partners
 
@@ -34,4 +39,3 @@
 Invoices, settlement, escrow, disputes, fees, and mainnet value transfer are
 outside this release. They require separate architecture, tests, legal review,
 and audit approval. Passing Foundation gates does not approve custody.
-

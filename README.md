@@ -47,7 +47,7 @@ authorship, originality, legal ownership, or copyright registration.
 
 ## Local verification
 
-Prerequisites: Rust 1.85.1, Anchor 0.30.1, a compatible Solana CLI, and Node 22+.
+Prerequisites: Rust 1.85.1, Anchor 0.30.1, Solana CLI 1.18.17, and Node 22+.
 
 ```bash
 npm ci
@@ -56,6 +56,8 @@ cargo fmt --all -- --check
 cargo test --workspace
 anchor build
 anchor test
+# Or run the complete F1 build, IDL, and validator gate:
+npm run test:f1
 ```
 
 The IDs currently committed in `Anchor.toml` and `declare_id!` are build-only

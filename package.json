@@ -10,6 +10,7 @@
     "test": "npm run typecheck && npm run test:sdk",
     "test:sdk": "npm run test --workspace @gwap/ppv-sdk",
     "test:anchor": "ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts",
+    "test:f1": "./scripts/verify-f1.sh",
     "typecheck": "tsc --noEmit -p tsconfig.json && npm run typecheck --workspace @gwap/ppv-sdk"
   },
   "devDependencies": {

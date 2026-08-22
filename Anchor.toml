@@ -1,5 +1,6 @@
 [toolchain]
 anchor_version = "0.30.1"
+solana_version = "1.18.17"
 
 [features]
 resolution = true
@@ -22,4 +23,3 @@ wallet = "~/.config/solana/id.json"
 
 [scripts]
 test = "npm run test:anchor"
-
