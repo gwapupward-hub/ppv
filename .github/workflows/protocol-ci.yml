@@ -36,6 +36,7 @@ jobs:
         run: |
           rm -f Cargo.lock
           cargo generate-lockfile
+          cargo update -p anchor-lang-idl --precise 0.1.1
           head -n 4 Cargo.lock
       - name: First build and synchronize ephemeral program ID
         shell: bash
