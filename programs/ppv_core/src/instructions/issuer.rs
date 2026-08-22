@@ -6,9 +6,9 @@ use crate::{
 };
 use anchor_lang::prelude::*;
 
+#[event_cpi]
 #[derive(Accounts)]
 #[instruction(issuer: Pubkey)]
-#[event_cpi]
 pub struct RegisterIssuer<'info> {
     #[account(mut)]
     pub admin: Signer<'info>,
@@ -49,8 +49,8 @@ pub fn register_issuer(
     Ok(())
 }
 
-#[derive(Accounts)]
 #[event_cpi]
+#[derive(Accounts)]
 pub struct SetIssuerActive<'info> {
     pub admin: Signer<'info>,
     #[account(seeds = [CONFIG_SEED], bump = config.bump, has_one = admin @ PpvCoreError::NotAuthorized)]
