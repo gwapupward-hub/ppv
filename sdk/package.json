@@ -1,0 +1,13 @@
+{
+  "name": "@gwap/ppv-sdk",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "test": "tsx test/canonical.test.ts && tsx test/crypto.test.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.12",
+    "typescript": "^5.7.0"
+  },
+  "type": "module"
+}

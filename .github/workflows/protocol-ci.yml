@@ -14,7 +14,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Install Solana 1.18.17
@@ -31,7 +30,7 @@ jobs:
           echo "$HOME/.avm/bin" >> "$GITHUB_PATH"
       - name: Install test dependencies
         run: npm install
-      - name: First build and synchronize ephemeral program IDs
+      - name: First build and synchronize ephemeral program ID
         shell: bash
         run: |
           anchor build

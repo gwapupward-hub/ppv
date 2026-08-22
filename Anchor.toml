@@ -7,11 +7,9 @@ skip-lint = false
 
 [programs.localnet]
 ppv_core = "JDksLsU1s3wSMzuEMtQ13fyT5ieSK1UYgcD3jBXAsYnF"
-ppv_commerce = "6tQYmhyrJqFp5d1tX4T7vbuhWACUjiqMeuao1GaP6pBE"
 
 [programs.devnet]
 ppv_core = "JDksLsU1s3wSMzuEMtQ13fyT5ieSK1UYgcD3jBXAsYnF"
-ppv_commerce = "6tQYmhyrJqFp5d1tX4T7vbuhWACUjiqMeuao1GaP6pBE"
 
 [registry]
 url = "https://api.apr.dev"
