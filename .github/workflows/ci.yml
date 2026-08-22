@@ -95,6 +95,17 @@ jobs:
         run: |
           rm Cargo.lock
           cargo +1.85.1 generate-lockfile
+          # Cargo's MSRV fallback cannot protect against crates that omit or
+          # understate rust-version. Use Solana 1.18.17's own lockfile as the
+          # compatibility baseline for the affected transitive families.
+          cargo +1.85.1 update -p solana-program --precise 1.18.17
+          cargo +1.85.1 update -p blake3 --precise 1.5.0
+          cargo +1.85.1 update -p cc --precise 1.0.83
+          cargo +1.85.1 update -p serde --precise 1.0.195
+          cargo +1.85.1 update -p serde_json --precise 1.0.111
+          cargo +1.85.1 update -p bytemuck --precise 1.14.0
+          cargo +1.85.1 update -p bytemuck_derive --precise 1.4.0
+          cargo +1.85.1 update -p borsh@1.5.7 --precise 1.2.1
           echo "PPV_CARGO_LOCK_B64=$(base64 --wrap=0 Cargo.lock)"
       - run: npm ci
       - name: Build twice, compare IDLs, and run validator tests
