@@ -1,0 +1,21 @@
+[package]
+name = "ppv_core"
+version = "0.1.0"
+description = "Non-custodial proof registry for PPV"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "ppv_core"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build"]
+
+[dependencies]
+anchor-lang = { workspace = true }

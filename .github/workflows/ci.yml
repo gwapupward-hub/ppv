@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sdk:
+    name: SDK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build:sdk
+
+  programs:
+    name: Solana programs (host)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Rust components
+        run: rustup component add rustfmt clippy --toolchain 1.85.1
+      - run: cargo fmt --all -- --check
+      - run: cargo test --workspace --locked
+      - run: cargo clippy --workspace --all-targets --locked
