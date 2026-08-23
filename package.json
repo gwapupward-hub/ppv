@@ -9,7 +9,7 @@
     "build:sdk": "npm run build --workspace @gwap/ppv-sdk",
     "test": "npm run typecheck && npm run test:sdk",
     "test:sdk": "npm run test --workspace @gwap/ppv-sdk",
-    "test:anchor": "ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts",
+    "test:anchor": "node --import tsx ./node_modules/mocha/bin/mocha.js --timeout 1000000 \"tests/**/*.ts\"",
     "test:f1": "./scripts/verify-f1.sh",
     "typecheck": "tsc --noEmit -p tsconfig.json && npm run typecheck --workspace @gwap/ppv-sdk"
   },
@@ -18,7 +18,8 @@
     "@solana/web3.js": "1.95.8",
     "@types/mocha": "10.0.10",
     "@types/node": "22.10.2",
-    "ts-mocha": "10.0.0",
+    "mocha": "10.8.2",
+    "tsx": "4.19.2",
     "typescript": "5.7.3"
   }
 }

@@ -51,14 +51,24 @@ Prerequisites: Rust 1.85.1, Anchor 0.30.1, Solana CLI 1.18.17, and Node 22+.
 
 ```bash
 npm ci
-npm test
+npm test                                          # typecheck + SDK tests
 cargo fmt --all -- --check
-cargo test --workspace
-anchor build
-anchor test
-# Or run the complete F1 build, IDL, and validator gate:
-npm run test:f1
+cargo test --workspace --locked
+cargo clippy --workspace --all-targets --locked
+npm run test:f1                                   # the complete F1 gate
 ```
+
+`npm run test:f1` is the gate: it pins the toolchains, generates ephemeral
+program keypairs under the ignored `target/deploy/`, builds twice and asserts the
+two generated IDLs are byte-identical, checks that the keypair, `declare_id!`,
+`Anchor.toml` and the IDL all name the same program id, then starts a
+`solana-test-validator`, deploys both programs from their own keypairs, and runs
+the full adversarial suite. It restores the committed placeholder ids on every
+exit path, so ephemeral ids can never reach a commit.
+
+`Cargo.lock` is committed and authoritative; CI consumes it with `--locked` and
+never regenerates it. To move a dependency, run
+`./scripts/regenerate-lockfile.sh`, commit the result, and re-run the gate.
 
 The IDs currently committed in `Anchor.toml` and `declare_id!` are build-only
 placeholders. Before any deployment, generate controlled program keypairs, run
@@ -71,5 +81,7 @@ manifest. Never deploy these placeholder IDs.
 - [Threat model](docs/threat-model.md)
 - [Canonicalization v1](docs/canonicalization-v1.md)
 - [Deployment gates](docs/deployment-gates.md)
+- [Devnet deployment runbook](docs/devnet-deployment.md)
+- [Deployment manifests](deployments/README.md)
 - [Future arbiter policy gate](docs/arbiter-policy.md)
 - [Security policy](SECURITY.md)

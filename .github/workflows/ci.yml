@@ -55,12 +55,18 @@ jobs:
             ~/.cache/solana
             ~/.local/share/solana/install
             ~/.cargo/bin/anchor
-          key: ppv-anchor-0.30.1-solana-1.18.17-${{ runner.os }}-v2
-      - name: Install pinned Rust toolchain
+          key: ppv-anchor-0.30.1-solana-1.18.17-${{ runner.os }}-v3
+      - name: Install pinned Rust toolchains
         run: |
           rustup toolchain install 1.85.1 --profile minimal
-          # Anchor 0.30.1's locked `time` dependency predates Rust 1.80.
+          # Anchor 0.30.1's locked `time` dependency predates Rust 1.80, so the
+          # CLI itself is built with 1.79.0.
           rustup toolchain install 1.79.0 --profile minimal
+          # Anchor 0.30.1 builds the IDL with `cargo +nightly` and anchor-syn
+          # calls proc_macro2::Span::source_file(), an unstable API later
+          # nightlies removed. scripts/verify-f1.sh pins this nightly so the IDL
+          # build fails on a code change, never on a date.
+          rustup toolchain install nightly-2024-06-15 --profile minimal
       - name: Install Solana CLI 1.18.17
         run: |
           solana_bin="${HOME}/.local/share/solana/install/active_release/bin"
@@ -90,24 +96,17 @@ jobs:
             ~/.cache/solana
             ~/.local/share/solana/install
             ~/.cargo/bin/anchor
-          key: ppv-anchor-0.30.1-solana-1.18.17-${{ runner.os }}-v2
-      - name: Resolve an SBF-compatible lockfile
+          key: ppv-anchor-0.30.1-solana-1.18.17-${{ runner.os }}-v3
+      - name: Assert the committed lockfile is authoritative
         run: |
-          rm Cargo.lock
-          cargo +1.85.1 generate-lockfile
-          # Cargo's MSRV fallback cannot protect against crates that omit or
-          # understate rust-version. Use Solana 1.18.17's own lockfile as the
-          # compatibility baseline for the affected transitive families.
-          cargo +1.85.1 update -p solana-program --precise 1.18.17
-          cargo +1.85.1 update -p blake3 --precise 1.5.0
-          cargo +1.85.1 update -p cc --precise 1.0.83
-          cargo +1.85.1 update -p serde_json --precise 1.0.111
-          cargo +1.85.1 update -p serde_bytes --precise 0.11.14
-          cargo +1.85.1 update -p serde --precise 1.0.195
-          cargo +1.85.1 update -p bytemuck --precise 1.14.0
-          cargo +1.85.1 update -p bytemuck_derive --precise 1.4.0
-          cargo +1.85.1 update -p borsh@1.5.7 --precise 1.2.1
-          echo "PPV_CARGO_LOCK_B64=$(base64 --wrap=0 Cargo.lock)"
+          # The committed Cargo.lock is the single source of truth. CI never
+          # mutates it: `--locked` makes cargo fail rather than silently
+          # re-resolve, so a drifting crates.io index cannot change what the
+          # SBF toolchain builds. Regenerate deliberately with
+          # ./scripts/regenerate-lockfile.sh and commit the result.
+          cargo +1.85.1 metadata --locked --format-version 1 > /dev/null
       - run: npm ci
       - name: Build twice, compare IDLs, and run validator tests
         run: npm run test:f1
+      - name: Assert the build did not rewrite the lockfile
+        run: git diff --exit-code -- Cargo.lock
