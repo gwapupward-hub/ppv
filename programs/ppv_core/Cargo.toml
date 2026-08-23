@@ -3,6 +3,7 @@ name = "ppv_core"
 version = "0.1.0"
 description = "Non-custodial proof registry for PPV"
 edition = "2021"
+rust-version = "1.75"
 publish = false
 
 [lib]
