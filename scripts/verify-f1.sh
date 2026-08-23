@@ -46,6 +46,16 @@ restore_program_ids() {
 }
 trap restore_program_ids EXIT
 
+# `anchor test` needs the provider wallet named in Anchor.toml to exist before it
+# can fund it from the local validator's faucet. A clean CI runner has none. This
+# identity only ever signs against solana-test-validator, is created outside the
+# repository, and is never deployed anywhere.
+provider_wallet="${HOME}/.config/solana/id.json"
+if [[ ! -f "${provider_wallet}" ]]; then
+  mkdir -p "$(dirname "${provider_wallet}")"
+  solana-keygen new --silent --no-bip39-passphrase --outfile "${provider_wallet}"
+fi
+
 ./scripts/prepare-ephemeral-program-ids.sh
 
 anchor build
