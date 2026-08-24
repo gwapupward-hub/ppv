@@ -157,6 +157,64 @@ Never run a deployment from an ordinary push workflow. Deployment is either a
 manual operator action or a GitHub Actions job bound to a protected `devnet`
 environment with required reviewers and environment-scoped secrets.
 
+## Deploying through protected CI
+
+`.github/workflows/deploy-devnet.yml` is the supported alternative to deploying
+by hand. It is `workflow_dispatch` only — there is deliberately no `push`,
+`pull_request` or `schedule` trigger, because a deployment must never be a side
+effect of merging code.
+
+The workflow is only as protected as the environment behind it. Before using it,
+configure a `devnet` environment in repository settings:
+
+1. **Settings → Environments → New environment → `devnet`.**
+2. **Required reviewers** — at least one, and not the person who dispatches the
+   run. Without this the job is just an ordinary workflow holding credentials,
+   which is what this runbook forbids.
+3. **Environment secrets** (never repository-level, so no other workflow can
+   read them):
+   - `PPV_PROGRAM_KEYPAIR` — the JSON keypair for the program being deployed.
+   - `PPV_DEPLOYER_KEYPAIR` — the funded devnet deployer.
+4. **Environment variables** (public values):
+   - `PPV_SQUADS_VAULT_PDA` — the Squads V4 vault PDA that becomes the upgrade
+     authority.
+   - `PPV_DEVNET_GENESIS_HASH` — devnet's genesis hash. The job refuses to
+     deploy if the cluster it reaches does not match.
+
+Deploy one program per run: pick it from the dropdown and retype its name to
+confirm. The job syncs ids, builds, asserts the built id matches the deployment
+keypair, deploys with the vault as upgrade authority, prints `solana program
+show` plus the artifact hashes, and destroys the keypair material on every exit
+path including failure. Only public keys are ever printed.
+
+Because the keypairs are held as environment secrets, rotating them is a
+settings change, not a code change. If you would rather they never live in
+GitHub at all, deploy by hand from the operator machine instead — both paths are
+supported and produce the same manifest.
+
+## Recording and verifying a deployment
+
+```bash
+# Once per program, immediately after the deploy, from the same checkout.
+PPV_PROGRAM=ppv_core \
+PPV_DEPLOY_SIGNATURE=<signature> \
+PPV_UPGRADE_AUTHORITY_MEMBERS=<pubkey,pubkey,...> \
+PPV_UPGRADE_AUTHORITY_THRESHOLD=2 \
+  ./scripts/record-deployment.sh
+
+# Read-only, needs no credentials, anyone can run it.
+PPV_VERIFY_RPC_URL=https://<second-provider> ./scripts/verify-deployment.sh
+```
+
+`record-deployment.sh` reads the chain and the build output, appends an entry to
+`deployments/devnet.json`, and refuses to run against a dirty working tree —
+otherwise `gitCommit` would not identify what was deployed. It never touches a
+keypair.
+
+`verify-deployment.sh` re-checks every live entry against the chain, through a
+second RPC when you give it one. A manifest nobody can independently check is
+not evidence.
+
 ## Post-deployment verification
 
 For each program:
