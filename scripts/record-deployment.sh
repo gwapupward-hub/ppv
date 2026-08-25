@@ -14,6 +14,9 @@ set -euo pipefail
 #   PPV_UPGRADE_AUTHORITY_MEMBERS=<comma-separated Squads member pubkeys> \
 #   PPV_UPGRADE_AUTHORITY_THRESHOLD=2 \
 #   ./scripts/record-deployment.sh
+#
+# PPV_VERIFIABLE defaults to false, matching the plain `anchor build` the devnet
+# runbook uses. Set it to true only for an `anchor build --verifiable` artifact.
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
@@ -23,6 +26,15 @@ program="${PPV_PROGRAM:?set PPV_PROGRAM to ppv_core or ppv_commerce}"
 signature="${PPV_DEPLOY_SIGNATURE:?set PPV_DEPLOY_SIGNATURE to the deploy transaction signature}"
 members="${PPV_UPGRADE_AUTHORITY_MEMBERS:?set PPV_UPGRADE_AUTHORITY_MEMBERS to the Squads member public keys}"
 threshold="${PPV_UPGRADE_AUTHORITY_THRESHOLD:?set PPV_UPGRADE_AUTHORITY_THRESHOLD to the Squads threshold}"
+# Devnet uses a plain `anchor build`. Set PPV_VERIFIABLE=true only when the
+# artifact really came from `anchor build --verifiable`, so the manifest never
+# claims a reproducibility property the build did not have.
+verifiable="${PPV_VERIFIABLE:-false}"
+
+case "${verifiable}" in
+  true | false) ;;
+  *) echo "PPV_VERIFIABLE must be true or false" >&2; exit 1 ;;
+esac
 
 case "${program}" in
   ppv_core | ppv_commerce) ;;
@@ -72,7 +84,7 @@ MANIFEST="${manifest}" PROGRAM="${program}" PROGRAM_ID="${program_id}" \
 PROGRAM_DATA="${program_data}" AUTHORITY="${authority}" SLOT="${slot}" \
 GENESIS="${genesis}" SIGNATURE="${signature}" COMMIT="${commit}" \
 IDL_HASH="${idl_hash}" BINARY_HASH="${binary_hash}" \
-MEMBERS="${members}" THRESHOLD="${threshold}" \
+MEMBERS="${members}" THRESHOLD="${threshold}" VERIFIABLE="${verifiable}" \
 node -e '
 const fs = require("node:fs");
 const env = process.env;
@@ -100,6 +112,11 @@ manifest.deployments.push({
   deploymentSignature: env.SIGNATURE,
   gitCommit: env.COMMIT,
   toolchain: { anchor: "0.30.1", solana: "1.18.17", rustHost: "1.85.1", rustSbf: "1.75.0" },
+  // Devnet deploys a plain `anchor build`, not `anchor build --verifiable`, so
+  // the artifact is not reproducible by a third party from a container digest
+  // alone. Recorded rather than assumed: gitCommit plus binaryHash still pin
+  // exactly what was deployed for anyone with the pinned toolchain.
+  verifiable: env.VERIFIABLE === "true",
   idlHash: `sha256:${env.IDL_HASH}`,
   binaryHash: `sha256:${env.BINARY_HASH}`,
 });
