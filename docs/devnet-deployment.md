@@ -3,6 +3,10 @@
 This runbook covers PPV Foundation on **Solana devnet only**. Mainnet is out of
 scope for Foundation and is not covered here.
 
+Before using this runbook, read `docs/devnet-artifact-audit.md`. Artifacts for a
+devnet `ppv_core` that this repository did not build are in circulation, and the
+audit records what is known about them and what is still undecided.
+
 Nothing in this document, and nothing committed to this repository, contains
 signing material. Program keypairs, deployer keypairs, and upgrade-authority
 keypairs live only in the operator secret store. This repository records public

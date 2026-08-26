@@ -8,6 +8,13 @@ deployed, from which source, by which authority.
 happened. An absent manifest means PPV is not deployed to that cluster; it never
 means "deployed but undocumented".
 
+That distinction is currently under strain: artifacts describing a devnet
+`ppv_core` at `9D2JUUB2vUTtfxSZNGzrUXk1AFmvvqSbxZiXWLBYaBHB` exist, but they were
+built from a source tree that is not in this repository, so no entry can name a
+`gitCommit` that reproduces them. See `docs/devnet-artifact-audit.md`. No
+manifest has been written, and that remains the correct state until the
+provenance question is settled.
+
 ## Rules
 
 - **Public only.** A manifest records public keys, addresses, hashes, slots, and

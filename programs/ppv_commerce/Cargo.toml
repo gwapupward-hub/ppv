@@ -16,6 +16,11 @@ cpi = ["no-entrypoint"]
 no-entrypoint = []
 no-idl = []
 no-log-ix-name = []
+# Declared so the cfg checks Anchor and solana-program expand into this
+# crate resolve. Never enabled by a build; enabling them is opt-in.
+anchor-debug = []
+custom-heap = []
+custom-panic = []
 idl-build = ["anchor-lang/idl-build"]
 
 [dependencies]
