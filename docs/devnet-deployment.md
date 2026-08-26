@@ -122,8 +122,8 @@ Set up the vault before the first deployment:
 
 1. Create a Squads V4 multisig on devnet with the intended signer set and
    threshold.
-2. Record the **vault PDA** — that address, not any member key, is the upgrade
-   authority passed to `solana program deploy`.
+2. Record the **vault PDA** — that address, not any member key, is the destination
+   of the immediate post-deployment upgrade-authority transfer.
 3. Record the member public keys and the threshold alongside it. Public keys
    only; a member's private key never leaves its own wallet.
 
@@ -144,14 +144,29 @@ solana genesis-hash                    # record this in the manifest
 
 anchor build
 solana program deploy \
+  --keypair "${work}/deployer.json" \
   --program-id "${work}/ppv_core-keypair.json" \
-  --upgrade-authority "$PPV_SQUADS_VAULT_PDA" \
+  --upgrade-authority "${work}/deployer.json" \
   --url https://api.devnet.solana.com \
   target/deploy/ppv_core.so
+
+# A Squads vault PDA cannot sign the checked transfer form. The deployer signs
+# this one-time unchecked transfer to the public PDA, then immediately verifies it.
+solana program set-upgrade-authority <PPV_CORE_PROGRAM_ID> \
+  --keypair "${work}/deployer.json" \
+  --upgrade-authority "${work}/deployer.json" \
+  --new-upgrade-authority "$PPV_SQUADS_VAULT_PDA" \
+  --skip-new-upgrade-authority-signer-check \
+  --url https://api.devnet.solana.com
+solana program show <PPV_CORE_PROGRAM_ID> --url https://api.devnet.solana.com
 ```
 
-Repeat for `ppv_commerce`. Deploy the two programs separately; a failure in one
-must never block or roll back the other.
+`solana program deploy --upgrade-authority` expects a signer, so passing a Squads
+PDA directly is invalid. The supported path is to deploy with the deployer as a
+temporary authority, transfer authority to the Squads vault PDA immediately, and
+fail the run unless the live account reports that exact PDA. Repeat for
+`ppv_commerce`. Deploy the two programs separately; a failure in one must never
+block or roll back the other.
 
 ### Devnet deploys a non-verifiable build
 
@@ -191,24 +206,36 @@ configure a `devnet` environment in repository settings:
    which is what this runbook forbids.
 3. **Environment secrets** (never repository-level, so no other workflow can
    read them):
-   - `PPV_PROGRAM_KEYPAIR` — the JSON keypair for the program being deployed.
+   - `PPV_CORE_PROGRAM_KEYPAIR` — the permanent JSON keypair for `ppv_core`.
+   - `PPV_COMMERCE_PROGRAM_KEYPAIR` — the permanent JSON keypair for `ppv_commerce`.
    - `PPV_DEPLOYER_KEYPAIR` — the funded devnet deployer.
 4. **Environment variables** (public values):
    - `PPV_SQUADS_VAULT_PDA` — the Squads V4 vault PDA that becomes the upgrade
      authority.
+   - `PPV_SQUADS_MEMBER_PUBKEYS` — comma-separated public member addresses for
+     the deployment manifest.
+   - `PPV_SQUADS_THRESHOLD` — the multisig approval threshold recorded in the
+     deployment manifest.
    - `PPV_DEVNET_GENESIS_HASH` — devnet's genesis hash. The job refuses to
      deploy if the cluster it reaches does not match.
 
 Deploy one program per run: pick it from the dropdown and retype its name to
-confirm. The job syncs ids, builds, asserts the built id matches the deployment
-keypair, deploys with the vault as upgrade authority, prints `solana program
-show` plus the artifact hashes, and destroys the keypair material on every exit
-path including failure. Only public keys are ever printed.
+confirm. The job requires the permanent keypair to match the already-committed
+`declare_id!` and `Anchor.toml` identity, builds without rewriting IDs, refuses an
+address that already exists, deploys with the deployer as a temporary authority,
+transfers authority immediately to the Squads vault PDA, verifies the live
+executable program and authority, records and verifies `deployments/devnet.json`,
+uploads that public manifest as workflow evidence, and destroys keypair material
+on every exit path including failure. Only public keys are ever printed.
 
-Because the keypairs are held as environment secrets, rotating them is a
-settings change, not a code change. If you would rather they never live in
-GitHub at all, deploy by hand from the operator machine instead — both paths are
-supported and produce the same manifest.
+The workflow selects exactly one of the two program-key secrets from the
+`program` input, so `ppv_core` and `ppv_commerce` cannot accidentally share an
+identity and no secret replacement is required between runs. Program identities
+are permanent: replacing either secret is permitted only before its first deploy,
+or as recovery of the same backed-up keypair—not as routine rotation. If you
+would rather the keypairs never live in GitHub at all, deploy by hand from the
+operator machine instead; both paths are supported and produce the same
+manifest.
 
 ## Recording and verifying a deployment
 
