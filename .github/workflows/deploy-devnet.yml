@@ -24,9 +24,9 @@ permissions:
   contents: read
 
 concurrency:
-  # One deployment at a time. Two concurrent deploys of the same program race on
-  # the write buffer and can leave it half-written.
-  group: deploy-devnet-${{ inputs.program }}
+  # One deployment at a time. Concurrent initial deploys can race on the
+  # deployer balance and produce incomplete evidence.
+  group: deploy-devnet
   cancel-in-progress: false
 
 jobs:
@@ -74,61 +74,140 @@ jobs:
         run: |
           solana config set --url https://api.devnet.solana.com
           solana config get
-          # Refuse to continue against anything but devnet's genesis.
           expected="${{ vars.PPV_DEVNET_GENESIS_HASH }}"
+          if [[ -z "${expected}" ]]; then
+            echo "PPV_DEVNET_GENESIS_HASH must be set on the devnet environment." >&2
+            exit 1
+          fi
           actual="$(solana genesis-hash)"
-          if [[ -n "${expected}" && "${expected}" != "${actual}" ]]; then
+          if [[ "${expected}" != "${actual}" ]]; then
             echo "Genesis hash ${actual} does not match the configured devnet genesis." >&2
             exit 1
           fi
           echo "genesis=${actual}"
 
-      - name: Fetch signing material
-        id: keys
+      - name: Fetch ppv_core signing material
+        if: inputs.program == 'ppv_core'
+        id: core_keys
         env:
-          # Environment-scoped secrets. They exist only for this step's process
-          # and are written to a temporary directory outside the repository.
-          PROGRAM_KEYPAIR: ${{ secrets.PPV_PROGRAM_KEYPAIR }}
+          PROGRAM_KEYPAIR: ${{ secrets.PPV_CORE_PROGRAM_KEYPAIR }}
           DEPLOYER_KEYPAIR: ${{ secrets.PPV_DEPLOYER_KEYPAIR }}
         run: |
-          if [[ -z "${PROGRAM_KEYPAIR}" || -z "${DEPLOYER_KEYPAIR}" ]]; then
-            echo "PPV_PROGRAM_KEYPAIR and PPV_DEPLOYER_KEYPAIR must be set on the devnet environment." >&2
+          if [[ -z "${PROGRAM_KEYPAIR}" ]]; then
+            echo "PPV_CORE_PROGRAM_KEYPAIR must be set on the devnet environment." >&2
+            exit 1
+          fi
+          if [[ -z "${DEPLOYER_KEYPAIR}" ]]; then
+            echo "PPV_DEPLOYER_KEYPAIR must be set on the devnet environment." >&2
             exit 1
           fi
           work="$(mktemp -d)"
           echo "work=${work}" >> "${GITHUB_OUTPUT}"
           umask 077
-          printf '%s' "${PROGRAM_KEYPAIR}"  > "${work}/${{ inputs.program }}-keypair.json"
+          printf '%s' "${PROGRAM_KEYPAIR}" > "${work}/ppv_core-keypair.json"
           printf '%s' "${DEPLOYER_KEYPAIR}" > "${work}/deployer.json"
-          # Only public keys are ever printed.
-          echo "program address: $(solana-keygen pubkey "${work}/${{ inputs.program }}-keypair.json")"
+          # Only public keys are printed.
+          echo "program address: $(solana-keygen pubkey "${work}/ppv_core-keypair.json")"
           echo "deployer:        $(solana-keygen pubkey "${work}/deployer.json")"
 
-      - name: Sync program ids and build
+      - name: Fetch ppv_commerce signing material
+        if: inputs.program == 'ppv_commerce'
+        id: commerce_keys
+        env:
+          PROGRAM_KEYPAIR: ${{ secrets.PPV_COMMERCE_PROGRAM_KEYPAIR }}
+          DEPLOYER_KEYPAIR: ${{ secrets.PPV_DEPLOYER_KEYPAIR }}
         run: |
-          mkdir -p target/deploy
-          cp "${{ steps.keys.outputs.work }}/${{ inputs.program }}-keypair.json" target/deploy/
-          # The other program needs a keypair present for `anchor keys sync` to
-          # run, but it is ephemeral and never deployed by this job.
-          for other in ppv_core ppv_commerce; do
-            [[ "${other}" == "${{ inputs.program }}" ]] && continue
-            [[ -f "target/deploy/${other}-keypair.json" ]] ||
-              solana-keygen new --silent --no-bip39-passphrase --outfile "target/deploy/${other}-keypair.json"
-          done
-          anchor keys sync
-          RUSTUP_TOOLCHAIN=nightly-2024-06-15 anchor build
-
-      - name: Assert the built id matches the deployment keypair
-        run: |
-          keypair_id="$(solana-keygen pubkey "target/deploy/${{ inputs.program }}-keypair.json")"
-          idl_id="$(node -e "process.stdout.write(require('./target/idl/${{ inputs.program }}.json').address)")"
-          if [[ "${keypair_id}" != "${idl_id}" ]]; then
-            echo "Built id ${idl_id} does not match keypair ${keypair_id}." >&2
+          if [[ -z "${PROGRAM_KEYPAIR}" ]]; then
+            echo "PPV_COMMERCE_PROGRAM_KEYPAIR must be set on the devnet environment." >&2
             exit 1
           fi
+          if [[ -z "${DEPLOYER_KEYPAIR}" ]]; then
+            echo "PPV_DEPLOYER_KEYPAIR must be set on the devnet environment." >&2
+            exit 1
+          fi
+          work="$(mktemp -d)"
+          echo "work=${work}" >> "${GITHUB_OUTPUT}"
+          umask 077
+          printf '%s' "${PROGRAM_KEYPAIR}" > "${work}/ppv_commerce-keypair.json"
+          printf '%s' "${DEPLOYER_KEYPAIR}" > "${work}/deployer.json"
+          # Only public keys are printed.
+          echo "program address: $(solana-keygen pubkey "${work}/ppv_commerce-keypair.json")"
+          echo "deployer:        $(solana-keygen pubkey "${work}/deployer.json")"
+
+      - name: Select the isolated signing directory
+        id: keys
+        env:
+          CORE_WORK: ${{ steps.core_keys.outputs.work }}
+          COMMERCE_WORK: ${{ steps.commerce_keys.outputs.work }}
+        run: |
+          work="${CORE_WORK:-${COMMERCE_WORK}}"
+          if [[ -z "${work}" || ! -d "${work}" ]]; then
+            echo "The selected program's signing directory was not created." >&2
+            exit 1
+          fi
+          echo "work=${work}" >> "${GITHUB_OUTPUT}"
+
+      - name: Assert committed identity and build
+        run: |
+          program="${{ inputs.program }}"
+          mkdir -p target/deploy
+          cp "${{ steps.keys.outputs.work }}/${program}-keypair.json" "target/deploy/${program}-keypair.json"
+
+          keypair_id="$(solana-keygen pubkey "target/deploy/${program}-keypair.json")"
+          declared_id="$(sed -n 's/^declare_id!("\(.*\)");$/\1/p' "programs/${program}/src/lib.rs")"
+          mapfile -t anchor_ids < <(sed -n "s/^${program} = \"\(.*\)\"$/\1/p" Anchor.toml | sort -u)
+
+          if [[ -z "${declared_id}" || "${#anchor_ids[@]}" -ne 1 ]]; then
+            echo "Could not resolve one committed identity for ${program}." >&2
+            exit 1
+          fi
+          if [[ "${keypair_id}" != "${declared_id}" || "${keypair_id}" != "${anchor_ids[0]}" ]]; then
+            echo "Permanent keypair ${keypair_id} does not match committed ${program} identity." >&2
+            echo "declare_id!: ${declared_id}" >&2
+            echo "Anchor.toml: ${anchor_ids[0]}" >&2
+            echo "Synchronize and commit the public program IDs before deployment." >&2
+            exit 1
+          fi
+
+          RUSTUP_TOOLCHAIN=nightly-2024-06-15 anchor build
+
+          idl_id="$(node -e "process.stdout.write(require('./target/idl/${program}.json').address)")"
+          if [[ "${keypair_id}" != "${idl_id}" ]]; then
+            echo "Built IDL id ${idl_id} does not match keypair ${keypair_id}." >&2
+            exit 1
+          fi
+          git diff --exit-code -- Anchor.toml "programs/${program}/src/lib.rs"
           echo "program id: ${keypair_id}"
 
-      - name: Deploy
+      - name: Refuse an existing program address
+        run: |
+          program_id="$(solana-keygen pubkey "target/deploy/${{ inputs.program }}-keypair.json")"
+          if solana program show "${program_id}" --url https://api.devnet.solana.com >/dev/null 2>&1; then
+            echo "${program_id} already exists. This initial-deployment workflow will not upgrade it." >&2
+            exit 1
+          fi
+
+      - name: Deploy with the deployer as temporary authority
+        id: deploy
+        run: |
+          program="${{ inputs.program }}"
+          deploy_log="$(mktemp)"
+          if ! solana program deploy \
+            --url https://api.devnet.solana.com \
+            --keypair "${{ steps.keys.outputs.work }}/deployer.json" \
+            --program-id "target/deploy/${program}-keypair.json" \
+            --upgrade-authority "${{ steps.keys.outputs.work }}/deployer.json" \
+            "target/deploy/${program}.so" 2>&1 | tee "${deploy_log}"; then
+            exit 1
+          fi
+          signature="$(sed -n 's/^Signature: //p' "${deploy_log}" | tail -1)"
+          if [[ -z "${signature}" ]]; then
+            echo "Deployment succeeded but its signature could not be parsed." >&2
+            exit 1
+          fi
+          echo "signature=${signature}" >> "${GITHUB_OUTPUT}"
+
+      - name: Transfer upgrade authority to Squads
         env:
           UPGRADE_AUTHORITY: ${{ vars.PPV_SQUADS_VAULT_PDA }}
         run: |
@@ -136,18 +215,62 @@ jobs:
             echo "PPV_SQUADS_VAULT_PDA must be set as a devnet environment variable." >&2
             exit 1
           fi
-          solana program deploy \
+          program_id="$(solana-keygen pubkey "target/deploy/${{ inputs.program }}-keypair.json")"
+          # A Squads vault PDA cannot sign the checked authority-transfer form.
+          # Solana CLI 1.18.17 supports an unchecked transfer to a public key;
+          # the current deployer authority still signs the transaction.
+          solana program set-upgrade-authority "${program_id}" \
             --url https://api.devnet.solana.com \
             --keypair "${{ steps.keys.outputs.work }}/deployer.json" \
-            --program-id "target/deploy/${{ inputs.program }}-keypair.json" \
-            --upgrade-authority "${UPGRADE_AUTHORITY}" \
-            "target/deploy/${{ inputs.program }}.so"
+            --upgrade-authority "${{ steps.keys.outputs.work }}/deployer.json" \
+            --new-upgrade-authority "${UPGRADE_AUTHORITY}" \
+            --skip-new-upgrade-authority-signer-check
 
-      - name: Verify on chain
+      - name: Verify on chain and record the deployment
+        env:
+          EXPECTED_AUTHORITY: ${{ vars.PPV_SQUADS_VAULT_PDA }}
+          AUTHORITY_MEMBERS: ${{ vars.PPV_SQUADS_MEMBER_PUBKEYS }}
+          AUTHORITY_THRESHOLD: ${{ vars.PPV_SQUADS_THRESHOLD }}
+          DEPLOY_SIGNATURE: ${{ steps.deploy.outputs.signature }}
         run: |
-          program_id="$(solana-keygen pubkey "target/deploy/${{ inputs.program }}-keypair.json")"
-          solana program show "${program_id}" --url https://api.devnet.solana.com
-          sha256sum "target/idl/${{ inputs.program }}.json" "target/deploy/${{ inputs.program }}.so"
+          if [[ -z "${AUTHORITY_MEMBERS}" || -z "${AUTHORITY_THRESHOLD}" ]]; then
+            echo "PPV_SQUADS_MEMBER_PUBKEYS and PPV_SQUADS_THRESHOLD must be set." >&2
+            exit 1
+          fi
+          program="${{ inputs.program }}"
+          program_id="$(solana-keygen pubkey "target/deploy/${program}-keypair.json")"
+          show="$(solana program show "${program_id}" --url https://api.devnet.solana.com --output json)"
+          actual_authority="$(node -e "process.stdout.write(JSON.parse(process.argv[1]).authority)" "${show}")"
+          if [[ "${actual_authority}" != "${EXPECTED_AUTHORITY}" ]]; then
+            echo "Authority handoff failed: expected ${EXPECTED_AUTHORITY}, got ${actual_authority}." >&2
+            exit 1
+          fi
+
+          account="$(solana account "${program_id}" --url https://api.devnet.solana.com --output json)"
+          executable="$(node -e "process.stdout.write(String(JSON.parse(process.argv[1]).account.executable))" "${account}")"
+          owner="$(node -e "process.stdout.write(JSON.parse(process.argv[1]).account.owner)" "${account}")"
+          if [[ "${executable}" != "true" || "${owner}" != "BPFLoaderUpgradeab1e11111111111111111111111" ]]; then
+            echo "Program account is not an executable upgradeable-loader program." >&2
+            exit 1
+          fi
+
+          PPV_PROGRAM="${program}" \
+          PPV_DEPLOY_SIGNATURE="${DEPLOY_SIGNATURE}" \
+          PPV_UPGRADE_AUTHORITY_MEMBERS="${AUTHORITY_MEMBERS}" \
+          PPV_UPGRADE_AUTHORITY_THRESHOLD="${AUTHORITY_THRESHOLD}" \
+          PPV_VERIFIABLE=false \
+          PPV_RPC_URL=https://api.devnet.solana.com \
+            ./scripts/record-deployment.sh
+          ./scripts/verify-deployment.sh
+          sha256sum "target/idl/${program}.json" "target/deploy/${program}.so"
+
+      - name: Upload public deployment evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: ppv-devnet-${{ inputs.program }}-evidence
+          path: deployments/devnet.json
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Destroy signing material
         if: always()
