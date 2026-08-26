@@ -20,6 +20,12 @@ means "deployed but undocumented".
   deployable, so they get independent entries even when deployed together.
 - **Reproducible.** `gitCommit`, the toolchain versions, and `binaryHash` must
   be sufficient to rebuild the exact artifact that was deployed.
+- **Honest about the build.** `verifiable` records whether the artifact came
+  from `anchor build --verifiable`. Devnet deploys a plain `anchor build`, so it
+  is `false` there: anyone with the pinned toolchain can still rebuild
+  `gitCommit` and compare `binaryHash`, but a third party cannot reproduce the
+  artifact from a container digest alone. Recording it is the point — a manifest
+  must never imply a stronger guarantee than the build actually made.
 
 ## Schema
 
@@ -46,6 +52,7 @@ means "deployed but undocumented".
         "rustHost": "1.85.1",
         "rustSbf": "1.75.0"
       },
+      "verifiable": false,                    // true only for `anchor build --verifiable`
       "idlHash": "sha256:<hex of target/idl/<program>.json>",
       "binaryHash": "sha256:<hex of target/deploy/<program>.so>"
     }

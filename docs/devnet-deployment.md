@@ -142,7 +142,7 @@ solana config get                      # confirm the RPC URL before every deploy
 solana cluster-version
 solana genesis-hash                    # record this in the manifest
 
-anchor build --verifiable
+anchor build
 solana program deploy \
   --program-id "${work}/ppv_core-keypair.json" \
   --upgrade-authority "$PPV_SQUADS_VAULT_PDA" \
@@ -152,6 +152,24 @@ solana program deploy \
 
 Repeat for `ppv_commerce`. Deploy the two programs separately; a failure in one
 must never block or roll back the other.
+
+### Devnet deploys a non-verifiable build
+
+That is a plain `anchor build`, not `anchor build --verifiable`. The verifiable
+build runs the compile inside a pinned Docker image so a third party can
+reproduce the artifact from a container digest; requiring Docker on every
+operator machine is not worth it for a design-partner cluster.
+
+What is lost is third-party reproducibility from the digest alone. What is not
+lost is what the manifest is for: `gitCommit`, the pinned toolchain table above,
+and `binaryHash` still identify exactly what was deployed, and anyone with that
+toolchain can rebuild the commit and compare the hash.
+
+The manifest records this as `"verifiable": false` rather than leaving it to be
+inferred — `record-deployment.sh` writes `false` unless you set
+`PPV_VERIFIABLE=true`. **Revisit before any production candidate:** a mainnet or
+production-candidate deployment should be verifiable, and F3's independent
+security review is the right place to require it.
 
 Never run a deployment from an ordinary push workflow. Deployment is either a
 manual operator action or a GitHub Actions job bound to a protected `devnet`
