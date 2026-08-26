@@ -1,10 +1,22 @@
 # Audit: unrecognized devnet artifacts for `ppv_core`
 
-Status: **unresolved — the deployment described below is not reproducible from
-this repository.** This document records what was checked and what was found. It
-is not a manifest. `deployments/devnet.json` still does not exist, and per
-`deployments/README.md` that continues to mean PPV is not deployed to devnet as
-far as this repository is aware.
+Status: **decided — this repository is authoritative.** The devnet program
+described below is not reproducible from any commit here, so it is treated as
+unrecognized third-party bytecode that happens to carry the name `ppv_core`. It
+is not adopted, not linked from any client, and not recorded as a PPV
+deployment.
+
+This document records what was checked and what was found. It is not a manifest.
+`deployments/devnet.json` still does not exist, and per `deployments/README.md`
+that continues to mean PPV is not deployed to devnet. The next devnet deployment
+will be a controlled one from this repository, per `docs/devnet-deployment.md`,
+with a Squads V4 vault as upgrade authority and a manifest entry.
+
+Findings 3 through 6 are recorded as design evidence, not as a backlog: they
+describe a program this repository does not ship, and several of them are
+choices this repository already made differently. Findings 7 through 9 stand as
+the reason the deployment is not adopted. Finding 1 is the one item that still
+needed an action, and it has one — see below.
 
 ## What was audited
 
@@ -209,24 +221,40 @@ The unresolved question is which artifact is authoritative: the program this
 repository builds, or the program on devnet. They are different programs and
 only one can be `ppv_core`.
 
-- **If this repository is authoritative**, the audited deployment is
-  unrecognized third-party bytecode holding a name and an IDL that imply
-  otherwise. It should be treated as out of service — not adopted, not linked
-  from any client — and a controlled deployment run per
-  `docs/devnet-deployment.md`, from a Squads V4 vault, with a manifest.
-- **If the deployed program is authoritative**, its source has to be brought
-  into this repository first and shown to rebuild to
-  `7f05be69…4980e4` under the pinned toolchain. Only then can `declare_id!`,
-  `Anchor.toml`, and a manifest entry name `9D2JUUB2vUTt…` truthfully. Findings
-  3 through 6 are then upgrades to make before the program carries real proofs —
-  finding 3 especially, because a PDA layout cannot be changed afterwards
-  without abandoning every proof already recorded under it. Findings 7 through 9
-  need a redeployment under the runbook's governance, not a settings change.
+The question this audit opened — which artifact is authoritative — has been
+answered: **this repository is.** Consequences:
 
-Until then, adopting the address into `Anchor.toml` would state a provenance
-this repository cannot support, so it has been left unchanged.
+- `Anchor.toml` and both `declare_id!` calls stay on their placeholder ids.
+  Adopting `9D2JUUB2vUTt…` would state a provenance this repository cannot
+  support, and no manifest entry can name a `gitCommit` that reproduces the
+  artifact.
+- The devnet program at `9D2JUUB2vUTt…` is **out of service**. Nothing in this
+  repository, in the SDK, or in any GwapSpot surface should call it, link to
+  it, or present it as PPV. It is not "the old deployment" — it is not a PPV
+  deployment at all.
+- Devnet gets a real deployment when one is run from this repository under
+  `docs/devnet-deployment.md`: controlled program keypairs from the secret
+  store, a Squads V4 vault PDA as upgrade authority, and a manifest entry
+  written by `scripts/record-deployment.sh`.
+- If the source behind the audited artifact turns up later, that changes
+  nothing on its own. It would have to rebuild to `7f05be69…4980e4` under the
+  pinned toolchain before any of it could be adopted, and findings 3 through 6
+  would need answering first — finding 3 especially, because a PDA layout
+  cannot be changed afterwards without abandoning every proof recorded under it.
 
-Finding 1 is the exception to that wait. Claiming the admin seat costs one
-devnet transaction, forecloses an unrecoverable land-grab, and prejudges
-nothing: an abandoned program with a known admin is strictly better than an
-abandoned program with an unknown one.
+### Finding 1 is still live
+
+Abandoning the address does not close the admin seat. Until someone calls
+`initialize_core`, anyone can, and whoever does holds it permanently. An
+abandoned program with a known admin is strictly better than an abandoned
+program with an unknown one, so the seat is worth claiming even though the
+program is not worth keeping.
+
+`scripts/claim-core-admin.ts` does exactly that and nothing else. It is a
+deliberate operator action: it simulates by default, refuses to send without an
+explicit confirmation variable, and is not wired into CI or any npm lifecycle
+script. It signs with a keypair the operator names; nothing in this repository
+holds one. See the script's header for usage.
+
+Once the seat is claimed, record the holder here and treat any later change of
+`CoreConfig.admin` as a security event.

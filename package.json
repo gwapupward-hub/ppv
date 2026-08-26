@@ -7,6 +7,7 @@
   ],
   "scripts": {
     "build:sdk": "npm run build --workspace @gwap/ppv-sdk",
+    "claim:core-admin": "node --import tsx ./scripts/claim-core-admin.ts",
     "test": "npm run typecheck && npm run test:sdk",
     "test:sdk": "npm run test --workspace @gwap/ppv-sdk",
     "test:anchor": "node --import tsx ./node_modules/mocha/bin/mocha.js --timeout 1000000 \"tests/**/*.ts\"",
