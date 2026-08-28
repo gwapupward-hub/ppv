@@ -240,9 +240,17 @@ manifest.
 ## Recording and verifying a deployment
 
 ```bash
+# `solana program deploy` prints only the program id, not the deploy signature,
+# so read it back from the chain. The program account's newest signature is the
+# deploy — `set-upgrade-authority` does not touch that account — so this is
+# correct whether you run it before or after the authority transfer.
+signature="$(solana transaction-history <PPV_CORE_PROGRAM_ID> \
+  --url https://api.devnet.solana.com --limit 1 --output json \
+  | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s)[0].signature))')"
+
 # Once per program, immediately after the deploy, from the same checkout.
 PPV_PROGRAM=ppv_core \
-PPV_DEPLOY_SIGNATURE=<signature> \
+PPV_DEPLOY_SIGNATURE="${signature}" \
 PPV_UPGRADE_AUTHORITY_MEMBERS=<pubkey,pubkey,...> \
 PPV_UPGRADE_AUTHORITY_THRESHOLD=2 \
   ./scripts/record-deployment.sh

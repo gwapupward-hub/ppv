@@ -191,18 +191,37 @@ jobs:
         id: deploy
         run: |
           program="${{ inputs.program }}"
-          deploy_log="$(mktemp)"
+          program_id="$(solana-keygen pubkey "target/deploy/${program}-keypair.json")"
           if ! solana program deploy \
             --url https://api.devnet.solana.com \
             --keypair "${{ steps.keys.outputs.work }}/deployer.json" \
             --program-id "target/deploy/${program}-keypair.json" \
             --upgrade-authority "${{ steps.keys.outputs.work }}/deployer.json" \
-            "target/deploy/${program}.so" 2>&1 | tee "${deploy_log}"; then
+            "target/deploy/${program}.so"; then
             exit 1
           fi
-          signature="$(sed -n 's/^Signature: //p' "${deploy_log}" | tail -1)"
+
+          # `solana program deploy` prints only the program id, never the deploy
+          # transaction signature — in both its text output and `--output json`
+          # form on the pinned Solana CLI 1.18.17. Read the signature back from
+          # the chain instead. This step runs before the authority handoff, so
+          # the newest signature on the program account is the deploy itself.
+          # Query at confirmed commitment because the just-deployed transaction
+          # is confirmed but not yet finalized, and retry briefly to absorb RPC
+          # indexing lag.
+          signature=""
+          for _ in $(seq 1 10); do
+            signature="$(
+              curl -fsS https://api.devnet.solana.com \
+                -X POST -H 'Content-Type: application/json' \
+                -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"getSignaturesForAddress\",\"params\":[\"${program_id}\",{\"limit\":1,\"commitment\":\"confirmed\"}]}" \
+                | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const r=(JSON.parse(s)||{}).result;process.stdout.write(r&&r[0]?r[0].signature:"")})'
+            )"
+            [[ -n "${signature}" ]] && break
+            sleep 3
+          done
           if [[ -z "${signature}" ]]; then
-            echo "Deployment succeeded but its signature could not be parsed." >&2
+            echo "Deployment succeeded but its signature could not be read from the chain." >&2
             exit 1
           fi
           echo "signature=${signature}" >> "${GITHUB_OUTPUT}"
