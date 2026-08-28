@@ -14,6 +14,8 @@ pub enum GovernanceError {
     InvalidProposalLifetime,
     #[msg("Treasury/spill destination cannot be the default public key")]
     InvalidTreasury,
+    #[msg("Governance may only be initialized by the program's current upgrade authority")]
+    UnauthorizedBootstrap,
     #[msg("Signer is not a governance member")]
     UnauthorizedMember,
     #[msg("Proposal id must equal governance.next_proposal_id")]
