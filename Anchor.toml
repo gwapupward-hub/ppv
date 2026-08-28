@@ -7,11 +7,11 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-ppv_core = "Dkujj5vZp8kxhqM6hQTqqV3sTQ4Rx7J77No4bfwjrfXp"
+ppv_core = "9D2JUUB2vUTtfxSZNGzrUXk1AFmvvqSbxZiXWLBYaBHB"
 ppv_commerce = "4Y83YzUZnJ5LF9M1PcKHtsYcQ1LRxedwDi93PVf5H1FJ"
 
 [programs.devnet]
-ppv_core = "Dkujj5vZp8kxhqM6hQTqqV3sTQ4Rx7J77No4bfwjrfXp"
+ppv_core = "9D2JUUB2vUTtfxSZNGzrUXk1AFmvvqSbxZiXWLBYaBHB"
 ppv_commerce = "4Y83YzUZnJ5LF9M1PcKHtsYcQ1LRxedwDi93PVf5H1FJ"
 
 [registry]
