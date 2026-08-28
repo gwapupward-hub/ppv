@@ -3,16 +3,52 @@
 ## Trust boundary
 
 ```text
-ppv_core                         ppv_commerce
-proof timestamps                 exact-version agreements
-no value custody                 no value custody
-wallet authority                 bilateral wallet authority
-independent program ID           independent program ID
+ppv_governance                  ppv_core                         ppv_commerce
+native multisig                 proof timestamps                 exact-version agreements
+proposal approvals              no value custody                 no value custody
+vault PDA authority             wallet authority                 bilateral wallet authority
+independent program ID          independent program ID           independent program ID
 ```
 
-The programs share a workspace and SDK, not state or upgrade authority. A
-future `ppv_commerce -> ppv_core` CPI may anchor executed agreement facts after
-the core CPI interface is frozen. `ppv_core` must never depend on commerce.
+The three programs share an Anchor workspace, not mutable application state.
+`ppv_governance` owns the deterministic vault PDA that becomes upgrade authority
+for Governance, Core and Commerce. Core and Commerce never implement multisig
+logic themselves and never depend on an external governance provider.
+
+## Program: ppv_governance
+
+### Governance
+
+- PDA: `["governance"]`
+- Stores: up to 8 member public keys, threshold, proposal delay, proposal
+  lifetime, treasury, epoch and next proposal id.
+- Minimum configuration: 2 members and threshold 2. A one-key governance setup
+  is rejected by the program.
+- Reconfiguration is itself proposal-controlled.
+- Every successful reconfiguration increments `epoch`; pending proposals from a
+  previous epoch become non-executable.
+
+### GovernanceVault
+
+- PDA: `["vault", governance]`
+- Has no private key.
+- Becomes the upgrade authority for all PPV programs.
+- Signs upgradeable-loader instructions only through `invoke_signed` after an
+  on-chain proposal reaches threshold and its delay has elapsed.
+
+### Proposal
+
+- PDA: `["proposal", governance, proposal_id_le]`
+- Actions: program upgrade or governance reconfiguration.
+- Approvals are one-bit-per-member, preventing duplicate votes.
+- Execution is permissionless after the approval threshold and delay are met.
+- Proposals expire and cannot execute after cancellation, execution, expiry, or
+  a governance epoch change.
+
+For an upgrade proposal the exact **target program** and **buffer account** are
+committed before approval. Execution verifies the target ProgramData address,
+upgradeable-loader ownership, configured treasury and canonical vault PDA before
+performing the loader CPI.
 
 ## Program: ppv_core
 
@@ -22,8 +58,7 @@ the core CPI interface is frozen. `ppv_core` must never depend on commerce.
 - Created by: `authority`
 - Modified by: `authority`, revocation only
 - Closed by: nobody
-- Immutable: authority, proof ID, content hash, context hash, kind, creation
-  time
+- Immutable: authority, proof ID, content hash, context hash, kind, creation time
 - Mutable: status and revocation time
 
 `proof_id` is a client-generated 16-byte random identifier. Including the
@@ -44,12 +79,12 @@ no context commitment.
 - Immutable: parties, agreement ID, creation time
 - Versioned: content hash and terms hash
 
-The Solana transaction signature authorizes the instruction data containing
-the exact version and hash. `SignatureRecord` preserves the signer wallet,
-version, hash, and chain time. GNS names are deliberately absent from authority
-logic and may be resolved by GWAP OS for display.
+The Solana transaction signature authorizes the instruction data containing the
+exact version and hash. `SignatureRecord` preserves the signer wallet, version,
+hash and chain time. GNS names are deliberately absent from authority logic and
+may be resolved by GWAP OS for display.
 
-## State transitions
+## Agreement state transitions
 
 ```text
 Pending --both current signatures--> Executed
@@ -60,19 +95,30 @@ Pending --either party cancels----> Cancelled
 Executed and Cancelled are terminal in this release. Expiry is evaluated from
 `expires_at`; no permissionless instruction rewrites expired accounts.
 
+## Upgrade model
+
+Deployment identities are permanent keypairs held outside Git. The initial
+bootstrap order is:
+
+1. Deploy and initialize `ppv_governance`.
+2. Derive its canonical Governance PDA and Vault PDA from the committed program
+   ID and verify the live member/threshold configuration.
+3. Transfer `ppv_governance`'s own upgrade authority to its Vault PDA.
+4. Deploy Core and Commerce separately and immediately transfer each upgrade
+   authority to the same verified Vault PDA.
+
+After bootstrap, a program upgrade requires a staged loader buffer whose
+authority is the PPV Vault PDA, an approved `Upgrade` proposal naming that exact
+program and buffer, threshold approval, and execution after the configured delay.
+No individual member key can replace program bytecode alone.
+
 ## Off-chain responsibilities
 
 - Canonicalize and hash documents locally.
-- Encrypt private documents before storage. Encryption is not included until a
-  wallet-compatible scheme receives dedicated cryptographic review.
+- Encrypt private documents before storage once the wallet-compatible encryption
+  design receives dedicated cryptographic review.
 - Store private ciphertext in access-controlled, deletable object storage.
 - Treat chain state as truth and indexed database records as a cache.
 - Resolve GNS names separately and label historical claims accurately.
-
-## Upgrade model
-
-Local and devnet placeholders are not deployment identities. Every deployed
-program receives its own controlled keypair and upgrade authority. Commerce
-must move to a separate Squads multisig before any future fund-moving module is
-considered.
-
+- Build upgrade buffers deterministically and publish their hashes before
+  governance approval.
