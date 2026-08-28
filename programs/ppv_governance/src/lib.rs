@@ -316,7 +316,11 @@ pub mod ppv_governance {
             program,
             GovernanceError::WrongTargetProgram
         );
-        require_keys_eq!(ctx.accounts.buffer.key(), buffer, GovernanceError::WrongBuffer);
+        require_keys_eq!(
+            ctx.accounts.buffer.key(),
+            buffer,
+            GovernanceError::WrongBuffer
+        );
         require_keys_eq!(
             ctx.accounts.spill.key(),
             governance.treasury,
