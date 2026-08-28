@@ -6,6 +6,9 @@ import assert from "node:assert/strict";
 const GOVERNANCE_SEED = Buffer.from("governance");
 const VAULT_SEED = Buffer.from("vault");
 const PROPOSAL_SEED = Buffer.from("proposal");
+const UPGRADEABLE_LOADER_ID = new PublicKey(
+  "BPFLoaderUpgradeab1e11111111111111111111111",
+);
 
 function u64(value: number): Buffer {
   return new BN(value).toArrayLike(Buffer, "le", 8);
@@ -53,6 +56,10 @@ describe("PPV native governance", () => {
 
   const memberTwo = Keypair.generate();
   const memberThree = Keypair.generate();
+  const [programData] = PublicKey.findProgramAddressSync(
+    [governanceProgram.programId.toBuffer()],
+    UPGRADEABLE_LOADER_ID,
+  );
   const [governance] = PublicKey.findProgramAddressSync(
     [GOVERNANCE_SEED],
     governanceProgram.programId,
@@ -62,7 +69,7 @@ describe("PPV native governance", () => {
     governanceProgram.programId,
   );
 
-  it("initializes a threshold-governed vault and rejects single-key control", async () => {
+  it("initializes a threshold-governed vault through the current loader authority", async () => {
     await governanceProgram.methods
       .initializeGovernance(
         [provider.wallet.publicKey, memberTwo.publicKey],
@@ -73,6 +80,8 @@ describe("PPV native governance", () => {
       )
       .accounts({
         payer: provider.wallet.publicKey,
+        program: governanceProgram.programId,
+        programData,
         governance,
         vault,
         systemProgram: SystemProgram.programId,
@@ -85,13 +94,6 @@ describe("PPV native governance", () => {
     assert.equal(config.threshold, 2);
     assert.equal(config.epoch.toNumber(), 0);
     assert.equal(vaultState.governance.toBase58(), governance.toBase58());
-
-    const rogueProgram = anchor.workspace.PpvGovernance as any;
-    const [existingGovernance] = PublicKey.findProgramAddressSync(
-      [GOVERNANCE_SEED],
-      rogueProgram.programId,
-    );
-    assert.equal(existingGovernance.toBase58(), governance.toBase58());
   });
 
   it("requires threshold approvals and rejects duplicate votes", async () => {
