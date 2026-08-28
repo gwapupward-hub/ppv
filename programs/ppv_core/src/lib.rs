@@ -10,9 +10,9 @@ use state::*;
 
 pub const PROOF_SEED: &[u8] = b"proof";
 
-// Build-only placeholder. Run `anchor keys sync` with controlled program
-// keypairs before deployment and commit the resulting deployment manifest.
-declare_id!("Dkujj5vZp8kxhqM6hQTqqV3sTQ4Rx7J77No4bfwjrfXp");
+// Permanent devnet program identity. The corresponding private keypair remains
+// operator-controlled and must never be committed to the repository.
+declare_id!("9D2JUUB2vUTtfxSZNGzrUXk1AFmvvqSbxZiXWLBYaBHB");
 
 #[program]
 pub mod ppv_core {
