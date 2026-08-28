@@ -1,12 +1,8 @@
 name: Deploy devnet
 
-# Manual only. There is no push, pull_request or schedule trigger here by
-# design: a deployment must never be a side effect of merging code.
-#
-# The `devnet` environment must be configured in repository settings with
-# required reviewers and environment-scoped secrets. Without that, this workflow
-# is just an ordinary job with credentials, which is exactly what the runbook
-# forbids. See docs/devnet-deployment.md.
+# Manual only. A deployment must never be a side effect of merging code.
+# The protected `devnet` environment holds signing material and requires human
+# approval before any keypair can be read by this job.
 on:
   workflow_dispatch:
     inputs:
@@ -14,7 +10,7 @@ on:
         description: Program to deploy
         required: true
         type: choice
-        options: [ppv_core, ppv_commerce]
+        options: [ppv_governance, ppv_core, ppv_commerce]
       confirm:
         description: Type the program name again to confirm
         required: true
@@ -24,8 +20,6 @@ permissions:
   contents: read
 
 concurrency:
-  # One deployment at a time. Concurrent initial deploys can race on the
-  # deployer balance and produce incomplete evidence.
   group: deploy-devnet
   cancel-in-progress: false
 
@@ -86,6 +80,23 @@ jobs:
           fi
           echo "genesis=${actual}"
 
+      - name: Fetch ppv_governance signing material
+        if: inputs.program == 'ppv_governance'
+        id: governance_keys
+        env:
+          PROGRAM_KEYPAIR: ${{ secrets.PPV_GOVERNANCE_PROGRAM_KEYPAIR }}
+          DEPLOYER_KEYPAIR: ${{ secrets.PPV_DEPLOYER_KEYPAIR }}
+        run: |
+          [[ -n "${PROGRAM_KEYPAIR}" ]] || { echo "PPV_GOVERNANCE_PROGRAM_KEYPAIR must be set." >&2; exit 1; }
+          [[ -n "${DEPLOYER_KEYPAIR}" ]] || { echo "PPV_DEPLOYER_KEYPAIR must be set." >&2; exit 1; }
+          work="$(mktemp -d)"
+          echo "work=${work}" >> "${GITHUB_OUTPUT}"
+          umask 077
+          printf '%s' "${PROGRAM_KEYPAIR}" > "${work}/ppv_governance-keypair.json"
+          printf '%s' "${DEPLOYER_KEYPAIR}" > "${work}/deployer.json"
+          echo "program address: $(solana-keygen pubkey "${work}/ppv_governance-keypair.json")"
+          echo "deployer:        $(solana-keygen pubkey "${work}/deployer.json")"
+
       - name: Fetch ppv_core signing material
         if: inputs.program == 'ppv_core'
         id: core_keys
@@ -93,20 +104,13 @@ jobs:
           PROGRAM_KEYPAIR: ${{ secrets.PPV_CORE_PROGRAM_KEYPAIR }}
           DEPLOYER_KEYPAIR: ${{ secrets.PPV_DEPLOYER_KEYPAIR }}
         run: |
-          if [[ -z "${PROGRAM_KEYPAIR}" ]]; then
-            echo "PPV_CORE_PROGRAM_KEYPAIR must be set on the devnet environment." >&2
-            exit 1
-          fi
-          if [[ -z "${DEPLOYER_KEYPAIR}" ]]; then
-            echo "PPV_DEPLOYER_KEYPAIR must be set on the devnet environment." >&2
-            exit 1
-          fi
+          [[ -n "${PROGRAM_KEYPAIR}" ]] || { echo "PPV_CORE_PROGRAM_KEYPAIR must be set." >&2; exit 1; }
+          [[ -n "${DEPLOYER_KEYPAIR}" ]] || { echo "PPV_DEPLOYER_KEYPAIR must be set." >&2; exit 1; }
           work="$(mktemp -d)"
           echo "work=${work}" >> "${GITHUB_OUTPUT}"
           umask 077
           printf '%s' "${PROGRAM_KEYPAIR}" > "${work}/ppv_core-keypair.json"
           printf '%s' "${DEPLOYER_KEYPAIR}" > "${work}/deployer.json"
-          # Only public keys are printed.
           echo "program address: $(solana-keygen pubkey "${work}/ppv_core-keypair.json")"
           echo "deployer:        $(solana-keygen pubkey "${work}/deployer.json")"
 
@@ -117,30 +121,24 @@ jobs:
           PROGRAM_KEYPAIR: ${{ secrets.PPV_COMMERCE_PROGRAM_KEYPAIR }}
           DEPLOYER_KEYPAIR: ${{ secrets.PPV_DEPLOYER_KEYPAIR }}
         run: |
-          if [[ -z "${PROGRAM_KEYPAIR}" ]]; then
-            echo "PPV_COMMERCE_PROGRAM_KEYPAIR must be set on the devnet environment." >&2
-            exit 1
-          fi
-          if [[ -z "${DEPLOYER_KEYPAIR}" ]]; then
-            echo "PPV_DEPLOYER_KEYPAIR must be set on the devnet environment." >&2
-            exit 1
-          fi
+          [[ -n "${PROGRAM_KEYPAIR}" ]] || { echo "PPV_COMMERCE_PROGRAM_KEYPAIR must be set." >&2; exit 1; }
+          [[ -n "${DEPLOYER_KEYPAIR}" ]] || { echo "PPV_DEPLOYER_KEYPAIR must be set." >&2; exit 1; }
           work="$(mktemp -d)"
           echo "work=${work}" >> "${GITHUB_OUTPUT}"
           umask 077
           printf '%s' "${PROGRAM_KEYPAIR}" > "${work}/ppv_commerce-keypair.json"
           printf '%s' "${DEPLOYER_KEYPAIR}" > "${work}/deployer.json"
-          # Only public keys are printed.
           echo "program address: $(solana-keygen pubkey "${work}/ppv_commerce-keypair.json")"
           echo "deployer:        $(solana-keygen pubkey "${work}/deployer.json")"
 
       - name: Select the isolated signing directory
         id: keys
         env:
+          GOVERNANCE_WORK: ${{ steps.governance_keys.outputs.work }}
           CORE_WORK: ${{ steps.core_keys.outputs.work }}
           COMMERCE_WORK: ${{ steps.commerce_keys.outputs.work }}
         run: |
-          work="${CORE_WORK:-${COMMERCE_WORK}}"
+          work="${GOVERNANCE_WORK:-${CORE_WORK:-${COMMERCE_WORK}}}"
           if [[ -z "${work}" || ! -d "${work}" ]]; then
             echo "The selected program's signing directory was not created." >&2
             exit 1
@@ -187,28 +185,24 @@ jobs:
             exit 1
           fi
 
+      - name: Show deployer balance
+        run: |
+          deployer="$(solana-keygen pubkey "${{ steps.keys.outputs.work }}/deployer.json")"
+          echo "deployer=${deployer}"
+          solana balance "${deployer}" --url https://api.devnet.solana.com
+
       - name: Deploy with the deployer as temporary authority
         id: deploy
         run: |
           program="${{ inputs.program }}"
           program_id="$(solana-keygen pubkey "target/deploy/${program}-keypair.json")"
-          if ! solana program deploy \
+          solana program deploy \
             --url https://api.devnet.solana.com \
             --keypair "${{ steps.keys.outputs.work }}/deployer.json" \
             --program-id "target/deploy/${program}-keypair.json" \
             --upgrade-authority "${{ steps.keys.outputs.work }}/deployer.json" \
-            "target/deploy/${program}.so"; then
-            exit 1
-          fi
+            "target/deploy/${program}.so"
 
-          # `solana program deploy` prints only the program id, never the deploy
-          # transaction signature — in both its text output and `--output json`
-          # form on the pinned Solana CLI 1.18.17. Read the signature back from
-          # the chain instead. This step runs before the authority handoff, so
-          # the newest signature on the program account is the deploy itself.
-          # Query at confirmed commitment because the just-deployed transaction
-          # is confirmed but not yet finalized, and retry briefly to absorb RPC
-          # indexing lag.
           signature=""
           for _ in $(seq 1 10); do
             signature="$(
@@ -220,24 +214,41 @@ jobs:
             [[ -n "${signature}" ]] && break
             sleep 3
           done
-          if [[ -z "${signature}" ]]; then
-            echo "Deployment succeeded but its signature could not be read from the chain." >&2
-            exit 1
-          fi
+          [[ -n "${signature}" ]] || { echo "Deployment signature could not be read from chain." >&2; exit 1; }
           echo "signature=${signature}" >> "${GITHUB_OUTPUT}"
 
-      - name: Transfer upgrade authority to Squads
+      - name: Initialize PPV native governance
+        if: inputs.program == 'ppv_governance'
+        id: initialize_governance
         env:
-          UPGRADE_AUTHORITY: ${{ vars.PPV_SQUADS_VAULT_PDA }}
+          PPV_RPC_URL: https://api.devnet.solana.com
+          PPV_DEPLOYER_KEYPAIR_PATH: ${{ steps.keys.outputs.work }}/deployer.json
+          PPV_GOVERNANCE_MEMBER_PUBKEYS: ${{ vars.PPV_GOVERNANCE_MEMBER_PUBKEYS }}
+          PPV_GOVERNANCE_THRESHOLD: ${{ vars.PPV_GOVERNANCE_THRESHOLD }}
+          PPV_GOVERNANCE_MIN_DELAY_SLOTS: ${{ vars.PPV_GOVERNANCE_MIN_DELAY_SLOTS }}
+          PPV_GOVERNANCE_PROPOSAL_LIFETIME_SLOTS: ${{ vars.PPV_GOVERNANCE_PROPOSAL_LIFETIME_SLOTS }}
+          PPV_GOVERNANCE_TREASURY: ${{ vars.PPV_GOVERNANCE_TREASURY }}
+        run: node --import tsx scripts/initialize-governance.ts
+
+      - name: Verify canonical PPV governance authority
+        id: governance
+        env:
+          PPV_RPC_URL: https://api.devnet.solana.com
+          PPV_GOVERNANCE_MEMBER_PUBKEYS: ${{ vars.PPV_GOVERNANCE_MEMBER_PUBKEYS }}
+          PPV_GOVERNANCE_THRESHOLD: ${{ vars.PPV_GOVERNANCE_THRESHOLD }}
+          PPV_GOVERNANCE_MIN_DELAY_SLOTS: ${{ vars.PPV_GOVERNANCE_MIN_DELAY_SLOTS }}
+          PPV_GOVERNANCE_PROPOSAL_LIFETIME_SLOTS: ${{ vars.PPV_GOVERNANCE_PROPOSAL_LIFETIME_SLOTS }}
+          PPV_GOVERNANCE_TREASURY: ${{ vars.PPV_GOVERNANCE_TREASURY }}
+        run: node --import tsx scripts/verify-governance-authority.ts
+
+      - name: Transfer upgrade authority to PPV governance vault
+        env:
+          UPGRADE_AUTHORITY: ${{ steps.governance.outputs.vault_pda }}
         run: |
-          if [[ -z "${UPGRADE_AUTHORITY}" ]]; then
-            echo "PPV_SQUADS_VAULT_PDA must be set as a devnet environment variable." >&2
-            exit 1
-          fi
+          [[ -n "${UPGRADE_AUTHORITY}" ]] || { echo "Canonical governance vault was not resolved." >&2; exit 1; }
           program_id="$(solana-keygen pubkey "target/deploy/${{ inputs.program }}-keypair.json")"
-          # A Squads vault PDA cannot sign the checked authority-transfer form.
-          # Solana CLI 1.18.17 supports an unchecked transfer to a public key;
-          # the current deployer authority still signs the transaction.
+          # The vault is a PDA and therefore has no private key. The deployer
+          # signs the one-time unchecked transfer to that public address.
           solana program set-upgrade-authority "${program_id}" \
             --url https://api.devnet.solana.com \
             --keypair "${{ steps.keys.outputs.work }}/deployer.json" \
@@ -247,15 +258,12 @@ jobs:
 
       - name: Verify on chain and record the deployment
         env:
-          EXPECTED_AUTHORITY: ${{ vars.PPV_SQUADS_VAULT_PDA }}
-          AUTHORITY_MEMBERS: ${{ vars.PPV_SQUADS_MEMBER_PUBKEYS }}
-          AUTHORITY_THRESHOLD: ${{ vars.PPV_SQUADS_THRESHOLD }}
+          EXPECTED_AUTHORITY: ${{ steps.governance.outputs.vault_pda }}
+          GOVERNANCE_PROGRAM_ID: ${{ steps.governance.outputs.governance_program_id }}
+          GOVERNANCE_MEMBERS: ${{ vars.PPV_GOVERNANCE_MEMBER_PUBKEYS }}
+          GOVERNANCE_THRESHOLD: ${{ vars.PPV_GOVERNANCE_THRESHOLD }}
           DEPLOY_SIGNATURE: ${{ steps.deploy.outputs.signature }}
         run: |
-          if [[ -z "${AUTHORITY_MEMBERS}" || -z "${AUTHORITY_THRESHOLD}" ]]; then
-            echo "PPV_SQUADS_MEMBER_PUBKEYS and PPV_SQUADS_THRESHOLD must be set." >&2
-            exit 1
-          fi
           program="${{ inputs.program }}"
           program_id="$(solana-keygen pubkey "target/deploy/${program}-keypair.json")"
           show="$(solana program show "${program_id}" --url https://api.devnet.solana.com --output json)"
@@ -275,8 +283,9 @@ jobs:
 
           PPV_PROGRAM="${program}" \
           PPV_DEPLOY_SIGNATURE="${DEPLOY_SIGNATURE}" \
-          PPV_UPGRADE_AUTHORITY_MEMBERS="${AUTHORITY_MEMBERS}" \
-          PPV_UPGRADE_AUTHORITY_THRESHOLD="${AUTHORITY_THRESHOLD}" \
+          PPV_GOVERNANCE_PROGRAM_ID="${GOVERNANCE_PROGRAM_ID}" \
+          PPV_GOVERNANCE_MEMBER_PUBKEYS="${GOVERNANCE_MEMBERS}" \
+          PPV_GOVERNANCE_THRESHOLD="${GOVERNANCE_THRESHOLD}" \
           PPV_VERIFIABLE=false \
           PPV_RPC_URL=https://api.devnet.solana.com \
             ./scripts/record-deployment.sh
@@ -294,6 +303,4 @@ jobs:
       - name: Destroy signing material
         if: always()
         run: |
-          # Runs even when an earlier step failed, so a partial run never leaves
-          # keypairs on the runner disk.
           rm -rf "${{ steps.keys.outputs.work }}" target/deploy/*-keypair.json
