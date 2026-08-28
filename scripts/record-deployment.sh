@@ -1,18 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Records one deployed program into deployments/<cluster>.json.
+# Records one deployed PPV program into deployments/<cluster>.json.
 #
 # Public data only. This script reads the chain and the build output; it never
-# touches a keypair, and it refuses to run if you hand it a path to one.
-#
-# Run it once per program, immediately after `solana program deploy`, from the
-# same checkout and build output that produced the artifact.
+# touches a keypair, and it refuses arguments that look like signing material.
 #
 #   PPV_PROGRAM=ppv_core \
 #   PPV_DEPLOY_SIGNATURE=<base58 signature from the deploy> \
-#   PPV_UPGRADE_AUTHORITY_MEMBERS=<comma-separated Squads member pubkeys> \
-#   PPV_UPGRADE_AUTHORITY_THRESHOLD=2 \
+#   PPV_GOVERNANCE_PROGRAM_ID=<public ppv_governance program id> \
+#   PPV_GOVERNANCE_MEMBER_PUBKEYS=<comma-separated member pubkeys> \
+#   PPV_GOVERNANCE_THRESHOLD=2 \
 #   ./scripts/record-deployment.sh
 #
 # PPV_VERIFIABLE defaults to false, matching the plain `anchor build` the devnet
@@ -22,13 +20,11 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 cluster="${PPV_CLUSTER:-devnet}"
 rpc_url="${PPV_RPC_URL:-https://api.${cluster}.solana.com}"
-program="${PPV_PROGRAM:?set PPV_PROGRAM to ppv_core or ppv_commerce}"
+program="${PPV_PROGRAM:?set PPV_PROGRAM to ppv_governance, ppv_core or ppv_commerce}"
 signature="${PPV_DEPLOY_SIGNATURE:?set PPV_DEPLOY_SIGNATURE to the deploy transaction signature}"
-members="${PPV_UPGRADE_AUTHORITY_MEMBERS:?set PPV_UPGRADE_AUTHORITY_MEMBERS to the Squads member public keys}"
-threshold="${PPV_UPGRADE_AUTHORITY_THRESHOLD:?set PPV_UPGRADE_AUTHORITY_THRESHOLD to the Squads threshold}"
-# Devnet uses a plain `anchor build`. Set PPV_VERIFIABLE=true only when the
-# artifact really came from `anchor build --verifiable`, so the manifest never
-# claims a reproducibility property the build did not have.
+governance_program_id="${PPV_GOVERNANCE_PROGRAM_ID:?set PPV_GOVERNANCE_PROGRAM_ID to the public ppv_governance program id}"
+members="${PPV_GOVERNANCE_MEMBER_PUBKEYS:?set PPV_GOVERNANCE_MEMBER_PUBKEYS to governance member public keys}"
+threshold="${PPV_GOVERNANCE_THRESHOLD:?set PPV_GOVERNANCE_THRESHOLD to the governance threshold}"
 verifiable="${PPV_VERIFIABLE:-false}"
 
 case "${verifiable}" in
@@ -37,12 +33,12 @@ case "${verifiable}" in
 esac
 
 case "${program}" in
-  ppv_core | ppv_commerce) ;;
-  *) echo "PPV_PROGRAM must be ppv_core or ppv_commerce" >&2; exit 1 ;;
+  ppv_governance | ppv_core | ppv_commerce) ;;
+  *) echo "PPV_PROGRAM must be ppv_governance, ppv_core or ppv_commerce" >&2; exit 1 ;;
 esac
 
-# Refuse anything that looks like signing material rather than an address.
-for value in "${signature}" "${members}" "${threshold}"; do
+# Refuse anything that looks like signing material rather than public metadata.
+for value in "${signature}" "${governance_program_id}" "${members}" "${threshold}"; do
   if [[ "${value}" == *"["* ]] || [[ -f "${value}" ]]; then
     echo "Refusing to run: an argument looks like a keypair, not public data." >&2
     exit 1
@@ -84,7 +80,8 @@ MANIFEST="${manifest}" PROGRAM="${program}" PROGRAM_ID="${program_id}" \
 PROGRAM_DATA="${program_data}" AUTHORITY="${authority}" SLOT="${slot}" \
 GENESIS="${genesis}" SIGNATURE="${signature}" COMMIT="${commit}" \
 IDL_HASH="${idl_hash}" BINARY_HASH="${binary_hash}" \
-MEMBERS="${members}" THRESHOLD="${threshold}" VERIFIABLE="${verifiable}" \
+GOVERNANCE_PROGRAM_ID="${governance_program_id}" MEMBERS="${members}" \
+THRESHOLD="${threshold}" VERIFIABLE="${verifiable}" \
 node -e '
 const fs = require("node:fs");
 const env = process.env;
@@ -104,7 +101,8 @@ manifest.deployments.push({
   programId: env.PROGRAM_ID,
   programDataAddress: env.PROGRAM_DATA,
   upgradeAuthority: env.AUTHORITY,
-  upgradeAuthorityKind: "squads-multisig",
+  upgradeAuthorityKind: "ppv-native-governance",
+  governanceProgramId: env.GOVERNANCE_PROGRAM_ID,
   upgradeAuthorityMembers: env.MEMBERS.split(",").map((m) => m.trim()).filter(Boolean),
   upgradeAuthorityThreshold: Number(env.THRESHOLD),
   deployedSlot: Number(env.SLOT),
@@ -112,10 +110,6 @@ manifest.deployments.push({
   deploymentSignature: env.SIGNATURE,
   gitCommit: env.COMMIT,
   toolchain: { anchor: "0.30.1", solana: "1.18.17", rustHost: "1.85.1", rustSbf: "1.75.0" },
-  // Devnet deploys a plain `anchor build`, not `anchor build --verifiable`, so
-  // the artifact is not reproducible by a third party from a container digest
-  // alone. Recorded rather than assumed: gitCommit plus binaryHash still pin
-  // exactly what was deployed for anyone with the pinned toolchain.
   verifiable: env.VERIFIABLE === "true",
   idlHash: `sha256:${env.IDL_HASH}`,
   binaryHash: `sha256:${env.BINARY_HASH}`,
@@ -128,6 +122,7 @@ echo "Recorded ${program} in ${manifest}:"
 echo "  programId:   ${program_id}"
 echo "  programData: ${program_data}"
 echo "  authority:   ${authority}"
+echo "  governance:  ${governance_program_id}"
 echo "  slot:        ${slot}"
 echo
-echo "Confirm the authority above is the Squads vault PDA, then commit ${manifest}."
+echo "Confirm the authority above is the canonical PPV governance vault PDA, then commit ${manifest}."
