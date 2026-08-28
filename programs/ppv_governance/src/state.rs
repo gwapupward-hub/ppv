@@ -61,15 +61,15 @@ impl Governance {
             proposal_lifetime_slots > min_delay_slots,
             GovernanceError::InvalidProposalLifetime
         );
-        require_keys_neq!(treasury, Pubkey::default(), GovernanceError::InvalidTreasury);
+        require_keys_neq!(
+            treasury,
+            Pubkey::default(),
+            GovernanceError::InvalidTreasury
+        );
 
         let mut fixed = [Pubkey::default(); MAX_MEMBERS];
         for (index, member) in members.iter().enumerate() {
-            require_keys_neq!(
-                *member,
-                Pubkey::default(),
-                GovernanceError::DefaultMember
-            );
+            require_keys_neq!(*member, Pubkey::default(), GovernanceError::DefaultMember);
             for existing in fixed.iter().take(index) {
                 require_keys_neq!(*existing, *member, GovernanceError::DuplicateMember);
             }
