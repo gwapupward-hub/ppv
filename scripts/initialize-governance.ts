@@ -5,6 +5,9 @@ import fs from "node:fs";
 
 const GOVERNANCE_SEED = Buffer.from("governance");
 const VAULT_SEED = Buffer.from("vault");
+const UPGRADEABLE_LOADER_ID = new PublicKey(
+  "BPFLoaderUpgradeab1e11111111111111111111111",
+);
 
 function required(name: string): string {
   const value = process.env[name]?.trim();
@@ -13,11 +16,11 @@ function required(name: string): string {
 }
 
 function parseMembers(raw: string): PublicKey[] {
-  const values = raw
+  return raw
     .split(",")
     .map((value) => value.trim())
-    .filter(Boolean);
-  return values.map((value) => new PublicKey(value));
+    .filter(Boolean)
+    .map((value) => new PublicKey(value));
 }
 
 function appendOutput(name: string, value: string): void {
@@ -49,6 +52,10 @@ const provider = new anchor.AnchorProvider(
   anchor.AnchorProvider.defaultOptions(),
 );
 const program = new anchor.Program(idl, provider) as any;
+const [programData] = PublicKey.findProgramAddressSync(
+  [programId.toBuffer()],
+  UPGRADEABLE_LOADER_ID,
+);
 const [governance] = PublicKey.findProgramAddressSync(
   [GOVERNANCE_SEED],
   programId,
@@ -72,6 +79,8 @@ const signature = await program.methods
   )
   .accounts({
     payer: deployer.publicKey,
+    program: programId,
+    programData,
     governance,
     vault,
     systemProgram: SystemProgram.programId,
