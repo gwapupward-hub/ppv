@@ -2,7 +2,7 @@
 
 Each cluster PPV is deployed to gets one manifest file in this directory —
 `devnet.json` for devnet. A manifest is the public, auditable record of what was
-deployed, from which source, by which authority.
+deployed, from which source, and which on-chain authority controls upgrades.
 
 `devnet.json` does not exist until a controlled devnet deployment has actually
 happened. An absent manifest means PPV is not deployed to that cluster; it never
@@ -11,21 +11,17 @@ means "deployed but undocumented".
 ## Rules
 
 - **Public only.** A manifest records public keys, addresses, hashes, slots, and
-  transaction signatures. It must never contain a private key, a seed phrase, an
-  RPC URL with an embedded API key, or any other credential.
+  transaction signatures. It must never contain private signing material.
 - **Append-only.** A redeploy appends a new entry to `deployments[]`. Past
-  entries are never edited or removed — they are how a past binary is
-  identified and restored.
-- **One entry per program per deployment.** Core and Commerce are independently
-  deployable, so they get independent entries even when deployed together.
-- **Reproducible.** `gitCommit`, the toolchain versions, and `binaryHash` must
-  be sufficient to rebuild the exact artifact that was deployed.
+  entries are never edited or removed.
+- **One entry per program per deployment.** Governance, Core and Commerce are
+  independently deployable and receive independent entries.
+- **Native governance.** Every PPV program's upgrade authority is the canonical
+  vault PDA owned by `ppv_governance`. A member wallet is never a program upgrade
+  authority.
 - **Honest about the build.** `verifiable` records whether the artifact came
-  from `anchor build --verifiable`. Devnet deploys a plain `anchor build`, so it
-  is `false` there: anyone with the pinned toolchain can still rebuild
-  `gitCommit` and compare `binaryHash`, but a third party cannot reproduce the
-  artifact from a container digest alone. Recording it is the point — a manifest
-  must never imply a stronger guarantee than the build actually made.
+  from `anchor build --verifiable`. Devnet uses a plain `anchor build` and
+  therefore records `false`.
 
 ## Schema
 
@@ -35,13 +31,14 @@ means "deployed but undocumented".
   "genesisHash": "<cluster genesis hash from `solana genesis-hash`>",
   "deployments": [
     {
-      "program": "ppv_core",                  // or "ppv_commerce"
+      "program": "ppv_governance",            // or ppv_core / ppv_commerce
       "programId": "<base58 program address>",
       "programDataAddress": "<base58 ProgramData account>",
-      "upgradeAuthority": "<Squads V4 vault PDA — never a member key>",
-      "upgradeAuthorityMembers": ["<base58 member public key>", "..."],
+      "upgradeAuthority": "<canonical PPV governance vault PDA>",
+      "upgradeAuthorityKind": "ppv-native-governance",
+      "governanceProgramId": "<ppv_governance program id>",
+      "upgradeAuthorityMembers": ["<member public key>", "..."],
       "upgradeAuthorityThreshold": 2,
-      "upgradeAuthorityKind": "squads-multisig",  // Squads V4 vault PDA
       "deployedSlot": 0,
       "deployedAt": "<UTC ISO-8601 timestamp>",
       "deploymentSignature": "<base58 transaction signature>",
@@ -52,32 +49,41 @@ means "deployed but undocumented".
         "rustHost": "1.85.1",
         "rustSbf": "1.75.0"
       },
-      "verifiable": false,                    // true only for `anchor build --verifiable`
+      "verifiable": false,
       "idlHash": "sha256:<hex of target/idl/<program>.json>",
       "binaryHash": "sha256:<hex of target/deploy/<program>.so>"
     }
   ],
-  "smokeTests": [
-    {
-      "program": "ppv_core",
-      "instruction": "create_proof",
-      "signature": "<base58 transaction signature>",
-      "note": "non-sensitive test data only"
-    }
-  ]
+  "smokeTests": []
 }
 ```
 
-## Producing the hashes
+## Native authority derivation
 
-```bash
-sha256sum target/idl/ppv_core.json target/idl/ppv_commerce.json
-sha256sum target/deploy/ppv_core.so target/deploy/ppv_commerce.so
+The authority is not copied from a third-party dashboard. It is deterministic:
+
+```text
+Governance PDA = PDA(["governance"], ppv_governance_program_id)
+Vault PDA      = PDA(["vault", Governance PDA], ppv_governance_program_id)
 ```
 
-Take the hashes from the same build that produced the deployed artifact, before
-that artifact is uploaded. Rebuilding later from `gitCommit` with the pinned
-toolchain must reproduce the same `binaryHash`.
+The deployment workflow derives those addresses from the committed
+`ppv_governance` program ID and fetches the on-chain governance account. It
+refuses the handoff unless the live member list, threshold, proposal delay,
+proposal lifetime and treasury match the protected `devnet` environment.
+
+## Producing hashes
+
+```bash
+sha256sum \
+  target/idl/ppv_governance.json \
+  target/idl/ppv_core.json \
+  target/idl/ppv_commerce.json
+sha256sum \
+  target/deploy/ppv_governance.so \
+  target/deploy/ppv_core.so \
+  target/deploy/ppv_commerce.so
+```
 
 ## Verifying a manifest entry
 
@@ -85,9 +91,9 @@ toolchain must reproduce the same `binaryHash`.
 solana program show <programId> --url "$SOLANA_RPC_URL"
 ```
 
-The reported ProgramData address and upgrade authority must equal
-`programDataAddress` and `upgradeAuthority`. Repeat the read against a second,
-independent RPC provider — a manifest verified only through the node that served
-the deployment is not independently verified.
+The reported ProgramData address and upgrade authority must equal the manifest.
+For Core and Commerce, independently derive the expected vault PDA from the
+recorded `governanceProgramId`; never trust a pasted authority address by itself.
+Repeat verification through an independent RPC when available.
 
-See `docs/devnet-deployment.md` for the full deployment and rollback procedure.
+See `docs/devnet-deployment.md` for the controlled deployment procedure.
