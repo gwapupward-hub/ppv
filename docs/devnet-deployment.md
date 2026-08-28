@@ -1,276 +1,238 @@
 # Devnet deployment runbook
 
 This runbook covers PPV Foundation on **Solana devnet only**. Mainnet is out of
-scope for Foundation and is not covered here.
+scope. PPV uses its own `ppv_governance` program and canonical Vault PDA for
+upgrade authority; there is no external multisig dependency.
 
-Nothing in this document, and nothing committed to this repository, contains
-signing material. Program keypairs, deployer keypairs, and upgrade-authority
-keypairs live only in the operator secret store. This repository records public
-keys and transaction signatures.
+Nothing committed to this repository contains private signing material. Program
+keypairs and the deployer keypair remain in the protected operator secret store.
+Only public program IDs, governance member addresses, PDAs, transaction
+signatures and artifact hashes are recorded.
 
-## Toolchain
+## Pinned toolchain
 
-Deployments must be produced with exactly these versions. They are the versions
-CI verifies and the versions the committed `Cargo.lock` is resolved against.
+| Tool | Version |
+|---|---|
+| Anchor CLI | 0.30.1 |
+| Solana CLI | 1.18.17 |
+| Rust host | 1.85.1 |
+| Rust SBF | 1.75.0 via Solana 1.18.17 platform tools |
+| Node | 22 |
 
-| Tool       | Version  |
-| ---------- | -------- |
-| Anchor CLI | 0.30.1   |
-| Solana CLI | 1.18.17  |
-| Rust host  | 1.85.1   |
-| Rust SBF   | 1.75.0 (platform-tools v1.41, shipped with Solana 1.18.17) |
-
-```bash
-sh -c "$(curl --proto '=https' --tlsv1.2 -sSfL https://release.anza.xyz/v1.18.17/install)"
-cargo +1.79.0 install --git https://github.com/solana-foundation/anchor \
-  --tag v0.30.1 anchor-cli --locked --force
-anchor --version   # anchor-cli 0.30.1
-solana --version   # solana-cli 1.18.17
-```
-
-Anchor 0.30.1's own locked dependencies predate Rust 1.80, so the CLI itself is
-built with Rust 1.79.0. That toolchain is only used to build the CLI; the
-programs are built with the host 1.85.1 toolchain and the SBF 1.75 toolchain.
-
-## Local verification before any deployment
+Local gate:
 
 ```bash
 npm ci
+npm test
 cargo fmt --all -- --check
 cargo test --workspace --locked
 cargo clippy --workspace --all-targets --locked
-npm test
 npm run test:f1
 ```
 
-`npm run test:f1` builds twice, asserts the two generated IDLs are
-byte-identical, and runs the full `solana-test-validator` suite. It generates
-**ephemeral** program keypairs under the git-ignored `target/deploy/` directory
-and restores the repository's placeholder program IDs when it finishes. Those
-ephemeral keys are never deployable and never leave the machine.
+F1 generates ignored ephemeral identities for `ppv_governance`, `ppv_core`, and
+`ppv_commerce`, builds twice, compares all generated IDLs, validates identity
+alignment, deploys to a local validator, and runs the protocol/governance tests.
+Ephemeral keys are never valid deployment identities.
 
-## Dependency policy
+## Permanent program identities
 
-`Cargo.lock` is committed and authoritative. CI consumes it with `--locked` and
-never regenerates or mutates it, so a drifting crates.io index cannot silently
-change what is built or deployed.
+The three programs have separate permanent keypairs:
 
-Two independent constraints shape it:
+- `PPV_GOVERNANCE_PROGRAM_KEYPAIR`
+- `PPV_CORE_PROGRAM_KEYPAIR`
+- `PPV_COMMERCE_PROGRAM_KEYPAIR`
 
-1. Every manifest in the resolve graph must be parseable by the SBF toolchain's
-   Cargo 1.75. Crates that adopted `edition2024` are not, and Cargo's MSRV-aware
-   resolver cannot avoid them when a dependency omits or understates its own
-   `rust-version`.
-2. Host-side IDL generation runs `anchor-syn 0.30.1`, which calls
-   `proc_macro2::Span::source_file()`. That method was removed in later
-   proc-macro2 releases, so the proc-macro family must stay on Anchor 0.30.1's
-   own baseline.
+The private JSON values remain environment secrets. Their public addresses are
+safe to commit and must match all of these surfaces before deployment:
 
-The non-arbitrary resolution for both is to hold the shared transitive graph at
-the versions the pinned toolchain was released against — Anchor v0.30.1's
-lockfile, falling back to Agave v1.18.17's lockfile. `scripts/regenerate-lockfile.sh`
-applies exactly that rule and is the only supported way to move the lockfile.
+1. the corresponding secret-backed keypair;
+2. `declare_id!` in `programs/<program>/src/lib.rs`;
+3. both matching entries in `Anchor.toml`;
+4. the generated IDL address.
 
-## Controlled program identities
+Do not generate substitute keypairs merely to make the identity gate pass.
+Program identities are permanent once first deployed.
 
-Core and Commerce are independently deployable and have separate keypairs and
-separate upgrade authorities.
+## Native governance model
 
-Program keypairs live in the **cloud secret manager** (Vault / AWS Secrets
-Manager / GCP Secret Manager). They are generated on the operator machine,
-written straight into the secret store, and pulled back only for the duration of
-a build. They never enter Git, CI logs, build artifacts, an application bundle,
-or a chat message.
+`ppv_governance` creates two canonical accounts:
 
-```bash
-# Generate into a directory that is not inside any repository.
-work="$(mktemp -d)"
-trap 'rm -rf "${work}"' EXIT
-
-solana-keygen new --no-bip39-passphrase --outfile "${work}/ppv_core-keypair.json"
-solana-keygen new --no-bip39-passphrase --outfile "${work}/ppv_commerce-keypair.json"
-
-# Push to the secret store, then record the public keys for the manifest.
-# (Substitute your provider's CLI; the point is that the file is stored once and
-# the local copy is destroyed by the trap above.)
-vault kv put secret/ppv/devnet/ppv_core     keypair=@"${work}/ppv_core-keypair.json"
-vault kv put secret/ppv/devnet/ppv_commerce keypair=@"${work}/ppv_commerce-keypair.json"
-
-solana-keygen pubkey "${work}/ppv_core-keypair.json"
-solana-keygen pubkey "${work}/ppv_commerce-keypair.json"
+```text
+Governance PDA = PDA(["governance"], ppv_governance_program_id)
+Vault PDA      = PDA(["vault", Governance PDA], ppv_governance_program_id)
 ```
 
-Copy the keypairs into `target/deploy/` only for the duration of the build, then
+The Governance account stores:
+
+- 2–8 unique member public keys;
+- threshold, always at least 2;
+- minimum execution delay in slots;
+- proposal lifetime in slots;
+- governance treasury/spill destination;
+- governance epoch and next proposal id.
+
+The Vault PDA has no private key. After bootstrap it is the upgrade authority for
+`ppv_governance`, `ppv_core`, and `ppv_commerce`. Program upgrades can then occur
+only through approved governance proposals executed by `ppv_governance` with
+PDA signer seeds.
+
+A reconfiguration proposal uses the same threshold/delay mechanism. Successful
+reconfiguration increments the governance epoch so proposals approved under an
+older member configuration become non-executable.
+
+## Protected GitHub environment
+
+The `devnet` environment must require human approval before secrets are released
+to the deployment job.
+
+### Environment secrets
+
+- `PPV_GOVERNANCE_PROGRAM_KEYPAIR`
+- `PPV_CORE_PROGRAM_KEYPAIR`
+- `PPV_COMMERCE_PROGRAM_KEYPAIR`
+- `PPV_DEPLOYER_KEYPAIR`
+
+### Public environment variables
+
+- `PPV_DEVNET_GENESIS_HASH`
+- `PPV_GOVERNANCE_MEMBER_PUBKEYS` — comma-separated public addresses
+- `PPV_GOVERNANCE_THRESHOLD`
+- `PPV_GOVERNANCE_MIN_DELAY_SLOTS`
+- `PPV_GOVERNANCE_PROPOSAL_LIFETIME_SLOTS`
+- `PPV_GOVERNANCE_TREASURY`
+
+There is intentionally **no manually configured Vault PDA variable**. The
+workflow derives the Governance and Vault PDAs from the committed governance
+program ID and verifies the live governance account before any authority
+handoff.
+
+## Bootstrap order
+
+### 1. Deploy native governance first
+
+Run the protected `Deploy devnet` workflow with:
+
+```text
+program = ppv_governance
+confirm = ppv_governance
+```
+
+The workflow:
+
+1. loads only the selected governance program keypair and deployer keypair;
+2. proves the secret-backed program address matches committed source/config;
+3. builds with the pinned toolchain;
+4. refuses a program address that already exists in this initial-deployment
+   path;
+5. deploys with the deployer as temporary upgrade authority;
+6. initializes the canonical Governance and Vault PDAs using the protected
+   public policy variables;
+7. reads the governance state back from devnet and verifies members, threshold,
+   delay, proposal lifetime and treasury;
+8. transfers `ppv_governance`'s own upgrade authority to its Vault PDA;
+9. verifies the live authority and records public deployment evidence;
+10. destroys temporary keypair files on every exit path.
+
+Governance initialization is deliberately part of the same protected run. Do not
+leave a newly deployed singleton governance program uninitialized for later.
+
+### 2. Deploy Core
+
+After governance is live and verified, synchronize Core's permanent public ID and
 run:
 
-```bash
-anchor keys sync
+```text
+program = ppv_core
+confirm = ppv_core
 ```
 
-`anchor keys sync` rewrites `declare_id!` in both programs and the `[programs.*]`
-tables in `Anchor.toml`. Commit those public IDs. Then rebuild and re-run the
-full F1 suite against the synchronized IDs before deploying.
+The job independently re-verifies native governance, deploys Core with temporary
+deployer authority, immediately transfers authority to the derived Vault PDA,
+and fails unless the chain reports that exact authority.
 
-## Upgrade authority
+### 3. Deploy Commerce
 
-Foundation devnet uses a **Squads V4 multisig** as the upgrade authority for
-both programs. Never the default local `~/.config/solana/id.json` on a shared
-machine, and never a key that has ever been pasted into a chat, an issue, a CI
-log, or an artifact.
+Repeat with:
 
-Set up the vault before the first deployment:
-
-1. Create a Squads V4 multisig on devnet with the intended signer set and
-   threshold.
-2. Record the **vault PDA** — that address, not any member key, is the destination
-   of the immediate post-deployment upgrade-authority transfer.
-3. Record the member public keys and the threshold alongside it. Public keys
-   only; a member's private key never leaves its own wallet.
-
-Every later upgrade is proposed against the vault and executed once the
-threshold approves, so no single operator can replace program bytecode alone.
-
-Record only public keys. The authority must stay identical for the whole
-lifetime of a program ID; changing it is an upgrade-authority migration and
-needs its own change record and manifest entry.
-
-## Deploying
-
-```bash
-solana config set --url https://api.devnet.solana.com
-solana config get                      # confirm the RPC URL before every deploy
-solana cluster-version
-solana genesis-hash                    # record this in the manifest
-
-anchor build
-solana program deploy \
-  --keypair "${work}/deployer.json" \
-  --program-id "${work}/ppv_core-keypair.json" \
-  --upgrade-authority "${work}/deployer.json" \
-  --url https://api.devnet.solana.com \
-  target/deploy/ppv_core.so
-
-# A Squads vault PDA cannot sign the checked transfer form. The deployer signs
-# this one-time unchecked transfer to the public PDA, then immediately verifies it.
-solana program set-upgrade-authority <PPV_CORE_PROGRAM_ID> \
-  --keypair "${work}/deployer.json" \
-  --upgrade-authority "${work}/deployer.json" \
-  --new-upgrade-authority "$PPV_SQUADS_VAULT_PDA" \
-  --skip-new-upgrade-authority-signer-check \
-  --url https://api.devnet.solana.com
-solana program show <PPV_CORE_PROGRAM_ID> --url https://api.devnet.solana.com
+```text
+program = ppv_commerce
+confirm = ppv_commerce
 ```
 
-`solana program deploy --upgrade-authority` expects a signer, so passing a Squads
-PDA directly is invalid. The supported path is to deploy with the deployer as a
-temporary authority, transfer authority to the Squads vault PDA immediately, and
-fail the run unless the live account reports that exact PDA. Repeat for
-`ppv_commerce`. Deploy the two programs separately; a failure in one must never
-block or roll back the other.
+Core and Commerce are separate runs so failure of one cannot create ambiguous
+evidence for the other.
 
-### Devnet deploys a non-verifiable build
+## Deployer funding
 
-That is a plain `anchor build`, not `anchor build --verifiable`. The verifiable
-build runs the compile inside a pinned Docker image so a third party can
-reproduce the artifact from a container digest; requiring Docker on every
-operator machine is not worth it for a design-partner cluster.
+GitHub Actions does not eliminate Solana deployment costs. The public address
+corresponding to `PPV_DEPLOYER_KEYPAIR` must hold enough devnet SOL for the
+selected deployment. The workflow prints only the deployer public address and
+its devnet balance before deployment.
 
-What is lost is third-party reproducibility from the digest alone. What is not
-lost is what the manifest is for: `gitCommit`, the pinned toolchain table above,
-and `binaryHash` still identify exactly what was deployed, and anyone with that
-toolchain can rebuild the commit and compare the hash.
+Do not rotate a permanent program keypair because a deployer is underfunded.
+Fund the deployer and retry using the same program identity.
 
-The manifest records this as `"verifiable": false` rather than leaving it to be
-inferred — `record-deployment.sh` writes `false` unless you set
-`PPV_VERIFIABLE=true`. **Revisit before any production candidate:** a mainnet or
-production-candidate deployment should be verifiable, and F3's independent
-security review is the right place to require it.
+## Deployment evidence
 
-Never run a deployment from an ordinary push workflow. Deployment is either a
-manual operator action or a GitHub Actions job bound to a protected `devnet`
-environment with required reviewers and environment-scoped secrets.
+Each successful run appends public evidence to `deployments/devnet.json` and
+records:
 
-## Deploying through protected CI
+- program ID and ProgramData address;
+- canonical Vault PDA upgrade authority;
+- `upgradeAuthorityKind: "ppv-native-governance"`;
+- `governanceProgramId`;
+- governance members and threshold;
+- deployment slot and transaction signature;
+- git commit and pinned toolchain;
+- IDL and binary SHA-256 hashes;
+- whether the build was verifiable.
 
-`.github/workflows/deploy-devnet.yml` is the supported alternative to deploying
-by hand. It is `workflow_dispatch` only — there is deliberately no `push`,
-`pull_request` or `schedule` trigger, because a deployment must never be a side
-effect of merging code.
+Devnet currently uses a normal `anchor build`, so `verifiable` is recorded as
+`false`. Production-candidate/mainnet policy must revisit reproducible builds.
 
-The workflow is only as protected as the environment behind it. Before using it,
-configure a `devnet` environment in repository settings:
-
-1. **Settings → Environments → New environment → `devnet`.**
-2. **Required reviewers** — at least one, and not the person who dispatches the
-   run. Without this the job is just an ordinary workflow holding credentials,
-   which is what this runbook forbids.
-3. **Environment secrets** (never repository-level, so no other workflow can
-   read them):
-   - `PPV_CORE_PROGRAM_KEYPAIR` — the permanent JSON keypair for `ppv_core`.
-   - `PPV_COMMERCE_PROGRAM_KEYPAIR` — the permanent JSON keypair for `ppv_commerce`.
-   - `PPV_DEPLOYER_KEYPAIR` — the funded devnet deployer.
-4. **Environment variables** (public values):
-   - `PPV_SQUADS_VAULT_PDA` — the Squads V4 vault PDA that becomes the upgrade
-     authority.
-   - `PPV_SQUADS_MEMBER_PUBKEYS` — comma-separated public member addresses for
-     the deployment manifest.
-   - `PPV_SQUADS_THRESHOLD` — the multisig approval threshold recorded in the
-     deployment manifest.
-   - `PPV_DEVNET_GENESIS_HASH` — devnet's genesis hash. The job refuses to
-     deploy if the cluster it reaches does not match.
-
-Deploy one program per run: pick it from the dropdown and retype its name to
-confirm. The job requires the permanent keypair to match the already-committed
-`declare_id!` and `Anchor.toml` identity, builds without rewriting IDs, refuses an
-address that already exists, deploys with the deployer as a temporary authority,
-transfers authority immediately to the Squads vault PDA, verifies the live
-executable program and authority, records and verifies `deployments/devnet.json`,
-uploads that public manifest as workflow evidence, and destroys keypair material
-on every exit path including failure. Only public keys are ever printed.
-
-The workflow selects exactly one of the two program-key secrets from the
-`program` input, so `ppv_core` and `ppv_commerce` cannot accidentally share an
-identity and no secret replacement is required between runs. Program identities
-are permanent: replacing either secret is permitted only before its first deploy,
-or as recovery of the same backed-up keypair—not as routine rotation. If you
-would rather the keypairs never live in GitHub at all, deploy by hand from the
-operator machine instead; both paths are supported and produce the same
-manifest.
-
-## Recording and verifying a deployment
+Run:
 
 ```bash
-# `solana program deploy` prints only the program id, not the deploy signature,
-# so read it back from the chain. The program account's newest signature is the
-# deploy — `set-upgrade-authority` does not touch that account — so this is
-# correct whether you run it before or after the authority transfer.
-signature="$(solana transaction-history <PPV_CORE_PROGRAM_ID> \
-  --url https://api.devnet.solana.com --limit 1 --output json \
-  | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s)[0].signature))')"
-
-# Once per program, immediately after the deploy, from the same checkout.
-PPV_PROGRAM=ppv_core \
-PPV_DEPLOY_SIGNATURE="${signature}" \
-PPV_UPGRADE_AUTHORITY_MEMBERS=<pubkey,pubkey,...> \
-PPV_UPGRADE_AUTHORITY_THRESHOLD=2 \
-  ./scripts/record-deployment.sh
-
-# Read-only, needs no credentials, anyone can run it.
-PPV_VERIFY_RPC_URL=https://<second-provider> ./scripts/verify-deployment.sh
+./scripts/verify-deployment.sh
 ```
 
-`record-deployment.sh` reads the chain and the build output, appends an entry to
-`deployments/devnet.json`, and refuses to run against a dirty working tree —
-otherwise `gitCommit` would not identify what was deployed. It never touches a
-keypair.
+and, when available, repeat with an independent RPC via `PPV_VERIFY_RPC_URL`.
+An upgrade-authority mismatch is a security incident, not ordinary configuration
+drift.
 
-`verify-deployment.sh` re-checks every live entry against the chain, through a
-second RPC when you give it one. A manifest nobody can independently check is
-not evidence.
+## Governed upgrades after bootstrap
 
-## Post-deployment verification
+An upgrade is no longer signed directly by an operator wallet. The controlled
+flow is:
 
-For each program:
+1. build and hash the candidate program artifact;
+2. create a Solana upgrade buffer for that artifact;
+3. hand buffer authority to the canonical PPV Vault PDA;
+4. create an `Upgrade` governance proposal containing the **exact target program
+   address and exact buffer address**;
+5. governance members approve on-chain;
+6. wait until the configured execution delay has elapsed;
+7. execute `execute_upgrade`; execution is permissionless once the proposal is
+   valid, approved, mature and unexpired;
+8. verify the live binary/ProgramData state and that upgrade authority remains
+   the same Vault PDA;
+9. append deployment/upgrade evidence without rewriting history.
+
+The first governed upgrade must be exercised on devnet before native governance
+is trusted for any production candidate.
+
+## Governance changes
+
+Member, threshold, delay, lifetime, or treasury changes are never direct admin
+writes. A member creates a reconfiguration proposal, members approve it, and the
+proposal executes only after threshold and delay requirements are satisfied.
+Execution increments the governance epoch, invalidating proposals created under
+the previous configuration.
+
+## Post-deployment checks
+
+For each controlled program:
 
 ```bash
 solana program show <PROGRAM_ID> --url https://api.devnet.solana.com
@@ -279,72 +241,19 @@ solana account <PROGRAM_ID> --url https://api.devnet.solana.com --output json
 
 Confirm:
 
-- the account is `executable: true` and owned by `BPFLoaderUpgradeab1e11111111111111111111111`
-- the ProgramData address matches what `solana program show` reports
-- the upgrade authority equals the intended public key
-- the deployed slot and the deployment signature are recorded
+- the program is executable and upgradeable-loader owned;
+- ProgramData matches the manifest;
+- upgrade authority equals the canonical PPV Vault PDA;
+- no deployer/member wallet remains direct upgrade authority;
+- deployment signature, hashes and source commit are recorded.
 
-Then repeat the account read through a **second, independent RPC provider** so
-the verification does not depend on the same node that served the deployment.
+## Mainnet boundary
 
-## Deployment manifest
+This native governance implementation does **not** become production-ready merely
+because it works on devnet. Before any production/mainnet candidate:
 
-Every deployment appends a record to `deployments/devnet.json`. The manifest is
-public and must never contain secrets. See `deployments/README.md` for the
-schema and the field-by-field meaning.
-
-## Rollback and redeploy
-
-Upgradeable programs are not rolled back by deleting them; they are redeployed
-with a known-good artifact.
-
-1. Check out the git commit named in the manifest entry you want to restore.
-2. Rebuild with the pinned toolchain and confirm the binary hash matches the
-   manifest's `binaryHash` for that entry.
-3. `solana program deploy --program-id <PROGRAM_ID> --upgrade-authority ...`
-   with the rebuilt artifact.
-4. Append a new manifest entry. Never edit or delete a past entry.
-
-If a program must be taken out of service entirely, close it with
-`solana program close <PROGRAM_ID> --bypass-warning` — this is irreversible and
-permanently burns the program ID. It requires an explicit operator decision.
-
-## Operational health check
-
-```bash
-solana program show <CORE_ID>     --url "$SOLANA_RPC_URL"
-solana program show <COMMERCE_ID> --url "$SOLANA_RPC_URL"
-```
-
-Healthy means: both accounts executable, both upgrade authorities unchanged from
-the manifest, and the GwapOS PPV surface able to fetch a known proof account.
-An upgrade authority that does not match the manifest is a security incident,
-not a configuration drift.
-
-## Troubleshooting
-
-| Symptom | Cause | Action |
-| --- | --- | --- |
-| `failed to select a version for serde_derive` | The lockfile was regenerated without the baseline pins | Do not add ad-hoc `--precise` flags. Run `./scripts/regenerate-lockfile.sh` and commit the result. |
-| `feature 'edition2024' is required` during `anchor build` | A crate newer than the SBF Cargo 1.75 entered the graph | Same fix — the baseline rule excludes those versions. |
-| `no method named 'source_file'` building the IDL | proc-macro2 drifted past Anchor 0.30.1's baseline | Same fix. |
-| `anchor build` output differs between runs | Toolchain mismatch | Confirm `anchor --version` and `solana --version` match the table above. |
-| Deploy fails with insufficient funds | Deployer under-funded | Devnet deploys need roughly 2-4 SOL per program; top up and retry. Partial deploys resume via the write buffer. |
-| Deploy fails mid-upload | Transient RPC | Retry the same command; `solana program deploy` resumes from the existing buffer. Do not generate a new program keypair. |
-
-## Known limitations
-
-- Foundation is non-custodial. There is no escrow, invoicing, token transfer,
-  dispute, or fee logic, and none may be added under this gate.
-- A PPV timestamp proves that a wallet committed to a specific sequence of bytes
-  at a chain-confirmed time. It does not prove authorship, ownership,
-  originality, copyright registration, or legal validity.
-- Document content is never uploaded. Only hashes reach the chain.
-- Devnet state is not durable. Devnet is periodically reset and program accounts
-  and history can disappear; devnet deployments are for design partners only.
-
-## Gates
-
-Passing this runbook satisfies **F2** only for the deployment mechanics. See
-`docs/deployment-gates.md` for the full F2 and F3 criteria, including the
-independent security review that F3 requires before any production candidate.
+- independently audit `ppv_governance`, including its loader CPI and PDA signing;
+- complete the Gate G2 governed-upgrade exercise;
+- remediate and re-review all critical/high findings;
+- deliberately choose production governance members/threshold/timelock;
+- require production-grade reproducible build evidence.
