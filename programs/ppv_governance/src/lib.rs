@@ -1,3 +1,4 @@
+use anchor_lang::bpf_upgradeable_state::ProgramData;
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{bpf_loader_upgradeable, program::invoke_signed};
 
@@ -75,7 +76,11 @@ pub mod ppv_governance {
         program: Pubkey,
         buffer: Pubkey,
     ) -> Result<()> {
-        require_keys_neq!(program, Pubkey::default(), GovernanceError::WrongTargetProgram);
+        require_keys_neq!(
+            program,
+            Pubkey::default(),
+            GovernanceError::WrongTargetProgram
+        );
         require_keys_neq!(buffer, Pubkey::default(), GovernanceError::WrongBuffer);
         require_keys_neq!(program, buffer, GovernanceError::WrongBuffer);
 
@@ -340,8 +345,7 @@ pub mod ppv_governance {
             GovernanceError::WrongLoaderOwner
         );
 
-        let expected_program_data =
-            Pubkey::find_program_address(&[program.as_ref()], &loader_id).0;
+        let expected_program_data = Pubkey::find_program_address(&[program.as_ref()], &loader_id).0;
         require_keys_eq!(
             ctx.accounts.program_data.key(),
             expected_program_data,
@@ -423,6 +427,16 @@ fn initialize_proposal(
 pub struct InitializeGovernance<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
+    #[account(
+        constraint = program.programdata_address()? == Some(program_data.key())
+            @ GovernanceError::WrongProgramData
+    )]
+    pub program: Program<'info, crate::program::PpvGovernance>,
+    #[account(
+        constraint = program_data.upgrade_authority_address == Some(payer.key())
+            @ GovernanceError::UnauthorizedBootstrap
+    )]
+    pub program_data: Account<'info, ProgramData>,
     #[account(
         init,
         payer = payer,
