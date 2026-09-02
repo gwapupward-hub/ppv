@@ -103,6 +103,8 @@ pub mod ppv_commerce {
 
         emit_cpi!(AgreementRevised {
             agreement: agreement.key(),
+            party_a: agreement.party_a,
+            party_b: agreement.party_b,
             proposer: signer,
             previous_version,
             new_version: agreement.version,
@@ -135,6 +137,8 @@ pub mod ppv_commerce {
 
         emit_cpi!(AgreementSigned {
             agreement: agreement.key(),
+            party_a: agreement.party_a,
+            party_b: agreement.party_b,
             signer,
             version: expected_version,
             content_hash: expected_content_hash,
@@ -166,6 +170,8 @@ pub mod ppv_commerce {
 
         emit_cpi!(AgreementCancelled {
             agreement: agreement.key(),
+            party_a: agreement.party_a,
+            party_b: agreement.party_b,
             cancelled_by: signer,
             version: agreement.version,
             cancelled_at: now,
