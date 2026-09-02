@@ -69,7 +69,9 @@ pub mod ppv_core {
         emit_cpi!(ProofRevoked {
             proof: proof.key(),
             authority,
+            proof_id: proof.proof_id,
             content_hash: proof.content_hash,
+            kind: proof.kind,
             revoked_at: now,
         });
 

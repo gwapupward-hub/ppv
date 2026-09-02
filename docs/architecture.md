@@ -76,3 +76,16 @@ program receives its own controlled keypair and upgrade authority. Commerce
 must move to a separate Squads multisig before any future fund-moving module is
 considered.
 
+
+## Events
+
+Both programs emit their lifecycle facts through Anchor event CPI
+(`emit_cpi!`). Every agreement event names both parties, and every proof
+event names the proof id and kind, so an indexer can attribute an event
+without reading the account. The discriminators are pinned in each crate's
+unit tests and in `sdk/test/reputation-chain-events.test.ts`.
+
+Events are facts (`AgreementExecuted`, `ProofRevoked`), never judgements.
+Reputation interpretation lives in GwapScore, downstream of the normalized
+contracts in `sdk/src/reputation/`; see
+[reputation-events-v1.md](reputation-events-v1.md).

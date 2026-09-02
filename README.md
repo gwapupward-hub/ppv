@@ -13,7 +13,9 @@ surface:
 - `ppv_commerce`: bilateral agreement creation, revision, signing, execution,
   and cancellation.
 - `@gwap/ppv-sdk`: frozen canonicalization v1 and SHA-256 helpers shared by
-  every client.
+  every client, plus the versioned reputation contracts (`ReputationEventV1`,
+  `PpvReceiptV1`, seal states, credential eligibility) and the decoder for the
+  programs' `emit_cpi!` events. PPV records facts; GwapScore interprets them.
 
 Not included: invoices, token transfers, escrow, milestones, disputes,
 arbitration, protocol fees, document encryption, GNS authority, mainnet
@@ -80,6 +82,7 @@ manifest. Never deploy these placeholder IDs.
 - [Architecture](docs/architecture.md)
 - [Threat model](docs/threat-model.md)
 - [Canonicalization v1](docs/canonicalization-v1.md)
+- [Reputation events v1](docs/reputation-events-v1.md)
 - [Deployment gates](docs/deployment-gates.md)
 - [Devnet deployment runbook](docs/devnet-deployment.md)
 - [Deployment manifests](deployments/README.md)
