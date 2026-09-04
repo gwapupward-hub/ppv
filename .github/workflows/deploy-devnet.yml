@@ -71,16 +71,31 @@ jobs:
       - run: npm ci
 
       - name: Confirm the CLI is targeting devnet
+        env:
+          EXPECTED_GENESIS: ${{ vars.PPV_DEVNET_GENESIS_HASH }}
+          VAULT_PDA: ${{ vars.PPV_SQUADS_VAULT_PDA }}
+          MEMBER_PUBKEYS: ${{ vars.PPV_SQUADS_MEMBER_PUBKEYS }}
+          THRESHOLD: ${{ vars.PPV_SQUADS_THRESHOLD }}
         run: |
           solana config set --url https://api.devnet.solana.com
           solana config get
-          expected="${{ vars.PPV_DEVNET_GENESIS_HASH }}"
-          if [[ -z "${expected}" ]]; then
-            echo "PPV_DEVNET_GENESIS_HASH must be set on the devnet environment." >&2
+          for required in EXPECTED_GENESIS VAULT_PDA MEMBER_PUBKEYS THRESHOLD; do
+            if [[ -z "${!required}" ]]; then
+              echo "${required} must be set on the devnet environment." >&2
+              exit 1
+            fi
+          done
+          if ! [[ "${THRESHOLD}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "PPV_SQUADS_THRESHOLD must be a positive integer." >&2
+            exit 1
+          fi
+          member_count="$(tr ',' '\n' <<< "${MEMBER_PUBKEYS}" | sed '/^[[:space:]]*$/d' | wc -l)"
+          if (( THRESHOLD > member_count )); then
+            echo "PPV_SQUADS_THRESHOLD cannot exceed the number of configured members." >&2
             exit 1
           fi
           actual="$(solana genesis-hash)"
-          if [[ "${expected}" != "${actual}" ]]; then
+          if [[ "${EXPECTED_GENESIS}" != "${actual}" ]]; then
             echo "Genesis hash ${actual} does not match the configured devnet genesis." >&2
             exit 1
           fi
@@ -296,4 +311,7 @@ jobs:
         run: |
           # Runs even when an earlier step failed, so a partial run never leaves
           # keypairs on the runner disk.
-          rm -rf "${{ steps.keys.outputs.work }}" target/deploy/*-keypair.json
+          rm -rf "${{ steps.keys.outputs.work }}" \
+            "${{ steps.core_keys.outputs.work }}" \
+            "${{ steps.commerce_keys.outputs.work }}" \
+            target/deploy/*-keypair.json
