@@ -9,6 +9,10 @@ test-ledger/
 *.pem
 *.key
 *-keypair.json
+# Solana program + deployer keypairs kept at repo root during a deploy.
+# These are secret keys — never commit them.
+*-program.json
+*-deployer-*.json
 .env
 .env.*
 !.env.example
