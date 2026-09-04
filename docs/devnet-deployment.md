@@ -46,7 +46,7 @@ npm run test:f1
 `npm run test:f1` builds twice, asserts the two generated IDLs are
 byte-identical, and runs the full `solana-test-validator` suite. It generates
 **ephemeral** program keypairs under the git-ignored `target/deploy/` directory
-and restores the repository's placeholder program IDs when it finishes. Those
+and restores the repository's committed program IDs when it finishes. Those
 ephemeral keys are never deployable and never leave the machine.
 
 ## Dependency policy

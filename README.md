@@ -65,17 +65,27 @@ program keypairs under the ignored `target/deploy/`, builds twice and asserts th
 two generated IDLs are byte-identical, checks that the keypair, `declare_id!`,
 `Anchor.toml` and the IDL all name the same program id, then starts a
 `solana-test-validator`, deploys both programs from their own keypairs, and runs
-the full adversarial suite. It restores the committed placeholder ids on every
+the full adversarial suite. It restores the committed program ids on every
 exit path, so ephemeral ids can never reach a commit.
 
 `Cargo.lock` is committed and authoritative; CI consumes it with `--locked` and
 never regenerates it. To move a dependency, run
 `./scripts/regenerate-lockfile.sh`, commit the result, and re-run the gate.
 
-The IDs currently committed in `Anchor.toml` and `declare_id!` are build-only
-placeholders. Before any deployment, generate controlled program keypairs, run
-`anchor keys sync`, rebuild, and record the resulting IDs in the deployment
-manifest. Never deploy these placeholder IDs.
+The IDs committed in `Anchor.toml` and `declare_id!` are the controlled program
+identities:
+
+| Program        | Program ID                                     |
+| -------------- | ---------------------------------------------- |
+| `ppv_core`     | `ENBkdfjFLD8sjcBFDzwD1BJ437ummEeJPdw6osowuaPm` |
+| `ppv_commerce` | `DXzqLJYm4xgBfXpATxE9CaNauHoKcmKqDjYc2o4kNPgA` |
+
+They are no longer placeholders, so do not regenerate them: a program identity is
+permanent once deployed. Deploying still requires the matching keypairs from the
+operator secret store and follows
+[the devnet runbook](docs/devnet-deployment.md) — committing an ID is not a
+deployment, and `deployments/devnet.json` remains the only record that one
+happened.
 
 ## Documentation
 
