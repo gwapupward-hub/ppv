@@ -7,12 +7,12 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-ppv_core = "Dkujj5vZp8kxhqM6hQTqqV3sTQ4Rx7J77No4bfwjrfXp"
-ppv_commerce = "4Y83YzUZnJ5LF9M1PcKHtsYcQ1LRxedwDi93PVf5H1FJ"
+ppv_core = "ENBkdfjFLD8sjcBFDzwD1BJ437ummEeJPdw6osowuaPm"
+ppv_commerce = "DXzqLJYm4xgBfXpATxE9CaNauHoKcmKqDjYc2o4kNPgA"
 
 [programs.devnet]
-ppv_core = "Dkujj5vZp8kxhqM6hQTqqV3sTQ4Rx7J77No4bfwjrfXp"
-ppv_commerce = "4Y83YzUZnJ5LF9M1PcKHtsYcQ1LRxedwDi93PVf5H1FJ"
+ppv_core = "ENBkdfjFLD8sjcBFDzwD1BJ437ummEeJPdw6osowuaPm"
+ppv_commerce = "DXzqLJYm4xgBfXpATxE9CaNauHoKcmKqDjYc2o4kNPgA"
 
 [registry]
 url = "https://api.apr.dev"

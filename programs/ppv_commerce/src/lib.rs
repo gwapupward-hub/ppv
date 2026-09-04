@@ -11,9 +11,9 @@ use state::*;
 pub const AGREEMENT_SEED: &[u8] = b"agreement";
 pub const MAX_AGREEMENT_TTL_SECS: i64 = 365 * 24 * 60 * 60;
 
-// Build-only placeholder. Run `anchor keys sync` with controlled program
-// keypairs before deployment and commit the resulting deployment manifest.
-declare_id!("4Y83YzUZnJ5LF9M1PcKHtsYcQ1LRxedwDi93PVf5H1FJ");
+// Controlled program ID. Matches the ppv_commerce-program.json keypair held by
+// the deployer; commit the deployment manifest after each deploy.
+declare_id!("DXzqLJYm4xgBfXpATxE9CaNauHoKcmKqDjYc2o4kNPgA");
 
 #[program]
 pub mod ppv_commerce {
