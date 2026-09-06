@@ -70,3 +70,16 @@ generalized trustworthiness.
 Adding an event type, an outcome, or a field that every consumer tolerates
 is a v1 change. Renaming or re-meaning anything is v2: new types, new schema
 version, old ones untouched.
+
+## Phase 10 additions
+
+The escrow kernel produced facts with no home in the original list, so five
+types were appended: `work.completed`, `milestone.settled`, `agreement.refunded`,
+`proof.approved` and `proof.rejected`.
+
+Appended, not substituted. Every type above still means exactly what it meant,
+and a consumer that ignores a type it does not recognise keeps working — which
+is why new facts get new types rather than new fields on old ones.
+
+`normalizeEscrowEvent` produces these from `ppv_escrow` events; the full map is
+in [ecosystem.md](ecosystem.md).

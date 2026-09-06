@@ -51,15 +51,25 @@ function defaultRoles(event: ReputationEventV1): DefaultRoles {
     case "dispute.opened":
     case "dispute.resolved":
       return { actor: "collaborator", counterparty: "collaborator" };
+    case "proof.approved":
+    case "proof.rejected":
+      // Both sides are parties to the same agreement; which one decided is in
+      // the event, and it is not a role.
+      return { actor: "collaborator", counterparty: "collaborator" };
     case "escrow.funded":
     case "invoice.paid":
     case "milestone.approved":
+    case "milestone.settled":
     case "settlement.completed":
       return { actor: "payer", counterparty: "payee" };
+    case "agreement.refunded":
+      // The actor gave the money back, so the actor is the one who had it.
+      return { actor: "seller", counterparty: "buyer" };
     case "milestone.created":
     case "milestone.rejected":
       return { actor: "buyer", counterparty: "seller" };
     case "milestone.delivered":
+    case "work.completed":
       return { actor: "seller", counterparty: "buyer" };
   }
 }

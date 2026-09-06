@@ -12,6 +12,7 @@ export {
   type ProductIdempotencyKey,
 } from "./hashing.js";
 export * from "./normalize.js";
+export * from "./normalize-escrow.js";
 export * from "./receipts.js";
 export * from "./seal-state.js";
 export * from "./eligibility.js";

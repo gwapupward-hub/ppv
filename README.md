@@ -120,6 +120,7 @@ manifest. Never deploy these placeholder IDs.
 - [Indexing](docs/indexing.md)
 - [Contracts and terms](docs/contracts.md)
 - [Invoices and bounties](docs/compositions.md)
+- [Integration contract](docs/ecosystem.md)
 - [Escrow security model and attack matrix](docs/security-model.md)
 - [Threat model](docs/threat-model.md)
 - [Canonicalization v1](docs/canonicalization-v1.md)
