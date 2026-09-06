@@ -1,0 +1,23 @@
+[package]
+name = "ppv_escrow"
+version = "0.1.0"
+description = "Phase 1 PPV escrow kernel: deterministic agreements and per-agreement token custody"
+edition = "2021"
+rust-version = "1.75"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "ppv_escrow"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+
+[dependencies]
+anchor-lang = { workspace = true }
+anchor-spl = { workspace = true }

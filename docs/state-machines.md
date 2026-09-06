@@ -1,0 +1,82 @@
+# PPV State Machines
+
+## The rule every instruction obeys
+
+```text
+WHO may perform this action?
+                AND
+IS this action legal in the current state?
+```
+
+Authorization alone is not sufficient. State alone is not sufficient. An
+instruction that checks only one of the two is incomplete, and the missing half
+is the vulnerability.
+
+## Escrow custody lifecycle (`ppv_escrow`)
+
+```text
+   OPEN
+     │  fund()            buyer only
+     ▼
+  FUNDED
+     │  mark_completed()  seller only, moves no money
+     ▼
+COMPLETED
+     │  settle()          either party, pays the seller
+     ▼
+  SETTLED   (terminal)
+```
+
+| Action | Signer | Legal from | Result | Custody effect |
+| --- | --- | --- | --- | --- |
+| `initialize_agreement` | creator | — | `Open` | Creates an empty vault |
+| `fund` | creator (buyer) | `Open` | `Funded` | Buyer ATA → vault, exactly `amount` |
+| `mark_completed` | counterparty (seller) | `Funded` | `Completed` | None |
+| `settle` | either party | `Completed` | `Settled` | Vault → seller ATA, exactly `amount` |
+
+Explicitly rejected, and covered by tests:
+
+```text
+OPEN      --X-->  COMPLETED
+OPEN      --X-->  SETTLED
+FUNDED    --X-->  SETTLED
+FUNDED    --X-->  FUNDED       (double funding)
+COMPLETED --X-->  COMPLETED    (double completion)
+SETTLED   --X-->  anything     (terminal)
+```
+
+### Why completion and settlement are separate
+
+`mark_completed` moves no money. That separation is what leaves room, without
+touching the custody path, for the approval, proof, dispute-window, milestone
+verification, and delayed-settlement steps of later phases. Collapsing the two
+into one instruction would be smaller today and unextendable tomorrow.
+
+### Why `settle` accepts either party
+
+The settlement destination is constrained to a token account the seller owns,
+so a buyer-triggered settlement can only pay the seller. Allowing either party
+removes a liveness failure — a seller who disappears after completing work
+cannot strand the buyer's tokens in the vault — without widening who can be
+paid. It is not permissionless: a third party has no role in custody here.
+
+## Negotiation lifecycle (`ppv_commerce`)
+
+```text
+Pending --both current signatures--> Executed
+Pending --revision-----------------> Pending (version + 1, signatures cleared)
+Pending --either party cancels-----> Cancelled
+```
+
+Negotiation state and custody state are separate machines in separate programs.
+There is deliberately no single enum spanning "counter-offer sent" and "vault
+funded": one enum covering business and custody conditions is how an illegal
+transition gets smuggled through a state that looks adjacent and is not.
+
+## Not yet implemented
+
+`Disputed`, `Refunded`, and `Cancelled` are Phase 5 states, and milestones are
+Phase 6 child machines. They are absent from `AgreementState` rather than
+present and unreachable: an enum variant no instruction can produce is a
+promise the program does not keep. Adding them appends borsh discriminants
+without moving the existing four.

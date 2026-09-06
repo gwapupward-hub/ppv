@@ -33,6 +33,7 @@ id_sources=(
   Anchor.toml
   programs/ppv_core/src/lib.rs
   programs/ppv_commerce/src/lib.rs
+  programs/ppv_escrow/src/lib.rs
 )
 for source in "${id_sources[@]}"; do
   install -D "${source}" "${workdir}/ids/${source}"
@@ -66,19 +67,21 @@ fi
 
 anchor build
 
-cp target/idl/ppv_core.json "${workdir}/ppv_core.json"
-cp target/idl/ppv_commerce.json "${workdir}/ppv_commerce.json"
+for program in ppv_core ppv_commerce ppv_escrow; do
+  cp "target/idl/${program}.json" "${workdir}/${program}.json"
+done
 
 # The second build is incremental; comparing both generated IDLs catches
 # nondeterministic schema output without paying for a second clean compile.
 anchor build
-cmp "${workdir}/ppv_core.json" target/idl/ppv_core.json
-cmp "${workdir}/ppv_commerce.json" target/idl/ppv_commerce.json
+for program in ppv_core ppv_commerce ppv_escrow; do
+  cmp "${workdir}/${program}.json" "target/idl/${program}.json"
+done
 
 # Assert the three places a program id lives agree before anything is deployed.
 # A binary compiled against one id and loaded at another fails every instruction
 # with DeclaredProgramIdMismatch, which reads like a protocol bug and is not one.
-for program in ppv_core ppv_commerce; do
+for program in ppv_core ppv_commerce ppv_escrow; do
   keypair_id="$(solana-keygen pubkey "target/deploy/${program}-keypair.json")"
   declared_id="$(sed -n 's/^declare_id!("\(.*\)");$/\1/p' "programs/${program}/src/lib.rs")"
   manifest_id="$(sed -n "s/^${program} = \"\(.*\)\"$/\1/p" Anchor.toml | head -1)"
@@ -122,5 +125,5 @@ solana --url http://127.0.0.1:8899 airdrop 100 \
 
 anchor test --skip-build --skip-local-validator
 
-sha256sum target/idl/ppv_core.json target/idl/ppv_commerce.json
+sha256sum target/idl/ppv_core.json target/idl/ppv_commerce.json target/idl/ppv_escrow.json
 echo "F1 local-validator verification passed"
