@@ -19,3 +19,34 @@ pub struct ProofSubmitted {
     pub agreement_state: AgreementState,
     pub timestamp: i64,
 }
+
+/// A decision recorded against evidence. Like submission, it is a fact about
+/// the agreement rather than a step in it: `agreement_state` is where the
+/// agreement was, and stayed.
+#[event]
+pub struct ProofApproved {
+    pub agreement: Pubkey,
+    pub proof: Pubkey,
+    pub creator: Pubkey,
+    pub counterparty: Pubkey,
+    pub submitter: Pubkey,
+    pub decided_by: Pubkey,
+    pub proof_index: u32,
+    pub content_hash: [u8; 32],
+    pub agreement_state: AgreementState,
+    pub timestamp: i64,
+}
+
+#[event]
+pub struct ProofRejected {
+    pub agreement: Pubkey,
+    pub proof: Pubkey,
+    pub creator: Pubkey,
+    pub counterparty: Pubkey,
+    pub submitter: Pubkey,
+    pub decided_by: Pubkey,
+    pub proof_index: u32,
+    pub content_hash: [u8; 32],
+    pub agreement_state: AgreementState,
+    pub timestamp: i64,
+}

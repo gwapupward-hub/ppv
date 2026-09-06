@@ -25,6 +25,8 @@ export const PPV_ESCROW_EVENT_NAMES = [
   "WorkCompleted",
   "SettlementExecuted",
   "ProofSubmitted",
+  "ProofApproved",
+  "ProofRejected",
 ] as const;
 export type PpvEscrowEventName = (typeof PPV_ESCROW_EVENT_NAMES)[number];
 
@@ -89,12 +91,29 @@ export type EscrowProofSubmittedEvent = Base & {
   agreementState: AgreementState;
 };
 
+/** Approval and rejection carry identical fields; only the name differs. */
+type ProofDecision = Base & {
+  proof: string;
+  creator: string;
+  counterparty: string;
+  submitter: string;
+  decidedBy: string;
+  proofIndex: number;
+  contentHash: string;
+  agreementState: AgreementState;
+};
+
+export type EscrowProofApprovedEvent = ProofDecision & { name: "ProofApproved" };
+export type EscrowProofRejectedEvent = ProofDecision & { name: "ProofRejected" };
+
 export type PpvEscrowEvent =
   | EscrowAgreementCreatedEvent
   | EscrowAgreementFundedEvent
   | EscrowWorkCompletedEvent
   | EscrowSettlementExecutedEvent
-  | EscrowProofSubmittedEvent;
+  | EscrowProofSubmittedEvent
+  | EscrowProofApprovedEvent
+  | EscrowProofRejectedEvent;
 
 export function escrowEventDiscriminatorHex(name: PpvEscrowEventName): string {
   return Buffer.from(anchorDiscriminator("event", name)).toString("hex");
@@ -191,6 +210,23 @@ export function decodeEscrowEventData(data: Uint8Array): PpvEscrowEvent | null {
         proofIndex: reader.u32(),
         contentHash: reader.hex(32),
         metadataHash: reader.hex(32),
+        agreementState: reader.state(),
+        timestamp: reader.i64(),
+      };
+      break;
+    case "ProofApproved":
+    case "ProofRejected":
+      event = {
+        program: "ppv_escrow",
+        name: match.name,
+        agreement: reader.pubkey(),
+        proof: reader.pubkey(),
+        creator: reader.pubkey(),
+        counterparty: reader.pubkey(),
+        submitter: reader.pubkey(),
+        decidedBy: reader.pubkey(),
+        proofIndex: reader.u32(),
+        contentHash: reader.hex(32),
         agreementState: reader.state(),
         timestamp: reader.i64(),
       };

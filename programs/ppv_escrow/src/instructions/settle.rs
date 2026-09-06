@@ -4,7 +4,7 @@ use anchor_spl::token::{self, Mint, Token, TokenAccount, TransferChecked};
 use crate::constants::{AGREEMENT_SEED, VAULT_AUTHORITY_SEED, VAULT_TOKEN_SEED};
 use crate::errors::EscrowError;
 use crate::events::SettlementExecuted;
-use crate::state::Agreement;
+use crate::state::{Agreement, Proof};
 
 #[event_cpi]
 #[derive(Accounts)]
@@ -45,6 +45,12 @@ pub struct Settle<'info> {
             @ EscrowError::DestinationNotOwnedBySeller,
     )]
     pub seller_token_account: Account<'info, TokenAccount>,
+    /// The approved evidence this settlement pays out against, when there is
+    /// any. Optional on purpose: a plain escrow settles on the parties' own
+    /// signatures, and making a proof mandatory here would fold approval into
+    /// custody. When one is cited it is checked, recorded on the agreement, and
+    /// named in the event, so the payment and its justification are one record.
+    pub settlement_proof: Option<Account<'info, Proof>>,
     pub token_program: Program<'info, Token>,
 }
 
@@ -54,6 +60,22 @@ pub fn handle_settle(ctx: Context<Settle>) -> Result<()> {
 
     let amount = ctx.accounts.agreement.amount;
     let agreement_key = ctx.accounts.agreement.key();
+
+    // Checked before any custody moves: a settlement that cites evidence must
+    // cite this agreement's evidence, and evidence the other party accepted.
+    let cited_proof = match &ctx.accounts.settlement_proof {
+        Some(proof) => {
+            require_keys_eq!(
+                proof.agreement,
+                agreement_key,
+                EscrowError::ProofAgreementMismatch
+            );
+            require!(proof.is_approved(), EscrowError::ProofNotApproved);
+            Some(proof.key())
+        }
+        None => None,
+    };
+
     let vault_before = ctx.accounts.vault.amount;
     let seller_before = ctx.accounts.seller_token_account.amount;
 
@@ -98,6 +120,7 @@ pub fn handle_settle(ctx: Context<Settle>) -> Result<()> {
     let destination = ctx.accounts.seller_token_account.key();
     let agreement = &mut ctx.accounts.agreement;
     let previous_state = agreement.record_settled(now);
+    agreement.settlement_proof = cited_proof.unwrap_or_default();
 
     emit_cpi!(SettlementExecuted {
         agreement: agreement.key(),
@@ -106,7 +129,7 @@ pub fn handle_settle(ctx: Context<Settle>) -> Result<()> {
         amount,
         mint: agreement.mint,
         destination,
-        proof: None,
+        proof: cited_proof,
         previous_state,
         new_state: agreement.state,
         timestamp: now,

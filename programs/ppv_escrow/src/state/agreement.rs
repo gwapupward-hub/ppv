@@ -36,10 +36,14 @@ pub struct Agreement {
     /// one gets, which is what keeps proof indices dense and ordered instead
     /// of client-chosen and sparse.
     pub proof_count: u32,
+    /// The approved proof settlement cited, or the default address when it
+    /// cited none. Recording it here makes a settlement auditable from the
+    /// account alone, without replaying its event.
+    pub settlement_proof: Pubkey,
     /// Reserved account space for compatible schema evolution. Phase 3 spent
-    /// four of the original sixty-four bytes on `proof_count`; the account size
-    /// is unchanged.
-    pub reserved: [u8; 60],
+    /// four of the original sixty-four bytes on `proof_count` and Phase 4 spent
+    /// thirty-two on `settlement_proof`; the account size is unchanged.
+    pub reserved: [u8; 28],
 }
 
 impl Agreement {
@@ -99,18 +103,22 @@ impl Agreement {
         Ok(())
     }
 
+    /// The window in which the agreement still accepts facts about itself.
+    /// Before funding there is nothing escrowed to say anything about; after
+    /// settlement the record is closed.
+    pub fn is_live(&self) -> bool {
+        matches!(
+            self.state,
+            AgreementState::Funded | AgreementState::Completed
+        )
+    }
+
     /// Evidence may be anchored while the agreement is live. Submission is not
     /// a state transition: it adds a fact, and no custody or lifecycle
     /// consequence follows from it on its own.
     pub fn require_proof_submittable(&self, signer: &Pubkey) -> Result<()> {
         require!(self.is_party(signer), EscrowError::NotAParty);
-        require!(
-            matches!(
-                self.state,
-                AgreementState::Funded | AgreementState::Completed
-            ),
-            EscrowError::BadState
-        );
+        require!(self.is_live(), EscrowError::BadState);
         Ok(())
     }
 
@@ -157,7 +165,8 @@ mod tests {
             completed_at: 0,
             settled_at: 0,
             proof_count: 0,
-            reserved: [0; 60],
+            settlement_proof: Pubkey::default(),
+            reserved: [0; 28],
         }
     }
 

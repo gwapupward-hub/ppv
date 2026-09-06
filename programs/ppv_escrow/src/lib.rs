@@ -71,6 +71,19 @@ pub mod ppv_escrow {
         instructions::settle::handle_settle(ctx)
     }
 
+    /// Records that the other party accepted a piece of evidence. Moves no
+    /// money: an approval is a decision about a fact, and settlement remains a
+    /// separate instruction with its own gate.
+    pub fn approve_proof(ctx: Context<DecideProof>) -> Result<()> {
+        instructions::decide_proof::handle_approve_proof(ctx)
+    }
+
+    /// Records that the other party refused a piece of evidence. Moves no
+    /// money and does not end the agreement — the submitter may anchor more.
+    pub fn reject_proof(ctx: Context<DecideProof>) -> Result<()> {
+        instructions::decide_proof::handle_reject_proof(ctx)
+    }
+
     /// Anchors a hash of evidence to this agreement. Either party may submit
     /// while the agreement is live. It moves no money and changes no state:
     /// a proof is a fact, and what follows from it is decided separately.

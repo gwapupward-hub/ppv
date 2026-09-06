@@ -50,7 +50,8 @@ function encodeAgreementAccount(account: AgreementAccount): Uint8Array {
         out.writeUInt32LE(account.proofCount);
         return out;
       })(),
-      Buffer.alloc(60),
+      pubkey(account.settlementProof),
+      Buffer.alloc(28),
     ]),
   );
 }
@@ -74,6 +75,7 @@ const FIXTURE: AgreementAccount = {
   completedAt: 1_700_000_200,
   settledAt: 1_700_000_300,
   proofCount: 2,
+  settlementProof: addressFromByte(8),
 };
 
 test("the account discriminator is the anchor derivation", () => {

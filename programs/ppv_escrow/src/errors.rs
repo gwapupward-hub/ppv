@@ -30,6 +30,12 @@ pub enum EscrowError {
     InvalidContentHash,
     #[msg("Proof does not belong to this agreement")]
     ProofAgreementMismatch,
+    #[msg("A party cannot decide its own proof")]
+    CannotDecideOwnProof,
+    #[msg("Proof has already been approved or rejected")]
+    ProofAlreadyDecided,
+    #[msg("Settlement can only cite an approved proof")]
+    ProofNotApproved,
     #[msg("Vault address already holds data")]
     VaultAlreadyInitialized,
     #[msg("Arithmetic overflow")]

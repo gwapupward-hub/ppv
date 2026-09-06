@@ -7,6 +7,8 @@ import {
   encodeBase58,
   type AgreementState,
   type AgreementType,
+  type EscrowProofApprovedEvent,
+  type EscrowProofRejectedEvent,
   type EscrowProofSubmittedEvent,
   type PpvEscrowEvent,
 } from "../../src/index.js";
@@ -139,6 +141,21 @@ export function encodeEscrowEvent(event: PpvEscrowEvent): Uint8Array {
         i64(event.timestamp),
       ]);
       break;
+    case "ProofApproved":
+    case "ProofRejected":
+      body = Buffer.concat([
+        pubkey(event.agreement),
+        pubkey(event.proof),
+        pubkey(event.creator),
+        pubkey(event.counterparty),
+        pubkey(event.submitter),
+        pubkey(event.decidedBy),
+        u32(event.proofIndex),
+        Buffer.from(event.contentHash, "hex"),
+        state(event.agreementState),
+        i64(event.timestamp),
+      ]);
+      break;
   }
   return Uint8Array.from(Buffer.concat([Buffer.from(EVENT_IX_TAG), discriminator(event.name), body]));
 }
@@ -223,6 +240,27 @@ export const PROOF_FIXTURE: EscrowProofSubmittedEvent = {
   metadataHash: hexFromByte(0, 32),
   agreementState: "Funded",
   timestamp: 1_700_000_150,
+};
+
+/** The buyer accepting the seller's deliverable. */
+export const PROOF_APPROVED_FIXTURE: EscrowProofApprovedEvent = {
+  program: "ppv_escrow",
+  name: "ProofApproved",
+  agreement: AGREEMENT,
+  proof: PROOF,
+  creator: BUYER,
+  counterparty: SELLER,
+  submitter: SELLER,
+  decidedBy: BUYER,
+  proofIndex: 0,
+  contentHash: hexFromByte(12, 32),
+  agreementState: "Funded",
+  timestamp: 1_700_000_180,
+};
+
+export const PROOF_REJECTED_FIXTURE: EscrowProofRejectedEvent = {
+  ...PROOF_APPROVED_FIXTURE,
+  name: "ProofRejected",
 };
 
 export const FIXTURE_ADDRESSES = { BUYER, SELLER, MINT, VAULT, AGREEMENT, SELLER_ATA, PROOF };

@@ -11,8 +11,9 @@ implemented as three separately deployable Solana programs.
   and cancellation. Non-custodial.
 - `ppv_escrow`: the custody kernel — `initialize_agreement`, `fund`,
   `mark_completed`, `settle` over `Open → Funded → Completed → Settled`, with a
-  vault and vault authority derived per agreement, plus `submit_proof` to anchor
-  agreement-bound evidence. **Local validator only.**
+  vault and vault authority derived per agreement, plus `submit_proof`,
+  `approve_proof` and `reject_proof` for agreement-bound evidence and the
+  decisions made about it. **Local validator only.**
 - `@gwap/ppv-sdk`: frozen canonicalization v1 and SHA-256 helpers shared by
   every client; the versioned reputation contracts (`ReputationEventV1`,
   `PpvReceiptV1`, seal states, credential eligibility); decoders for the

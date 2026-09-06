@@ -34,6 +34,8 @@ COMPLETED
 | `mark_completed` | counterparty (seller) | `Funded` | `Completed` | None |
 | `settle` | either party | `Completed` | `Settled` | Vault → seller ATA, exactly `amount` |
 | `submit_proof` | either party | `Funded`, `Completed` | unchanged | None |
+| `approve_proof` | the party who did not submit | `Funded`, `Completed` | unchanged | None |
+| `reject_proof` | the party who did not submit | `Funded`, `Completed` | unchanged | None |
 
 Explicitly rejected, and covered by tests:
 
@@ -61,6 +63,23 @@ COMPLETED ──submit_proof()──> COMPLETED
 
 Neither `Open` nor `Settled` accepts evidence: before funding there is nothing
 escrowed to deliver against, and after settlement the record is closed.
+
+A proof runs a small machine of its own, orthogonal to the agreement's:
+
+```text
+SUBMITTED ──approve_proof()──> APPROVED   (decided by the party who did not submit)
+          └─reject_proof()───> REJECTED
+```
+
+Both decisions are terminal. Re-deciding would let a party withdraw an approval
+a settlement had already relied on. A rejection ends nothing — the submitter may
+anchor more evidence — and it erases nothing: the rejected proof stays on chain
+with its hash intact.
+
+`settle` may cite one approved proof, which is then recorded on the agreement
+and named in the settlement event. It is optional on purpose: a plain escrow
+settles on the parties' own signatures, and requiring a proof would fold
+approval into custody.
 
 ### Why completion and settlement are separate
 

@@ -237,6 +237,7 @@ describe("PPV escrow kernel", () => {
       vault?: PublicKey;
       vaultAuthority?: PublicKey;
       mint?: PublicKey;
+      settlementProof?: PublicKey | null;
     },
   ) {
     const signer = overrides?.signer ?? seller;
@@ -249,6 +250,7 @@ describe("PPV escrow kernel", () => {
         vault: overrides?.vault ?? agreement.vault,
         vaultAuthority: overrides?.vaultAuthority ?? agreement.vaultAuthority,
         sellerTokenAccount: overrides?.destination ?? sellerTokens,
+        settlementProof: overrides?.settlementProof ?? null,
         tokenProgram: TOKEN_PROGRAM_ID,
       })
       .signers([signer])
@@ -608,6 +610,7 @@ describe("PPV escrow kernel", () => {
             vault: mine.vault,
             vaultAuthority: theirs.vaultAuthority,
             sellerTokenAccount: attackerTokens,
+            settlementProof: null,
             tokenProgram: TOKEN_PROGRAM_ID,
           })
           .signers([attacker])
@@ -741,6 +744,173 @@ describe("PPV escrow kernel", () => {
           .signers([seller])
           .rpc(),
       );
+    });
+  });
+
+  describe("proof decisions", () => {
+    function submitProofFor(
+      agreement: Awaited<ReturnType<typeof initialize>>,
+      signer: Keypair = seller,
+      index = 0,
+    ) {
+      return escrow.methods
+        .submitProof(hash32(12), hash32(0))
+        .accounts({
+          submitter: signer.publicKey,
+          agreement: agreement.agreement,
+          proof: proofAddress(escrow.programId, agreement.agreement, index),
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([signer])
+        .rpc();
+    }
+
+    function decide(
+      agreement: Awaited<ReturnType<typeof initialize>>,
+      approve: boolean,
+      overrides?: { signer?: Keypair; index?: number; proof?: PublicKey },
+    ) {
+      const signer = overrides?.signer ?? buyer;
+      const proof =
+        overrides?.proof ?? proofAddress(escrow.programId, agreement.agreement, overrides?.index ?? 0);
+      const method = approve ? escrow.methods.approveProof() : escrow.methods.rejectProof();
+      return method
+        .accounts({ decider: signer.publicKey, agreement: agreement.agreement, proof })
+        .signers([signer])
+        .rpc();
+    }
+
+    it("records the other party's acceptance without moving money", async () => {
+      const agreement = await fundedAgreement();
+      await submitProofFor(agreement);
+      const vaultBefore = await getAccount(connection, agreement.vault);
+
+      const signature = await decide(agreement, true);
+
+      const proof = await escrow.account.proof.fetch(
+        proofAddress(escrow.programId, agreement.agreement, 0),
+      );
+      assert.ok("approved" in proof.status);
+      assert.equal(proof.decidedBy.toBase58(), buyer.publicKey.toBase58());
+      assert.ok(proof.decidedAt.toNumber() > 0);
+
+      const vaultAfter = await getAccount(connection, agreement.vault);
+      assert.equal(vaultAfter.amount, vaultBefore.amount, "approval is not payment");
+      const account = await escrow.account.agreement.fetch(agreement.agreement);
+      assert.ok("funded" in account.state, "approval is not a transition");
+
+      const event = eventNamed(await eventsOf(signature), "proofApproved");
+      assert.equal(event.decidedBy.toBase58(), buyer.publicKey.toBase58());
+      assert.equal(event.submitter.toBase58(), seller.publicKey.toBase58());
+    });
+
+    it("refuses a party deciding its own evidence", async () => {
+      const agreement = await fundedAgreement();
+      await submitProofFor(agreement, seller);
+
+      // Both parties are authorized on this agreement, so authorization alone
+      // would let the seller approve its own deliverable.
+      await expectAnchorError(decide(agreement, true, { signer: seller }), "CannotDecideOwnProof");
+      await expectAnchorError(decide(agreement, false, { signer: seller }), "CannotDecideOwnProof");
+      await expectAnchorError(decide(agreement, true, { signer: attacker }), "NotAParty");
+    });
+
+    it("makes a decision final", async () => {
+      const agreement = await fundedAgreement();
+      await submitProofFor(agreement);
+      await decide(agreement, true);
+
+      // Re-deciding would let a party withdraw an approval a settlement had
+      // already relied on.
+      await expectAnchorError(decide(agreement, true), "ProofAlreadyDecided");
+      await expectAnchorError(decide(agreement, false), "ProofAlreadyDecided");
+    });
+
+    it("records a rejection as a fact, not an erasure", async () => {
+      const agreement = await fundedAgreement();
+      await submitProofFor(agreement);
+      const signature = await decide(agreement, false);
+
+      const proof = await escrow.account.proof.fetch(
+        proofAddress(escrow.programId, agreement.agreement, 0),
+      );
+      assert.ok("rejected" in proof.status);
+      assert.deepEqual([...proof.contentHash], hash32(12), "the evidence remains anchored");
+
+      eventNamed(await eventsOf(signature), "proofRejected");
+
+      // The seller can anchor more evidence; a rejection ends nothing.
+      await submitProofFor(agreement, seller, 1);
+    });
+
+    it("refuses a decision on another agreement's evidence", async () => {
+      const mine = await fundedAgreement();
+      const theirs = await fundedAgreement();
+      await submitProofFor(mine);
+
+      await assert.rejects(
+        decide(theirs, true, { proof: proofAddress(escrow.programId, mine.agreement, 0) }),
+      );
+    });
+
+    it("lets settlement cite the approved evidence it pays out against", async () => {
+      const agreement = await fundedAgreement();
+      await submitProofFor(agreement);
+      await decide(agreement, true);
+      await markCompleted(agreement);
+
+      const proof = proofAddress(escrow.programId, agreement.agreement, 0);
+      const signature = await settle(agreement, { settlementProof: proof });
+
+      const account = await escrow.account.agreement.fetch(agreement.agreement);
+      assert.ok("settled" in account.state);
+      assert.equal(account.settlementProof.toBase58(), proof.toBase58());
+
+      const event = eventNamed(await eventsOf(signature), "settlementExecuted");
+      assert.equal(event.proof?.toBase58(), proof.toBase58());
+    });
+
+    it("refuses settlement citing evidence that was not approved", async () => {
+      const agreement = await fundedAgreement();
+      await submitProofFor(agreement);
+      await markCompleted(agreement);
+
+      const proof = proofAddress(escrow.programId, agreement.agreement, 0);
+      await expectAnchorError(settle(agreement, { settlementProof: proof }), "ProofNotApproved");
+
+      const rejected = await fundedAgreement();
+      await submitProofFor(rejected);
+      await decide(rejected, false);
+      await markCompleted(rejected);
+      await expectAnchorError(
+        settle(rejected, { settlementProof: proofAddress(escrow.programId, rejected.agreement, 0) }),
+        "ProofNotApproved",
+      );
+
+      const vault = await getAccount(connection, agreement.vault);
+      assert.equal(vault.amount, AMOUNT, "a refused settlement moves nothing");
+    });
+
+    it("refuses settlement citing another agreement's evidence", async () => {
+      const mine = await completedAgreement();
+      const theirs = await fundedAgreement();
+      await submitProofFor(theirs);
+      await decide(theirs, true);
+
+      await expectAnchorError(
+        settle(mine, { settlementProof: proofAddress(escrow.programId, theirs.agreement, 0) }),
+        "ProofAgreementMismatch",
+      );
+    });
+
+    it("still settles with no evidence cited at all", async () => {
+      // Citing a proof is optional on purpose: a plain escrow settles on the
+      // parties' own signatures, and requiring one would fold approval into
+      // custody.
+      const agreement = await completedAgreement();
+      await settle(agreement);
+      const account = await escrow.account.agreement.fetch(agreement.agreement);
+      assert.equal(account.settlementProof.toBase58(), PublicKey.default.toBase58());
     });
   });
 

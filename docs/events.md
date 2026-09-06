@@ -47,6 +47,8 @@ transition committed.
 | `WorkCompleted` | `mark_completed` | `Funded` → `Completed` |
 | `SettlementExecuted` | `settle` | `Completed` → `Settled` |
 | `ProofSubmitted` | `submit_proof` | none — reports the state it saw |
+| `ProofApproved` | `approve_proof` | none — reports the state it saw |
+| `ProofRejected` | `reject_proof` | none — reports the state it saw |
 
 ```rust
 #[event]
@@ -64,8 +66,13 @@ pub struct SettlementExecuted {
 }
 ```
 
-`proof` is always `None` today. It is present from the first release so that
-Phase 3 can populate it without moving a byte for existing consumers.
+`proof` names the approved evidence a settlement cited, or is `None` when it
+cited none. The field was present from the first release, before anything could
+populate it, so adding proofs moved no byte for existing consumers.
+
+`ProofApproved` and `ProofRejected` carry identical fields and differ only in
+their discriminator, so a consumer never reconciles two layouts for one kind of
+fact, and never has to guess which decision it is reading.
 
 ## Reading events back
 
@@ -101,7 +108,7 @@ gets a new event name and the old one keeps its layout until consumers migrate.
 
 ## Later phases
 
-`ProofApproved`, `ProofRejected`, `MilestoneCreated`,
+`MilestoneCreated`,
 `MilestoneFunded`, `MilestoneSubmitted`, `MilestoneApproved`, `DisputeOpened`,
 `DisputeResolved`, `RefundExecuted`, `AgreementCancelled`, `InvoiceCreated`, and
 `InvoicePaid` arrive with the instructions that emit them. Each is added to the

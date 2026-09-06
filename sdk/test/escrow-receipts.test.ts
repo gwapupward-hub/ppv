@@ -12,7 +12,9 @@ import {
 import {
   FIXTURE_ADDRESSES,
   LIFECYCLE_FIXTURE,
+  PROOF_APPROVED_FIXTURE,
   PROOF_FIXTURE,
+  PROOF_REJECTED_FIXTURE,
   addressFromByte,
   signatureFromByte,
 } from "./helpers/escrow-events.js";
@@ -289,4 +291,98 @@ test("evidence cannot predate the agreement it annotates", () => {
     () => reconstructAgreementLifecycle([...receipts, proof]),
     /before this agreement existed/,
   );
+});
+
+function annotation(event: PpvEscrowEvent, slot: number, index: number) {
+  return escrowReceiptFromEvent({
+    event,
+    programId: PROGRAM_ID,
+    transactionSignature: signatureFromByte(120 + index),
+    slot,
+    instructionIndex: 0,
+    innerInstructionIndex: 0,
+    blockTime: event.timestamp,
+  });
+}
+
+test("a proof carries the decision made about it", () => {
+  const receipts = lifecycleReceipts();
+  const lifecycle = reconstructAgreementLifecycle([
+    ...receipts,
+    annotation(PROOF_FIXTURE, 1_001, 0),
+    annotation(PROOF_APPROVED_FIXTURE, 1_001, 1),
+  ]);
+
+  assert.equal(lifecycle.proofs.length, 1, "a decision is not a second proof");
+  assert.equal(lifecycle.proofs[0]?.status, "Approved");
+  assert.equal(lifecycle.proofs[0]?.decidedBy, FIXTURE_ADDRESSES.BUYER);
+  assert.equal(lifecycle.proofs[0]?.submitter, FIXTURE_ADDRESSES.SELLER);
+});
+
+test("a rejected proof stays in the history as rejected", () => {
+  const lifecycle = reconstructAgreementLifecycle([
+    ...lifecycleReceipts(),
+    annotation(PROOF_FIXTURE, 1_001, 0),
+    annotation(PROOF_REJECTED_FIXTURE, 1_001, 1),
+  ]);
+  assert.equal(lifecycle.proofs[0]?.status, "Rejected");
+  // Rejection is a fact, not an erasure: the submission is still there.
+  assert.equal(lifecycle.receipts.filter((r) => r.action === "PROOF_SUBMITTED").length, 1);
+});
+
+test("a decision for evidence that was never submitted is refused", () => {
+  assert.throws(
+    () =>
+      reconstructAgreementLifecycle([
+        ...lifecycleReceipts(),
+        annotation(PROOF_APPROVED_FIXTURE, 1_001, 1),
+      ]),
+    /never submitted/,
+  );
+});
+
+test("evidence cannot be decided twice", () => {
+  assert.throws(
+    () =>
+      reconstructAgreementLifecycle([
+        ...lifecycleReceipts(),
+        annotation(PROOF_FIXTURE, 1_001, 0),
+        annotation(PROOF_APPROVED_FIXTURE, 1_001, 1),
+        annotation(PROOF_REJECTED_FIXTURE, 1_002, 2),
+      ]),
+    /decided more than once/,
+  );
+});
+
+test("a settlement can only cite evidence this history approved", () => {
+  const receipts = lifecycleReceipts();
+  const settled = receipts[3]!;
+  const citing = { ...settled, proof: FIXTURE_ADDRESSES.PROOF };
+
+  // Cited but never submitted.
+  assert.throws(
+    () => reconstructAgreementLifecycle([...receipts.slice(0, 3), citing]),
+    /never saw/,
+  );
+
+  // Cited, submitted, but not approved.
+  assert.throws(
+    () =>
+      reconstructAgreementLifecycle([
+        ...receipts.slice(0, 3),
+        citing,
+        annotation(PROOF_FIXTURE, 1_001, 0),
+      ]),
+    /which is Submitted/,
+  );
+
+  // Cited, submitted, approved.
+  const lifecycle = reconstructAgreementLifecycle([
+    ...receipts.slice(0, 3),
+    citing,
+    annotation(PROOF_FIXTURE, 1_001, 0),
+    annotation(PROOF_APPROVED_FIXTURE, 1_001, 1),
+  ]);
+  assert.equal(lifecycle.state, "Settled");
+  assert.equal(lifecycle.receipts.at(-1)?.proof, FIXTURE_ADDRESSES.PROOF);
 });

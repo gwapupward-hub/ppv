@@ -33,6 +33,8 @@ export const ESCROW_RECEIPT_ACTIONS = {
   WorkCompleted: "WORK_COMPLETED",
   SettlementExecuted: "SETTLEMENT_EXECUTED",
   ProofSubmitted: "PROOF_SUBMITTED",
+  ProofApproved: "PROOF_APPROVED",
+  ProofRejected: "PROOF_REJECTED",
 } as const;
 
 /**
@@ -47,7 +49,11 @@ export const ESCROW_RECEIPT_ACTIONS = {
  */
 export type EscrowReceiptKind = "transition" | "annotation";
 
-const ANNOTATION_ACTIONS = new Set<string>(["PROOF_SUBMITTED"]);
+const ANNOTATION_ACTIONS = new Set<string>([
+  "PROOF_SUBMITTED",
+  "PROOF_APPROVED",
+  "PROOF_REJECTED",
+]);
 
 export type EscrowReceiptAction =
   (typeof ESCROW_RECEIPT_ACTIONS)[keyof typeof ESCROW_RECEIPT_ACTIONS];
@@ -221,6 +227,22 @@ export function escrowReceiptFromEvent(envelope: EscrowEventEnvelope): PpvEscrow
         previousState: event.previousState,
         newState: event.newState,
       };
+    case "ProofApproved":
+    case "ProofRejected":
+      return {
+        ...common,
+        agreementId: 0n,
+        buyer: event.creator,
+        seller: event.counterparty,
+        actor: event.decidedBy,
+        mint: null,
+        amount: null,
+        destination: null,
+        proof: event.proof,
+        proofIndex: event.proofIndex,
+        previousState: event.agreementState,
+        newState: event.agreementState,
+      };
     case "ProofSubmitted":
       return {
         ...common,
@@ -265,6 +287,9 @@ export type ProofRecord = {
   submitter: string;
   /** The state the agreement was in when this evidence was anchored. */
   agreementState: AgreementState;
+  /** Decided by the other party, or "Submitted" while nobody has. */
+  status: "Submitted" | "Approved" | "Rejected";
+  decidedBy: string | null;
   receiptId: string;
   occurredAt: string;
   slot: number;
@@ -286,6 +311,44 @@ export type ProofRecord = {
  * actions instead would work only for a lifecycle that never branches, and
  * disputes, refunds, and milestones all branch.
  */
+/**
+ * Folds the proof annotations into one record per proof. Decisions arrive as
+ * their own events, so the status a proof ends on is the last decision made
+ * about it — and a decision for a proof this history never saw submitted is an
+ * inconsistency, not a proof.
+ */
+function proofRecords(annotations: readonly PpvEscrowReceiptV1[]): ProofRecord[] {
+  const byProof = new Map<string, ProofRecord>();
+  for (const receipt of annotations) {
+    if (receipt.action === "PROOF_SUBMITTED") {
+      byProof.set(receipt.proof as string, {
+        proof: receipt.proof as string,
+        proofIndex: receipt.proofIndex as number,
+        submitter: receipt.actor,
+        agreementState: receipt.newState,
+        status: "Submitted",
+        decidedBy: null,
+        receiptId: receipt.receiptId,
+        occurredAt: receipt.occurredAt,
+        slot: receipt.slot,
+      });
+    }
+  }
+  for (const receipt of annotations) {
+    if (receipt.action !== "PROOF_APPROVED" && receipt.action !== "PROOF_REJECTED") continue;
+    const record = byProof.get(receipt.proof as string);
+    if (!record) {
+      throw new ReceiptError(`a decision names proof ${receipt.proof}, which was never submitted`);
+    }
+    if (record.decidedBy !== null) {
+      throw new ReceiptError(`proof ${record.proof} was decided more than once`);
+    }
+    record.status = receipt.action === "PROOF_APPROVED" ? "Approved" : "Rejected";
+    record.decidedBy = receipt.actor;
+  }
+  return [...byProof.values()];
+}
+
 export function reconstructAgreementLifecycle(
   receipts: readonly PpvEscrowReceiptV1[],
 ): AgreementLifecycle {
@@ -398,6 +461,16 @@ export function reconstructAgreementLifecycle(
   if (settled && !funded) {
     throw new ReceiptError("settlement without the funding it pays out");
   }
+  const proofs = proofRecords(sortedAnnotations);
+  if (settled?.proof) {
+    const cited = proofs.find((record) => record.proof === settled.proof);
+    if (!cited) {
+      throw new ReceiptError(`settlement cites proof ${settled.proof}, which this history never saw`);
+    }
+    if (cited.status !== "Approved") {
+      throw new ReceiptError(`settlement cites proof ${settled.proof}, which is ${cited.status}`);
+    }
+  }
 
   return {
     agreement,
@@ -410,17 +483,7 @@ export function reconstructAgreementLifecycle(
     settledAmount: settled?.amount ?? null,
     settlementDestination: settled?.destination ?? null,
     lastSlot: previous.slot,
-    proofs: sortedAnnotations
-      .filter((receipt) => receipt.action === "PROOF_SUBMITTED")
-      .map((receipt) => ({
-        proof: receipt.proof as string,
-        proofIndex: receipt.proofIndex as number,
-        submitter: receipt.actor,
-        agreementState: receipt.newState,
-        receiptId: receipt.receiptId,
-        occurredAt: receipt.occurredAt,
-        slot: receipt.slot,
-      })),
+    proofs,
     receipts: withAnnotations,
   };
 }

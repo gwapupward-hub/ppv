@@ -13,14 +13,21 @@ import {
 import { encodePpvEvent } from "./helpers/ppv-events.js";
 import {
   LIFECYCLE_FIXTURE,
+  PROOF_APPROVED_FIXTURE,
   PROOF_FIXTURE,
+  PROOF_REJECTED_FIXTURE,
   addressFromByte,
   encodeEscrowEvent,
   hexFromByte,
 } from "./helpers/escrow-events.js";
 
 test("every escrow event round-trips through the decoder", () => {
-  const all = [...LIFECYCLE_FIXTURE, PROOF_FIXTURE];
+  const all = [
+    ...LIFECYCLE_FIXTURE,
+    PROOF_FIXTURE,
+    PROOF_APPROVED_FIXTURE,
+    PROOF_REJECTED_FIXTURE,
+  ];
   for (const fixture of all) {
     assert.deepEqual(decodeEscrowEventData(encodeEscrowEvent(fixture)), fixture);
   }
@@ -121,4 +128,17 @@ test("a settlement can carry a proof reference without a layout change", () => {
   assert.equal(settled.name, "SettlementExecuted");
   const withProof = { ...settled, proof: "11111111111111111111111111111111" } as typeof settled;
   assert.deepEqual(decodeEscrowEventData(encodeEscrowEvent(withProof)), withProof);
+});
+
+test("approval and rejection are one shape told apart by their discriminator", () => {
+  // A consumer should never have to reconcile two field layouts for one kind
+  // of fact, and should never have to guess which decision it is reading.
+  const approved = encodeEscrowEvent(PROOF_APPROVED_FIXTURE);
+  const rejected = encodeEscrowEvent(PROOF_REJECTED_FIXTURE);
+  assert.equal(approved.length, rejected.length);
+  assert.deepEqual(approved.subarray(16), rejected.subarray(16), "identical fields");
+  assert.notDeepEqual(approved.subarray(8, 16), rejected.subarray(8, 16), "different names");
+
+  assert.equal(decodeEscrowEventData(approved)?.name, "ProofApproved");
+  assert.equal(decodeEscrowEventData(rejected)?.name, "ProofRejected");
 });

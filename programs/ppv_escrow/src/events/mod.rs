@@ -34,6 +34,8 @@ mod tests {
             expected("SettlementExecuted")
         );
         assert_eq!(ProofSubmitted::DISCRIMINATOR, expected("ProofSubmitted"));
+        assert_eq!(ProofApproved::DISCRIMINATOR, expected("ProofApproved"));
+        assert_eq!(ProofRejected::DISCRIMINATOR, expected("ProofRejected"));
     }
 
     // `ppv_commerce` emits an `AgreementCreated` too, and Anchor derives the
@@ -113,6 +115,41 @@ mod tests {
         assert_eq!(bytes.len(), 32 * 5 + 4 + 32 * 2 + 1 + 8);
         assert_eq!(&bytes[160..164], &0u32.to_le_bytes());
         assert_eq!(bytes[228], 1, "AgreementState::Funded");
+    }
+
+    #[test]
+    fn proof_decision_layouts_are_pinned_and_identical() {
+        let approved = ProofApproved {
+            agreement: Pubkey::new_from_array([5; 32]),
+            proof: Pubkey::new_from_array([8; 32]),
+            creator: Pubkey::new_from_array([1; 32]),
+            counterparty: Pubkey::new_from_array([2; 32]),
+            submitter: Pubkey::new_from_array([2; 32]),
+            decided_by: Pubkey::new_from_array([1; 32]),
+            proof_index: 0,
+            content_hash: [7; 32],
+            agreement_state: AgreementState::Completed,
+            timestamp: 1_700_000_250,
+        };
+        let rejected = ProofRejected {
+            agreement: approved.agreement,
+            proof: approved.proof,
+            creator: approved.creator,
+            counterparty: approved.counterparty,
+            submitter: approved.submitter,
+            decided_by: approved.decided_by,
+            proof_index: approved.proof_index,
+            content_hash: approved.content_hash,
+            agreement_state: approved.agreement_state,
+            timestamp: approved.timestamp,
+        };
+
+        let bytes = approved.try_to_vec().unwrap();
+        assert_eq!(bytes.len(), 32 * 6 + 4 + 32 + 1 + 8);
+        // The two decisions differ only in which event was emitted, so a
+        // consumer never has to reconcile two shapes for one kind of fact.
+        assert_eq!(bytes, rejected.try_to_vec().unwrap());
+        assert_ne!(ProofApproved::DISCRIMINATOR, ProofRejected::DISCRIMINATOR);
     }
 
     #[test]

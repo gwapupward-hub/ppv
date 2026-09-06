@@ -26,7 +26,8 @@ mod tests {
             + 1                   // state
             + 8 * 4               // created / funded / completed / settled
             + 4                   // proof count
-            + 60; // reserved
+            + 32                  // settlement proof
+            + 28; // reserved
         assert_eq!(Agreement::INIT_SPACE, expected);
         assert_eq!(
             expected, 278,
