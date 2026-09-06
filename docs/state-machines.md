@@ -39,6 +39,7 @@ end is final: paid, refunded, or abandoned before money was ever involved.
 | `fund` | creator (buyer) | `Open` | `Funded` | Buyer ATA → vault, exactly `amount` |
 | `mark_completed` | counterparty (seller) | `Funded` | `Completed` | None |
 | `settle` | either party | `Completed` | `Settled` | Vault → seller ATA, exactly `amount` |
+| `select_counterparty` | creator (sponsor) | `Open`, `Funded`, bounty only, once | unchanged | None |
 | `cancel` | creator (buyer) | `Open` | `Cancelled` | None — the vault is empty by construction |
 | `open_dispute` | either party | `Funded`, `Completed` | `Disputed` | None |
 | `resolve_dispute` | the conceding party | `Disputed` | `Settled` or `Refunded` | Vault → the *other* party, exactly `amount` |
@@ -134,6 +135,15 @@ no tranche has earned.
 `mark_completed` and the agreement-level `settle` do not apply to a milestone
 contract: it has no single moment of completion, and it finishes when its last
 tranche is paid.
+
+### One field is not fixed at creation
+
+`select_counterparty` names the wallet a bounty will pay. It is the single
+exception to "participants are immutable", and it is fenced: bounty-only,
+sponsor-only, assignable exactly once, and refused for the sponsor itself or the
+default address. Before it is assigned nobody can complete, settle or refund;
+after it is assigned the payee is as frozen as any other agreement's. See
+[compositions.md](compositions.md).
 
 ### Disputes are resolved by concession, not by a judge
 

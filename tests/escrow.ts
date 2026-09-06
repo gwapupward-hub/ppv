@@ -1482,6 +1482,133 @@ describe("PPV escrow kernel", () => {
     });
   });
 
+  describe("bounties", () => {
+    function selectCounterparty(
+      agreement: Awaited<ReturnType<typeof initialize>>,
+      winner: PublicKey,
+      signer: Keypair = buyer,
+    ) {
+      return escrow.methods
+        .selectCounterparty(winner)
+        .accounts({ creator: signer.publicKey, agreement: agreement.agreement })
+        .signers([signer])
+        .rpc();
+    }
+
+    it("escrows before it knows who wins, then names the winner", async () => {
+      // The point of the exception: applicants can see the money exists before
+      // doing the work.
+      const bounty = await initialize({
+        agreementType: { bounty: {} },
+        counterparty: PublicKey.default,
+      });
+      await fund(bounty);
+
+      const funded = await escrow.account.agreement.fetch(bounty.agreement);
+      assert.equal(funded.counterparty.toBase58(), PublicKey.default.toBase58());
+      const vault = await getAccount(connection, bounty.vault);
+      assert.equal(vault.amount, AMOUNT);
+
+      const signature = await selectCounterparty(bounty, seller.publicKey);
+      const named = await escrow.account.agreement.fetch(bounty.agreement);
+      assert.equal(named.counterparty.toBase58(), seller.publicKey.toBase58());
+      assert.ok("funded" in named.state, "naming a payee is not a step in the lifecycle");
+
+      const event = eventNamed(await eventsOf(signature), "counterpartyAssigned");
+      assert.equal(event.counterparty.toBase58(), seller.publicKey.toBase58());
+
+      await markCompleted(bounty);
+      const before = await getAccount(connection, sellerTokens);
+      await settle(bounty);
+      const after = await getAccount(connection, sellerTokens);
+      assert.equal(after.amount - before.amount, AMOUNT);
+    });
+
+    it("pays nobody until a winner is named", async () => {
+      const bounty = await initialize({
+        agreementType: { bounty: {} },
+        counterparty: PublicKey.default,
+      });
+      await fund(bounty);
+
+      // Nobody can sign as the default address, and the program says so rather
+      // than leaving it to be derived.
+      await expectAnchorError(markCompleted(bounty), "CounterpartyNotAssigned");
+      await expectAnchorError(settle(bounty), "CounterpartyNotAssigned");
+      await expectAnchorError(
+        escrow.methods
+          .refund()
+          .accounts({
+            seller: seller.publicKey,
+            agreement: bounty.agreement,
+            mint: bounty.mint,
+            vault: bounty.vault,
+            vaultAuthority: bounty.vaultAuthority,
+            buyerTokenAccount: buyerTokens,
+            tokenProgram: TOKEN_PROGRAM_ID,
+          })
+          .signers([seller])
+          .rpc(),
+        "CounterpartyNotAssigned",
+      );
+    });
+
+    it("names a winner once and never again", async () => {
+      const bounty = await initialize({
+        agreementType: { bounty: {} },
+        counterparty: PublicKey.default,
+      });
+      await selectCounterparty(bounty, seller.publicKey);
+
+      // From selection onward the payee is as frozen as any other agreement's.
+      // The sponsor cannot re-choose after seeing what a settlement would do.
+      await expectAnchorError(
+        selectCounterparty(bounty, attacker.publicKey),
+        "CounterpartyAlreadyAssigned",
+      );
+      const account = await escrow.account.agreement.fetch(bounty.agreement);
+      assert.equal(account.counterparty.toBase58(), seller.publicKey.toBase58());
+    });
+
+    it("refuses selection by anyone but the sponsor, and of the sponsor", async () => {
+      const bounty = await initialize({
+        agreementType: { bounty: {} },
+        counterparty: PublicKey.default,
+      });
+      await expectAnchorError(
+        selectCounterparty(bounty, seller.publicKey, seller),
+        "NotTheBuyer",
+      );
+      await expectAnchorError(selectCounterparty(bounty, buyer.publicKey), "InvalidCounterparty");
+      await expectAnchorError(
+        selectCounterparty(bounty, PublicKey.default),
+        "InvalidCounterparty",
+      );
+    });
+
+    it("is the only agreement type that may start without a payee", async () => {
+      await expectAnchorError(
+        initialize({ counterparty: PublicKey.default }),
+        "InvalidCounterparty",
+      );
+      await expectAnchorError(
+        initialize({
+          agreementType: { milestoneContract: {} },
+          counterparty: PublicKey.default,
+        }),
+        "InvalidCounterparty",
+      );
+
+      // And an ordinary escrow's payee is fixed at creation, so there is
+      // nothing to select.
+      const plain = await initialize();
+      await expectAnchorError(
+        selectCounterparty(plain, attacker.publicKey),
+        "WrongAgreementType",
+      );
+    });
+  });
+
   describe("chain-data reconstruction", () => {
     // `@gwap/ppv-indexer` rebuilds an agreement's history from RPC alone, and
     // its unit tests run against fixtures this repository writes. That proves

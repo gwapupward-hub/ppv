@@ -7,6 +7,8 @@ import {
   encodeBase58,
   type AgreementState,
   type AgreementType,
+  type EscrowAgreementCreatedEvent,
+  type EscrowCounterpartyAssignedEvent,
   type EscrowDisputeOpenedEvent,
   type EscrowDisputeResolvedEvent,
   type EscrowProofApprovedEvent,
@@ -258,6 +260,15 @@ export function encodeEscrowEvent(event: PpvEscrowEvent): Uint8Array {
         optionalPubkey(event.proof),
         milestoneState(event.previousState),
         milestoneState(event.newState),
+        state(event.agreementState),
+        i64(event.timestamp),
+      ]);
+      break;
+    case "CounterpartyAssigned":
+      body = Buffer.concat([
+        pubkey(event.agreement),
+        pubkey(event.creator),
+        pubkey(event.counterparty),
         state(event.agreementState),
         i64(event.timestamp),
       ]);
@@ -530,5 +541,22 @@ export const MILESTONE_FIXTURE: readonly PpvEscrowEvent[] = [
     timestamp: 1_700_000_150,
   },
 ];
+
+/** A bounty naming its winner after the money was already escrowed. */
+export const CREATED_FIXTURE: EscrowAgreementCreatedEvent = (() => {
+  const event = LIFECYCLE_FIXTURE[0];
+  if (event?.name !== "AgreementCreated") throw new Error("fixture order changed");
+  return event;
+})();
+
+export const COUNTERPARTY_ASSIGNED_FIXTURE: EscrowCounterpartyAssignedEvent = {
+  program: "ppv_escrow",
+  name: "CounterpartyAssigned",
+  agreement: AGREEMENT,
+  creator: BUYER,
+  counterparty: SELLER,
+  agreementState: "Funded",
+  timestamp: 1_700_000_110,
+};
 
 export const FIXTURE_ADDRESSES = { BUYER, SELLER, MINT, VAULT, AGREEMENT, SELLER_ATA, PROOF, BUYER_ATA, MILESTONE_A, MILESTONE_B };

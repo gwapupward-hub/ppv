@@ -44,6 +44,10 @@ pub enum EscrowError {
     DestinationNotAParty,
     #[msg("This instruction does not apply to this agreement type")]
     WrongAgreementType,
+    #[msg("This agreement's counterparty has already been assigned")]
+    CounterpartyAlreadyAssigned,
+    #[msg("This agreement has no counterparty yet")]
+    CounterpartyNotAssigned,
     #[msg("Milestone amounts must not exceed the agreement amount")]
     MilestoneTotalMismatch,
     #[msg("A milestone contract must be fully scheduled before it is funded")]

@@ -69,6 +69,43 @@ impl Agreement {
         self.counterparty
     }
 
+    /// Whether the wallet that will be paid is known yet. Only a bounty can
+    /// exist without one, and only before it is selected.
+    pub fn has_counterparty(&self) -> bool {
+        self.counterparty != Pubkey::default()
+    }
+
+    /// A bounty escrows before it knows who will be paid — that is the point:
+    /// applicants can see the money exists before doing the work. The sponsor
+    /// names the winner once, and from that moment the payee is frozen exactly
+    /// as it is for every other agreement.
+    pub fn require_counterparty_assignable(&self, signer: &Pubkey) -> Result<()> {
+        require_keys_eq!(*signer, self.creator, EscrowError::NotTheBuyer);
+        require!(
+            self.agreement_type == AgreementType::Bounty,
+            EscrowError::WrongAgreementType
+        );
+        require!(
+            !self.has_counterparty(),
+            EscrowError::CounterpartyAlreadyAssigned
+        );
+        require!(
+            matches!(self.state, AgreementState::Open | AgreementState::Funded),
+            EscrowError::BadState
+        );
+        Ok(())
+    }
+
+    pub fn record_counterparty(&mut self, winner: Pubkey, now: i64) -> Result<()> {
+        require!(
+            winner != Pubkey::default() && winner != self.creator,
+            EscrowError::InvalidCounterparty
+        );
+        self.counterparty = winner;
+        self.state_changed_at = now;
+        Ok(())
+    }
+
     /// True for agreements whose money is released in tranches rather than in
     /// one payment at the end.
     pub fn is_milestone_contract(&self) -> bool {
@@ -116,6 +153,13 @@ impl Agreement {
     }
 
     pub fn require_completable(&self, signer: &Pubkey) -> Result<()> {
+        // Nobody can sign as the default address, so an unselected bounty is
+        // already unreachable here. Saying so explicitly costs nothing and
+        // means a reader does not have to derive it.
+        require!(
+            self.has_counterparty(),
+            EscrowError::CounterpartyNotAssigned
+        );
         require_keys_eq!(*signer, self.counterparty, EscrowError::NotTheSeller);
         require!(self.state == AgreementState::Funded, EscrowError::BadState);
         // A milestone contract has no single moment of completion; each
@@ -140,6 +184,10 @@ impl Agreement {
     /// permissionless crank, because a third party has no business touching
     /// custody in the kernel.
     pub fn require_settleable(&self, signer: &Pubkey) -> Result<()> {
+        require!(
+            self.has_counterparty(),
+            EscrowError::CounterpartyNotAssigned
+        );
         require!(self.is_party(signer), EscrowError::NotAParty);
         require!(
             self.state == AgreementState::Completed,
@@ -274,6 +322,10 @@ impl Agreement {
     /// seller because it is the seller's claim being surrendered; a buyer who
     /// wants its money back over the seller's objection has to dispute.
     pub fn require_refundable(&self, signer: &Pubkey) -> Result<()> {
+        require!(
+            self.has_counterparty(),
+            EscrowError::CounterpartyNotAssigned
+        );
         require_keys_eq!(*signer, self.counterparty, EscrowError::NotTheSeller);
         require!(
             matches!(
@@ -640,6 +692,61 @@ mod tests {
         // the record.
         assert!(agreement.require_proof_submittable(&buyer).is_ok());
         assert!(agreement.require_proof_submittable(&seller).is_ok());
+    }
+
+    #[test]
+    fn a_bounty_names_its_winner_once_and_never_again() {
+        let (sponsor, winner, other) = parties();
+        let mut bounty = open(sponsor, Pubkey::default());
+        bounty.agreement_type = AgreementType::Bounty;
+
+        // Nothing can be completed, settled or refunded while nobody is named.
+        assert!(!bounty.has_counterparty());
+        assert!(bounty.require_completable(&winner).is_err());
+        assert!(bounty.require_settleable(&sponsor).is_err());
+        assert!(bounty.require_refundable(&winner).is_err());
+
+        // Only the sponsor selects, and not itself.
+        assert!(bounty.require_counterparty_assignable(&winner).is_err());
+        assert!(bounty.require_counterparty_assignable(&sponsor).is_ok());
+        assert!(bounty.record_counterparty(sponsor, 20).is_err());
+        assert!(bounty.record_counterparty(Pubkey::default(), 20).is_err());
+
+        bounty.record_counterparty(winner, 20).unwrap();
+        assert_eq!(bounty.counterparty, winner);
+
+        // Once named, the payee is as frozen as any other agreement's. The
+        // sponsor cannot re-choose after seeing what a settlement would do.
+        assert!(bounty.require_counterparty_assignable(&sponsor).is_err());
+        assert!(
+            bounty.record_counterparty(other, 30).is_ok(),
+            "the guard, not the setter, is what forbids it"
+        );
+    }
+
+    #[test]
+    fn only_a_bounty_may_start_without_a_payee() {
+        let (buyer, seller, _) = parties();
+        let mut escrow = open(buyer, seller);
+        assert!(escrow.require_counterparty_assignable(&buyer).is_err());
+
+        escrow.agreement_type = AgreementType::MilestoneContract;
+        assert!(escrow.require_counterparty_assignable(&buyer).is_err());
+    }
+
+    #[test]
+    fn a_bounty_can_be_funded_before_its_winner_is_known() {
+        let (sponsor, winner, _) = parties();
+        let mut bounty = open(sponsor, Pubkey::default());
+        bounty.agreement_type = AgreementType::Bounty;
+
+        // The point of the exception: applicants can see the money exists
+        // before doing the work.
+        assert!(bounty.require_fundable(&sponsor).is_ok());
+        bounty.record_funded(20);
+        assert!(bounty.require_counterparty_assignable(&sponsor).is_ok());
+        bounty.record_counterparty(winner, 30).unwrap();
+        assert!(bounty.require_completable(&winner).is_ok());
     }
 
     #[test]

@@ -13,6 +13,7 @@ import {
 import { encodePpvEvent } from "./helpers/ppv-events.js";
 import {
   CANCELLED_FIXTURE,
+  COUNTERPARTY_ASSIGNED_FIXTURE,
   DISPUTE_FIXTURE,
   LIFECYCLE_FIXTURE,
   MILESTONE_FIXTURE,
@@ -33,6 +34,7 @@ test("every escrow event round-trips through the decoder", () => {
     ...DISPUTE_FIXTURE,
     CANCELLED_FIXTURE,
     ...MILESTONE_FIXTURE,
+    COUNTERPARTY_ASSIGNED_FIXTURE,
   ];
   for (const fixture of all) {
     assert.deepEqual(decodeEscrowEventData(encodeEscrowEvent(fixture)), fixture);

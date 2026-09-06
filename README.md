@@ -15,7 +15,8 @@ implemented as three separately deployable Solana programs.
   `approve_proof` and `reject_proof` for agreement-bound evidence; and `cancel`,
   `open_dispute`, `resolve_dispute` and `refund` for the ways an agreement ends
   other than payment; and milestone contracts, which escrow one budget and
-  release it in tranches. **Local validator only.**
+  release it in tranches; and bounties, which escrow before the winner is known.
+  **Local validator only.**
 - `@gwap/ppv-sdk`: frozen canonicalization v1 and SHA-256 helpers shared by
   every client; the versioned reputation contracts (`ReputationEventV1`,
   `PpvReceiptV1`, seal states, credential eligibility); decoders for the
@@ -27,7 +28,7 @@ implemented as three separately deployable Solana programs.
   endpoint and the SDK — no GWAP database and no privileged access. Run it with
   `npm run replay`.
 
-Not included: invoices, third-party arbitration, protocol fees,
+Not included: third-party arbitration, protocol fees,
 document encryption, GNS authority, or any mainnet deployment. Disputes are
 resolved by concession only — the party who would lose signs away its own claim
 — because an arbiter is a trusted third party and the protocol has not yet
@@ -118,6 +119,7 @@ manifest. Never deploy these placeholder IDs.
 - [Receipts](docs/receipts.md)
 - [Indexing](docs/indexing.md)
 - [Contracts and terms](docs/contracts.md)
+- [Invoices and bounties](docs/compositions.md)
 - [Escrow security model and attack matrix](docs/security-model.md)
 - [Threat model](docs/threat-model.md)
 - [Canonicalization v1](docs/canonicalization-v1.md)

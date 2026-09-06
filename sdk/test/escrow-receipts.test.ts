@@ -11,6 +11,8 @@ import {
 } from "../src/index.js";
 import {
   CANCELLED_FIXTURE,
+  COUNTERPARTY_ASSIGNED_FIXTURE,
+  CREATED_FIXTURE,
   DISPUTE_FIXTURE,
   FIXTURE_ADDRESSES,
   LIFECYCLE_FIXTURE,
@@ -567,5 +569,56 @@ test("a milestone step for a tranche that was never created is refused", () => {
   assert.throws(
     () => reconstructAgreementLifecycle([created, funded, orphan]),
     /which was never created/,
+  );
+});
+
+test("a bounty's history reports the payee it ended with", () => {
+  // A bounty is created without one so applicants can see the money exists
+  // before doing the work; the sponsor names the winner afterwards.
+  const anonymous = { ...CREATED_FIXTURE, counterparty: addressFromByte(0) };
+  const receipts = [
+    escrowReceiptFromEvent(envelope(anonymous, 0)),
+    escrowReceiptFromEvent(envelope(LIFECYCLE_FIXTURE[1]!, 1)),
+    escrowReceiptFromEvent({
+      event: COUNTERPARTY_ASSIGNED_FIXTURE,
+      programId: PROGRAM_ID,
+      transactionSignature: signatureFromByte(180),
+      slot: 1_001,
+      instructionIndex: 0,
+      innerInstructionIndex: 0,
+      blockTime: COUNTERPARTY_ASSIGNED_FIXTURE.timestamp,
+    }),
+  ];
+
+  const lifecycle = reconstructAgreementLifecycle(receipts);
+  assert.equal(lifecycle.seller, FIXTURE_ADDRESSES.SELLER);
+  assert.equal(lifecycle.state, "Funded");
+  // Naming a payee is not a step in the lifecycle.
+  assert.equal(lifecycle.receipts.filter((r) => r.kind === "transition").length, 2);
+});
+
+test("a payee assigned twice is refused", () => {
+  const receipts = [
+    escrowReceiptFromEvent(envelope(LIFECYCLE_FIXTURE[0]!, 0)),
+    escrowReceiptFromEvent(envelope(LIFECYCLE_FIXTURE[1]!, 1)),
+  ];
+  const assign = (index: number, counterparty: string) =>
+    escrowReceiptFromEvent({
+      event: { ...COUNTERPARTY_ASSIGNED_FIXTURE, counterparty },
+      programId: PROGRAM_ID,
+      transactionSignature: signatureFromByte(190 + index),
+      slot: 1_001,
+      instructionIndex: 0,
+      innerInstructionIndex: index,
+      blockTime: COUNTERPARTY_ASSIGNED_FIXTURE.timestamp,
+    });
+  assert.throws(
+    () =>
+      reconstructAgreementLifecycle([
+        ...receipts,
+        assign(0, FIXTURE_ADDRESSES.SELLER),
+        assign(1, addressFromByte(41)),
+      ]),
+    /assigned more than once/,
   );
 });

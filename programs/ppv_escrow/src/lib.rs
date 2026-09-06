@@ -71,6 +71,17 @@ pub mod ppv_escrow {
         instructions::settle::handle_settle(ctx)
     }
 
+    /// Names the wallet a bounty will pay. Sponsor-only, once, and only for a
+    /// bounty — the one field of an agreement not fixed at creation, because a
+    /// bounty escrows before it knows who wins. From selection onward the payee
+    /// is as frozen as it is everywhere else.
+    pub fn select_counterparty(
+        ctx: Context<SelectCounterparty>,
+        counterparty: Pubkey,
+    ) -> Result<()> {
+        instructions::select_counterparty::handle_select_counterparty(ctx, counterparty)
+    }
+
     /// Adds a tranche to a milestone contract's schedule. Buyer-only and
     /// `Open`-only: the plan is fixed before the money arrives, so the buyer
     /// funds a schedule it has seen in full and the seller knows every tranche

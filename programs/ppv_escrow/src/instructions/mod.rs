@@ -8,6 +8,7 @@ pub mod milestone;
 pub mod open_dispute;
 pub mod refund;
 pub mod resolve_dispute;
+pub mod select_counterparty;
 pub mod settle;
 pub mod submit_proof;
 
@@ -23,5 +24,6 @@ pub use milestone::*;
 pub use open_dispute::*;
 pub use refund::*;
 pub use resolve_dispute::*;
+pub use select_counterparty::*;
 pub use settle::*;
 pub use submit_proof::*;

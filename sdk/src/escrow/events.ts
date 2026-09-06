@@ -41,6 +41,7 @@ export const PPV_ESCROW_EVENT_NAMES = [
   "MilestoneApproved",
   "MilestoneRejected",
   "MilestoneSettled",
+  "CounterpartyAssigned",
 ] as const;
 export type PpvEscrowEventName = (typeof PPV_ESCROW_EVENT_NAMES)[number];
 
@@ -200,6 +201,14 @@ export type EscrowMilestoneSettledEvent = MilestoneTransition & {
   proof: string | null;
 };
 
+/** A bounty's payee, named after the fact. Cannot repeat for one agreement. */
+export type EscrowCounterpartyAssignedEvent = Base & {
+  name: "CounterpartyAssigned";
+  creator: string;
+  counterparty: string;
+  agreementState: AgreementState;
+};
+
 export type PpvEscrowEvent =
   | EscrowAgreementCreatedEvent
   | EscrowAgreementFundedEvent
@@ -216,7 +225,8 @@ export type PpvEscrowEvent =
   | EscrowMilestoneSubmittedEvent
   | EscrowMilestoneApprovedEvent
   | EscrowMilestoneRejectedEvent
-  | EscrowMilestoneSettledEvent;
+  | EscrowMilestoneSettledEvent
+  | EscrowCounterpartyAssignedEvent;
 
 export function escrowEventDiscriminatorHex(name: PpvEscrowEventName): string {
   return Buffer.from(anchorDiscriminator("event", name)).toString("hex");
@@ -448,6 +458,17 @@ export function decodeEscrowEventData(data: Uint8Array): PpvEscrowEvent | null {
         proof: reader.optionalPubkey(),
         previousState: reader.milestoneState(),
         newState: reader.milestoneState(),
+        agreementState: reader.state(),
+        timestamp: reader.i64(),
+      };
+      break;
+    case "CounterpartyAssigned":
+      event = {
+        program: "ppv_escrow",
+        name: "CounterpartyAssigned",
+        agreement: reader.pubkey(),
+        creator: reader.pubkey(),
+        counterparty: reader.pubkey(),
         agreementState: reader.state(),
         timestamp: reader.i64(),
       };

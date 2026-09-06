@@ -58,3 +58,14 @@ pub struct AgreementCancelled {
     pub new_state: AgreementState,
     pub timestamp: i64,
 }
+
+/// A bounty's payee, named after the fact. Emitted once per agreement at most:
+/// the field cannot be reassigned, so this event cannot repeat.
+#[event]
+pub struct CounterpartyAssigned {
+    pub agreement: Pubkey,
+    pub creator: Pubkey,
+    pub counterparty: Pubkey,
+    pub agreement_state: AgreementState,
+    pub timestamp: i64,
+}

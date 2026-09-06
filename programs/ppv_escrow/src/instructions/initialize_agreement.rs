@@ -55,8 +55,12 @@ pub fn handle_initialize_agreement(
 ) -> Result<()> {
     let creator = ctx.accounts.creator.key();
 
+    // A bounty may start without a payee: applicants need to see the money
+    // exists before doing the work, and the sponsor names the winner later. No
+    // other type may, and none may name the creator.
+    let unassigned_allowed = agreement_type == AgreementType::Bounty;
     require!(
-        counterparty != Pubkey::default() && counterparty != creator,
+        (counterparty != Pubkey::default() || unassigned_allowed) && counterparty != creator,
         EscrowError::InvalidCounterparty
     );
     require!(amount > 0, EscrowError::InvalidAmount);
@@ -69,7 +73,7 @@ pub fn handle_initialize_agreement(
     require!(
         matches!(
             agreement_type,
-            AgreementType::Escrow | AgreementType::MilestoneContract
+            AgreementType::Escrow | AgreementType::MilestoneContract | AgreementType::Bounty
         ),
         EscrowError::UnsupportedAgreementType
     );

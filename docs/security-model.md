@@ -93,6 +93,11 @@ cases in `programs/ppv_escrow/src/state/agreement.rs`.
 | Use another agreement's tranche | FAIL | ✓ |
 | Work a tranche while disputed | FAIL | ✓ |
 | Refund a milestone contract midway | PASS — returns only the unearned tranches | ✓ |
+| Fund a bounty before its winner is known | PASS | ✓ |
+| Complete, settle or refund a bounty with no winner named | FAIL | ✓ |
+| Name a bounty's winner twice | FAIL | ✓ |
+| Name a winner as anyone but the sponsor, or name the sponsor | FAIL | ✓ |
+| Start a non-bounty agreement with no payee | FAIL | ✓ |
 | Observe an event from a failed settlement | FAIL | ✓ |
 | Take a donated surplus along with settlement | FAIL | ✓ |
 
@@ -126,6 +131,8 @@ it is a review step, not a committed change.
   deliberate trade: an arbiter is a trusted third party, and the protocol has
   not yet decided who may be one or under what policy. Phase 13, behind the
   arbiter policy gate, is where splits and third-party judgement arrive.
+- **A bounty sponsor who never selects.** The money stays in the vault. This is
+  the same liveness gap as the one below, reached a different way.
 - **No expiry.** Nothing forces an agreement forward. A seller who never marks
   work complete leaves tokens in the vault indefinitely. Time-based release is a
   design decision with its own attack surface and is deferred, not forgotten.

@@ -12,6 +12,7 @@ export {
   type CanonicalValue,
 } from "./canonical.js";
 export * from "./commerce/index.js";
+export * from "./compositions/index.js";
 export * from "./escrow/index.js";
 export * from "./programs.js";
 export * from "./reputation/index.js";

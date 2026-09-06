@@ -58,6 +58,7 @@ transition committed.
 | `MilestoneApproved` | `approve_milestone` | the tranche's |
 | `MilestoneRejected` | `reject_milestone` | the tranche's, back to `Pending` |
 | `MilestoneSettled` | `settle_milestone` | the tranche's; the payment is a `SettlementExecuted` beside it |
+| `CounterpartyAssigned` | `select_counterparty` | none — a bounty naming its payee |
 
 ```rust
 #[event]
@@ -137,8 +138,10 @@ gets a new event name and the old one keeps its layout until consumers migrate.
 
 ## Later phases
 
-`InvoiceCreated` and `InvoicePaid` arrive with the instructions that emit them.
-There is deliberately no `MilestoneFunded`: the budget is escrowed once for the
+There are deliberately no `InvoiceCreated` or `InvoicePaid` events: an invoice
+is a document carried by an ordinary escrow, and its creation and payment are
+already `AgreementCreated` and `SettlementExecuted`. Nor is there a
+`MilestoneFunded`: the budget is escrowed once for the
 whole contract, so no tranche is ever funded on its own. Each is added to the
 SDK decoder and the reputation contracts in the same change as the instruction,
 never ahead of it.

@@ -44,6 +44,7 @@ export const ESCROW_RECEIPT_ACTIONS = {
   MilestoneApproved: "MILESTONE_APPROVED",
   MilestoneRejected: "MILESTONE_REJECTED",
   MilestoneSettled: "MILESTONE_SETTLED",
+  CounterpartyAssigned: "COUNTERPARTY_ASSIGNED",
 } as const;
 
 /**
@@ -249,6 +250,23 @@ function buildReceipt(envelope: EscrowEventEnvelope): Omit<PpvEscrowReceiptV1, "
         milestoneIndex: null,
         previousState: event.previousState,
         newState: event.newState,
+      };
+    case "CounterpartyAssigned":
+      return {
+        ...common,
+        agreementId: 0n,
+        buyer: event.creator,
+        seller: event.counterparty,
+        actor: event.creator,
+        mint: null,
+        amount: null,
+        destination: null,
+        proof: null,
+        proofIndex: null,
+        milestone: null,
+        milestoneIndex: null,
+        previousState: event.agreementState,
+        newState: event.agreementState,
       };
     case "MilestoneCreated":
       return {
@@ -707,6 +725,16 @@ export function reconstructAgreementLifecycle(
     }
   }
 
+  // A bounty is created without a payee and names one later, so the seller a
+  // history reports is the one it ended with, not the placeholder it opened on.
+  const assigned = sortedAnnotations.filter(
+    (receipt) => receipt.action === "COUNTERPARTY_ASSIGNED",
+  );
+  if (assigned.length > 1) {
+    throw new ReceiptError("a payee was assigned more than once");
+  }
+  const seller = assigned[0]?.seller ?? created.seller;
+
   const proofs = proofRecords(sortedAnnotations);
   const milestones = milestoneRecords(sortedAnnotations);
   const scheduled = milestones.reduce((total, record) => total + record.amount, 0n);
@@ -727,7 +755,7 @@ export function reconstructAgreementLifecycle(
     agreement,
     agreementId: created.agreementId,
     buyer: created.buyer,
-    seller: created.seller,
+    seller,
     mint: created.mint as string,
     state,
     fundedAmount: funded?.amount ?? null,

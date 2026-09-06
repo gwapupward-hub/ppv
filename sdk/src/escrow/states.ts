@@ -32,6 +32,7 @@ export type AgreementType = (typeof AGREEMENT_TYPES)[number];
 export const IMPLEMENTED_AGREEMENT_TYPES: readonly AgreementType[] = [
   "Escrow",
   "MilestoneContract",
+  "Bounty",
 ];
 
 export const PROOF_STATUSES = ["Submitted", "Approved", "Rejected"] as const;
@@ -103,6 +104,7 @@ export function disputeOutcomeFromIndex(index: number): DisputeOutcome {
 }
 
 export const ESCROW_ACTIONS = [
+  "select_counterparty",
   "fund",
   "mark_completed",
   "settle",
@@ -117,6 +119,9 @@ export type EscrowAction = (typeof ESCROW_ACTIONS)[number];
 const TRANSITIONS: Readonly<
   Record<EscrowAction, { from: readonly AgreementState[]; to: readonly AgreementState[] }>
 > = {
+  // The one action that does not move the agreement: it fills in the payee a
+  // bounty was created without.
+  select_counterparty: { from: ["Open", "Funded"], to: ["Open", "Funded"] },
   fund: { from: ["Open"], to: ["Funded"] },
   mark_completed: { from: ["Funded"], to: ["Completed"] },
   settle: { from: ["Completed"], to: ["Settled"] },
@@ -132,6 +137,7 @@ const TRANSITIONS: Readonly<
 export const ACTION_SIGNER: Readonly<
   Record<EscrowAction, "buyer" | "seller" | "either_party" | "conceding_party">
 > = {
+  select_counterparty: "buyer",
   fund: "buyer",
   mark_completed: "seller",
   settle: "either_party",
