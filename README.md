@@ -111,6 +111,7 @@ manifest. Never deploy these placeholder IDs.
 
 ## Documentation
 
+- [Build status and what is blocked](docs/phase-status.md)
 - [Architecture](docs/architecture.md)
 - [State machines](docs/state-machines.md)
 - [Invariants](docs/invariants.md)
