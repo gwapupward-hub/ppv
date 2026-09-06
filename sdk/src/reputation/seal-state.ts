@@ -13,8 +13,10 @@ export type SealFacts = {
   proofRevoked: boolean;
   /** Both parties signed the current version, or a milestone was approved. */
   counterpartyConfirmed: boolean;
-  /** Value settled: settlement completed, invoice paid, or milestone approved and released. */
+  /** Value settled: settlement completed, invoice paid, or a milestone released. */
   settled: boolean;
+  /** Money went back to the buyer. Never implies settlement. */
+  refunded: boolean;
   disputeOpen: boolean;
   disputeResolved: boolean;
 };
@@ -24,6 +26,7 @@ export const EMPTY_SEAL_FACTS: SealFacts = {
   proofRevoked: false,
   counterpartyConfirmed: false,
   settled: false,
+  refunded: false,
   disputeOpen: false,
   disputeResolved: false,
 };
@@ -47,14 +50,21 @@ export function deriveSealFacts(
       case "proof.revoked":
         facts.proofRevoked = true;
         break;
+      // Confirmation means the *other* party accepted something. Approving a
+      // proof or a milestone is that; executing a signed agreement is that.
       case "agreement.executed":
       case "milestone.approved":
+      case "proof.approved":
         facts.counterpartyConfirmed = true;
         break;
       case "invoice.paid":
       case "settlement.completed":
+      case "milestone.settled":
         facts.counterpartyConfirmed = true;
         facts.settled = true;
+        break;
+      case "agreement.refunded":
+        facts.refunded = true;
         break;
       case "dispute.opened":
         if (!lastDisputeOpened || event.occurredAt > lastDisputeOpened) lastDisputeOpened = event.occurredAt;
@@ -62,7 +72,29 @@ export function deriveSealFacts(
       case "dispute.resolved":
         if (!lastDisputeResolved || event.occurredAt > lastDisputeResolved) lastDisputeResolved = event.occurredAt;
         break;
-      default:
+
+      // Everything below is deliberately not seal-relevant, and the switch is
+      // exhaustive so that adding a reputation event type forces this decision
+      // to be made rather than silently defaulting to "ignore".
+      //
+      // `work.completed` is the seller's own claim that it finished. A
+      // credential that treated it as confirmation would let one party stamp
+      // itself. `proof.rejected` and `milestone.rejected` withhold confirmation
+      // rather than granting it, and there is nothing to un-set: only an
+      // approval ever sets the flag. The rest record that something was created
+      // or proposed, which is not yet anyone agreeing to it.
+      case "proof.created":
+      case "proof.submitted":
+      case "proof.rejected":
+      case "agreement.created":
+      case "agreement.revised":
+      case "agreement.signed":
+      case "agreement.cancelled":
+      case "escrow.funded":
+      case "milestone.created":
+      case "milestone.delivered":
+      case "milestone.rejected":
+      case "work.completed":
         break;
     }
   }
