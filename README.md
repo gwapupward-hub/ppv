@@ -20,8 +20,9 @@ implemented as three separately deployable Solana programs.
   every client; the versioned reputation contracts (`ReputationEventV1`,
   `PpvReceiptV1`, seal states, credential eligibility); decoders for the
   programs' `emit_cpi!` events; and dependency-free PDA derivation, account
-  decoding, and deterministic receipt reconstruction for the escrow kernel.
-  PPV records facts; GwapScore interprets them.
+  decoding, and deterministic receipt reconstruction for the escrow kernel; and
+  the binding that checks a funded escrow against the negotiated contract it
+  cites. PPV records facts; GwapScore interprets them.
 - `@gwap/ppv-indexer`: rebuilds an agreement's whole lifecycle from a public RPC
   endpoint and the SDK — no GWAP database and no privileged access. Run it with
   `npm run replay`.
@@ -116,6 +117,7 @@ manifest. Never deploy these placeholder IDs.
 - [Protocol events](docs/events.md)
 - [Receipts](docs/receipts.md)
 - [Indexing](docs/indexing.md)
+- [Contracts and terms](docs/contracts.md)
 - [Escrow security model and attack matrix](docs/security-model.md)
 - [Threat model](docs/threat-model.md)
 - [Canonicalization v1](docs/canonicalization-v1.md)

@@ -115,6 +115,15 @@ Open --fund()--> Funded --mark_completed()--> Completed --settle()--> Settled
 Negotiation state and custody state are never merged into one enum. See
 [state-machines.md](state-machines.md).
 
+## Contracts and custody
+
+`ppv_escrow` never reads a `ppv_commerce` account. The two are bound by a
+cryptographic commitment — the same `terms_hash` on both — which
+`verifyTermsBinding` re-checks along with the contract's execution state,
+parties, and signatures. Verifying it on chain would mean coupling custody to
+another program's layout and upgrade authority for no gain the commitment does
+not already provide. See [contracts.md](contracts.md).
+
 ## Reconstruction
 
 ```text
