@@ -15,19 +15,25 @@ import {
 } from "../src/index.js";
 import { addressFromByte, hexFromByte } from "./helpers/escrow-events.js";
 
+const pubkey = (value: string) => Buffer.from(decodeBase58(value));
+const u32 = (value: number) => {
+  const out = Buffer.alloc(4);
+  out.writeUInt32LE(value);
+  return out;
+};
+const u64 = (value: bigint) => {
+  const out = Buffer.alloc(8);
+  out.writeBigUInt64LE(value);
+  return out;
+};
+const i64 = (value: number) => {
+  const out = Buffer.alloc(8);
+  out.writeBigInt64LE(BigInt(value));
+  return out;
+};
+
 /** Mirrors `Agreement` in programs/ppv_escrow/src/state/agreement.rs. */
 function encodeAgreementAccount(account: AgreementAccount): Uint8Array {
-  const pubkey = (value: string) => Buffer.from(decodeBase58(value));
-  const u64 = (value: bigint) => {
-    const out = Buffer.alloc(8);
-    out.writeBigUInt64LE(value);
-    return out;
-  };
-  const i64 = (value: number) => {
-    const out = Buffer.alloc(8);
-    out.writeBigInt64LE(BigInt(value));
-    return out;
-  };
   return Uint8Array.from(
     Buffer.concat([
       Buffer.from(AGREEMENT_ACCOUNT_DISCRIMINATOR),
@@ -53,7 +59,11 @@ function encodeAgreementAccount(account: AgreementAccount): Uint8Array {
       pubkey(account.settlementProof),
       pubkey(account.disputeOpenedBy),
       i64(account.stateChangedAt),
-      Buffer.alloc(64),
+      u32(account.milestoneCount),
+      u32(account.milestonesSettled),
+      u64(account.milestoneTotal),
+      u64(account.settledTotal),
+      Buffer.alloc(40),
     ]),
   );
 }
@@ -80,6 +90,10 @@ const FIXTURE: AgreementAccount = {
   settlementProof: addressFromByte(8),
   disputeOpenedBy: addressFromByte(0),
   stateChangedAt: 0,
+  milestoneCount: 0,
+  milestonesSettled: 0,
+  milestoneTotal: 0n,
+  settledTotal: 100_000_000n,
 };
 
 test("the account discriminator is the anchor derivation", () => {
@@ -110,17 +124,6 @@ test("a truncated or over-long account is refused", () => {
 });
 
 function encodeProofAccount(account: ProofAccount): Uint8Array {
-  const pubkey = (value: string) => Buffer.from(decodeBase58(value));
-  const u32 = (value: number) => {
-    const out = Buffer.alloc(4);
-    out.writeUInt32LE(value);
-    return out;
-  };
-  const i64 = (value: number) => {
-    const out = Buffer.alloc(8);
-    out.writeBigInt64LE(BigInt(value));
-    return out;
-  };
   return Uint8Array.from(
     Buffer.concat([
       Buffer.from(PROOF_ACCOUNT_DISCRIMINATOR),

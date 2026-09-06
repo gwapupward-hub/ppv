@@ -47,8 +47,17 @@ pub struct Agreement {
     /// are; adding one field per state would duplicate the event log on chain,
     /// which is the thing receipts exist to avoid.
     pub state_changed_at: i64,
+    /// How many milestones exist, and the index the next one gets.
+    pub milestone_count: u32,
+    /// How many have settled. The agreement itself settles when the last does.
+    pub milestones_settled: u32,
+    /// Sum of the milestone amounts created so far. Must equal `amount` before
+    /// a milestone contract can be funded.
+    pub milestone_total: u64,
+    /// How much has left the vault for this agreement, by any path.
+    pub settled_total: u64,
     /// Reserved account space for compatible schema evolution.
-    pub reserved: [u8; 64],
+    pub reserved: [u8; 40],
 }
 
 impl Agreement {
@@ -58,6 +67,31 @@ impl Agreement {
 
     pub fn seller(&self) -> Pubkey {
         self.counterparty
+    }
+
+    /// True for agreements whose money is released in tranches rather than in
+    /// one payment at the end.
+    pub fn is_milestone_contract(&self) -> bool {
+        self.agreement_type == AgreementType::MilestoneContract
+    }
+
+    /// What the vault still owes this agreement. Every payout path pays this,
+    /// not `amount`: once milestones have released part of the escrow, the
+    /// remainder is all there is to settle or return.
+    pub fn remaining(&self) -> u64 {
+        self.amount.saturating_sub(self.settled_total)
+    }
+
+    pub fn record_payout(&mut self, paid: u64) -> Result<()> {
+        self.settled_total = self
+            .settled_total
+            .checked_add(paid)
+            .ok_or(EscrowError::Overflow)?;
+        require!(
+            self.settled_total <= self.amount,
+            EscrowError::CustodyMismatch
+        );
+        Ok(())
     }
 
     pub fn is_party(&self, signer: &Pubkey) -> bool {
@@ -84,6 +118,12 @@ impl Agreement {
     pub fn require_completable(&self, signer: &Pubkey) -> Result<()> {
         require_keys_eq!(*signer, self.counterparty, EscrowError::NotTheSeller);
         require!(self.state == AgreementState::Funded, EscrowError::BadState);
+        // A milestone contract has no single moment of completion; each
+        // milestone is submitted, approved and settled on its own.
+        require!(
+            !self.is_milestone_contract(),
+            EscrowError::WrongAgreementType
+        );
         Ok(())
     }
 
@@ -106,6 +146,63 @@ impl Agreement {
             EscrowError::BadState
         );
         Ok(())
+    }
+
+    /// Milestones are planned before the money arrives, so the buyer funds a
+    /// schedule it has already seen in full and the seller knows every tranche
+    /// is covered.
+    pub fn require_milestone_creatable(&self, signer: &Pubkey) -> Result<()> {
+        require_keys_eq!(*signer, self.creator, EscrowError::NotTheBuyer);
+        require!(
+            self.is_milestone_contract(),
+            EscrowError::WrongAgreementType
+        );
+        require!(self.state == AgreementState::Open, EscrowError::BadState);
+        Ok(())
+    }
+
+    pub fn record_milestone(&mut self, amount: u64) -> Result<u32> {
+        let index = self.milestone_count;
+        self.milestone_count = self
+            .milestone_count
+            .checked_add(1)
+            .ok_or(EscrowError::Overflow)?;
+        self.milestone_total = self
+            .milestone_total
+            .checked_add(amount)
+            .ok_or(EscrowError::Overflow)?;
+        // The schedule can never promise more than the escrow will hold.
+        require!(
+            self.milestone_total <= self.amount,
+            EscrowError::MilestoneTotalMismatch
+        );
+        Ok(index)
+    }
+
+    /// Milestone work happens against escrowed money, and stops while disputed.
+    pub fn require_milestone_active(&self) -> Result<()> {
+        require!(
+            self.is_milestone_contract(),
+            EscrowError::WrongAgreementType
+        );
+        require!(self.state == AgreementState::Funded, EscrowError::BadState);
+        Ok(())
+    }
+
+    /// Records a settled milestone, and reports whether it was the last one —
+    /// the moment the agreement itself is finished.
+    pub fn record_milestone_settled(&mut self, paid: u64, now: i64) -> Result<bool> {
+        self.record_payout(paid)?;
+        self.milestones_settled = self
+            .milestones_settled
+            .checked_add(1)
+            .ok_or(EscrowError::Overflow)?;
+        let finished = self.milestones_settled == self.milestone_count;
+        if finished {
+            self.state = AgreementState::Settled;
+            self.settled_at = now;
+        }
+        Ok(finished)
     }
 
     /// The window in which the agreement still accepts facts about itself.
@@ -259,7 +356,11 @@ mod tests {
             settlement_proof: Pubkey::default(),
             dispute_opened_by: Pubkey::default(),
             state_changed_at: 0,
-            reserved: [0; 64],
+            milestone_count: 0,
+            milestones_settled: 0,
+            milestone_total: 0,
+            settled_total: 0,
+            reserved: [0; 40],
         }
     }
 

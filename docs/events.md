@@ -53,6 +53,11 @@ transition committed.
 | `DisputeOpened` | `open_dispute` | `Funded`/`Completed` → `Disputed` |
 | `DisputeResolved` | `resolve_dispute` | none — the custody event beside it carries the transition |
 | `RefundExecuted` | `refund`, `resolve_dispute` | → `Refunded` |
+| `MilestoneCreated` | `create_milestone` | none — reports the agreement state it saw |
+| `MilestoneSubmitted` | `submit_milestone` | the tranche's, not the agreement's |
+| `MilestoneApproved` | `approve_milestone` | the tranche's |
+| `MilestoneRejected` | `reject_milestone` | the tranche's, back to `Pending` |
+| `MilestoneSettled` | `settle_milestone` | the tranche's; the payment is a `SettlementExecuted` beside it |
 
 ```rust
 #[event]
@@ -96,9 +101,15 @@ state — a fork the program cannot produce — so `DisputeResolved` names the
 resulting state instead and carries the reason and the concession.
 
 The same principle keeps the custody events shared across paths: a settlement
-reached through a dispute emits the same `SettlementExecuted` as one reached
-normally, so a consumer counting payments has one event type to count however
-the payment came about.
+reached through a dispute, or paid as one tranche of a milestone contract, emits
+the same `SettlementExecuted` as an ordinary one. A consumer counting payments
+has one event type to count however the payment came about.
+
+That is also why a `SettlementExecuted` can report equal previous and new
+agreement states. A milestone tranche moves money without ending the agreement,
+and equal states is precisely how an event says so — which is why a receipt's
+"is this a lifecycle step" follows from the states the event reports rather than
+from its name.
 
 ## Design rules
 
@@ -126,8 +137,8 @@ gets a new event name and the old one keeps its layout until consumers migrate.
 
 ## Later phases
 
-`MilestoneCreated`, `MilestoneFunded`, `MilestoneSubmitted`,
-`MilestoneApproved`, `InvoiceCreated`, and `InvoicePaid` arrive with the
-instructions that emit them. Each is added to the
+`InvoiceCreated` and `InvoicePaid` arrive with the instructions that emit them.
+There is deliberately no `MilestoneFunded`: the budget is escrowed once for the
+whole contract, so no tranche is ever funded on its own. Each is added to the
 SDK decoder and the reputation contracts in the same change as the instruction,
 never ahead of it.

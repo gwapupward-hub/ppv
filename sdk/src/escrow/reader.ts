@@ -3,10 +3,12 @@ import {
   agreementStateFromIndex,
   agreementTypeFromIndex,
   disputeOutcomeFromIndex,
+  milestoneStateFromIndex,
   proofStatusFromIndex,
   type AgreementState,
   type AgreementType,
   type DisputeOutcome,
+  type MilestoneState,
   type ProofStatus,
 } from "./states.js";
 
@@ -81,6 +83,10 @@ export class BorshReader {
 
   disputeOutcome(): DisputeOutcome {
     return disputeOutcomeFromIndex(this.u8());
+  }
+
+  milestoneState(): MilestoneState {
+    return milestoneStateFromIndex(this.u8());
   }
 
   u32(): number {

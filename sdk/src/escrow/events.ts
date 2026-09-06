@@ -1,7 +1,12 @@
 import { anchorDiscriminator } from "../reputation/hashing.js";
 import { EVENT_IX_TAG } from "../reputation/chain-events.js";
 import { BorshReader, bytesEqual } from "./reader.js";
-import type { AgreementState, AgreementType, DisputeOutcome } from "./states.js";
+import type {
+  AgreementState,
+  AgreementType,
+  DisputeOutcome,
+  MilestoneState,
+} from "./states.js";
 
 /**
  * Decoder for the events `ppv_escrow` emits through Anchor's event CPI.
@@ -31,6 +36,11 @@ export const PPV_ESCROW_EVENT_NAMES = [
   "DisputeOpened",
   "DisputeResolved",
   "RefundExecuted",
+  "MilestoneCreated",
+  "MilestoneSubmitted",
+  "MilestoneApproved",
+  "MilestoneRejected",
+  "MilestoneSettled",
 ] as const;
 export type PpvEscrowEventName = (typeof PPV_ESCROW_EVENT_NAMES)[number];
 
@@ -158,6 +168,38 @@ export type EscrowRefundExecutedEvent = Base & {
   newState: AgreementState;
 };
 
+type MilestoneBase = Base & {
+  milestone: string;
+  creator: string;
+  counterparty: string;
+  milestoneIndex: number;
+  /** The agreement's state; a milestone step does not change it. */
+  agreementState: AgreementState;
+};
+
+export type EscrowMilestoneCreatedEvent = MilestoneBase & {
+  name: "MilestoneCreated";
+  amount: bigint;
+  termsHash: string;
+};
+
+/** Submission, approval and rejection share one shape. */
+type MilestoneTransition = MilestoneBase & {
+  previousState: MilestoneState;
+  newState: MilestoneState;
+};
+
+export type EscrowMilestoneSubmittedEvent = MilestoneTransition & { name: "MilestoneSubmitted" };
+export type EscrowMilestoneApprovedEvent = MilestoneTransition & { name: "MilestoneApproved" };
+export type EscrowMilestoneRejectedEvent = MilestoneTransition & { name: "MilestoneRejected" };
+
+export type EscrowMilestoneSettledEvent = MilestoneTransition & {
+  name: "MilestoneSettled";
+  amount: bigint;
+  destination: string;
+  proof: string | null;
+};
+
 export type PpvEscrowEvent =
   | EscrowAgreementCreatedEvent
   | EscrowAgreementFundedEvent
@@ -169,7 +211,12 @@ export type PpvEscrowEvent =
   | EscrowAgreementCancelledEvent
   | EscrowDisputeOpenedEvent
   | EscrowDisputeResolvedEvent
-  | EscrowRefundExecutedEvent;
+  | EscrowRefundExecutedEvent
+  | EscrowMilestoneCreatedEvent
+  | EscrowMilestoneSubmittedEvent
+  | EscrowMilestoneApprovedEvent
+  | EscrowMilestoneRejectedEvent
+  | EscrowMilestoneSettledEvent;
 
 export function escrowEventDiscriminatorHex(name: PpvEscrowEventName): string {
   return Buffer.from(anchorDiscriminator("event", name)).toString("hex");
@@ -184,6 +231,21 @@ const DISCRIMINATORS: ReadonlyArray<{ name: PpvEscrowEventName; bytes: Uint8Arra
  * when it claims to be one but is malformed, so an indexer can tell "not ours"
  * from "corrupt".
  */
+function readMilestoneTransition(reader: BorshReader) {
+  return {
+    program: "ppv_escrow" as const,
+    agreement: reader.pubkey(),
+    milestone: reader.pubkey(),
+    creator: reader.pubkey(),
+    counterparty: reader.pubkey(),
+    milestoneIndex: reader.u32(),
+    previousState: reader.milestoneState(),
+    newState: reader.milestoneState(),
+    agreementState: reader.state(),
+    timestamp: reader.i64(),
+  };
+}
+
 export function decodeEscrowEventData(data: Uint8Array): PpvEscrowEvent | null {
   if (data.length < 16 || !bytesEqual(data.subarray(0, 8), EVENT_IX_TAG)) return null;
   const discriminator = data.subarray(8, 16);
@@ -342,6 +404,51 @@ export function decodeEscrowEventData(data: Uint8Array): PpvEscrowEvent | null {
         destination: reader.pubkey(),
         previousState: reader.state(),
         newState: reader.state(),
+        timestamp: reader.i64(),
+      };
+      break;
+    case "MilestoneCreated":
+      event = {
+        program: "ppv_escrow",
+        name: "MilestoneCreated",
+        agreement: reader.pubkey(),
+        milestone: reader.pubkey(),
+        creator: reader.pubkey(),
+        counterparty: reader.pubkey(),
+        milestoneIndex: reader.u32(),
+        amount: reader.u64(),
+        termsHash: reader.hex(32),
+        agreementState: reader.state(),
+        timestamp: reader.i64(),
+      };
+      break;
+    // One shape, three names. Read once and name it per case: a variable name
+    // would leave the union unnarrowed, and a cast would defeat the point of
+    // the union in the first place.
+    case "MilestoneSubmitted":
+      event = { ...readMilestoneTransition(reader), name: "MilestoneSubmitted" };
+      break;
+    case "MilestoneApproved":
+      event = { ...readMilestoneTransition(reader), name: "MilestoneApproved" };
+      break;
+    case "MilestoneRejected":
+      event = { ...readMilestoneTransition(reader), name: "MilestoneRejected" };
+      break;
+    case "MilestoneSettled":
+      event = {
+        program: "ppv_escrow",
+        name: "MilestoneSettled",
+        agreement: reader.pubkey(),
+        milestone: reader.pubkey(),
+        creator: reader.pubkey(),
+        counterparty: reader.pubkey(),
+        milestoneIndex: reader.u32(),
+        amount: reader.u64(),
+        destination: reader.pubkey(),
+        proof: reader.optionalPubkey(),
+        previousState: reader.milestoneState(),
+        newState: reader.milestoneState(),
+        agreementState: reader.state(),
         timestamp: reader.i64(),
       };
       break;

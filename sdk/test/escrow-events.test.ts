@@ -15,6 +15,7 @@ import {
   CANCELLED_FIXTURE,
   DISPUTE_FIXTURE,
   LIFECYCLE_FIXTURE,
+  MILESTONE_FIXTURE,
   PROOF_APPROVED_FIXTURE,
   PROOF_FIXTURE,
   PROOF_REJECTED_FIXTURE,
@@ -31,6 +32,7 @@ test("every escrow event round-trips through the decoder", () => {
     PROOF_REJECTED_FIXTURE,
     ...DISPUTE_FIXTURE,
     CANCELLED_FIXTURE,
+    ...MILESTONE_FIXTURE,
   ];
   for (const fixture of all) {
     assert.deepEqual(decodeEscrowEventData(encodeEscrowEvent(fixture)), fixture);

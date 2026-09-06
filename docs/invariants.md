@@ -25,6 +25,9 @@ with no test is an intention.
 | 9b | A dispute can only be resolved in the other party's favour. | `require_resolvable` rejects a signer that is also the beneficiary. | `resolution_gives_the_money_to_the_other_party`, "refuses anyone taking the money for themselves" |
 | 9c | A refund reaches only the buyer, and only the seller may give it. | Destination owner constraint plus a seller-only signer. | `a_refund_is_the_sellers_to_give`, "refuses a buyer taking its own refund" |
 | 9d | Cancellation cannot strand escrowed money. | `cancel` is `Open`-only and takes no token accounts. | `cancellation_is_only_for_an_agreement_nobody_funded`, "refuses cancellation … once money is escrowed" |
+| 12g | A milestone from one agreement cannot affect another. | The agreement is in the milestone PDA seeds, and every guard re-checks `milestone.agreement`. | `a_tranche_of_another_agreement_is_unusable_here`, "refuses another agreement's tranche" |
+| 12h | A schedule can never promise more than the escrow holds, and a milestone contract cannot be funded until it is fully scheduled. | `record_milestone` caps the running total; `fund` requires `milestone_total == amount`. | `a_schedule_cannot_promise_more_than_the_escrow_holds`, "refuses funding a contract whose schedule does not add up" |
+| 12i | Total paid out can never exceed what was escrowed. | `record_payout` caps `settled_total` at `amount`; every payout path pays `remaining()`. | `a_refund_midway_returns_only_what_is_left`, "refunds only what no tranche has earned" |
 | 12 | An agreement whose semantics are unimplemented cannot exist. | `agreement_type == Escrow` required at initialization. | "rejects an agreement type the kernel does not implement" |
 | 12a | A proof from one agreement cannot be presented for another. | The agreement is in the proof PDA seeds, so the same index under another agreement is another address. | "keeps one agreement's evidence unusable by another", `escrow-pdas.test.ts` |
 | 12b | Proof indices are dense, ordered, and assigned by the protocol. | The seed is the agreement's own `proof_count`; a client-chosen index is a seeds failure. | "numbers proofs densely, and refuses a client-chosen index" |
@@ -42,6 +45,7 @@ with no test is an intention.
 | 15 | A receipt corresponds to an actual protocol transition. | Receipts are projections of committed events plus chain coordinates; nothing else can produce one. | `escrow-receipts.test.ts` |
 | 16 | Replay produces identical receipt history. | Receipt ids are a hash of (program id, signature, instruction index, inner index, action). | "a receipt is a pure function…", "out-of-order and duplicated delivery…" |
 | 17 | A reconstructed history that does not chain is refused. | `reconstructAgreementLifecycle` verifies each step starts where the previous ended and that settlement matches funding. | "a history that does not chain is refused", "a settlement that disagrees with custody is refused" |
+| 17d | A reconstructed milestone schedule must add up to what was funded, and no tranche step may name a tranche that was never created. | `reconstructAgreementLifecycle` checks both. | "a schedule that does not add up to the escrow is refused", "a milestone step for a tranche that was never created is refused" |
 | 17c | A reconstructed agreement cannot be both settled and refunded, and a refund must return what was funded. | `reconstructAgreementLifecycle` checks both. | "an agreement cannot be both settled and refunded", "a refund must return exactly what was funded" |
 | 17b | A reconstructed settlement cannot cite evidence the history never approved. | `reconstructAgreementLifecycle` resolves the cited proof and its decision. | "a settlement can only cite evidence this history approved" |
 | 17a | A fact that is not a transition cannot be read as one. | Receipts carry `kind`; annotations are placed into the history but excluded from the chain walk. | "evidence is recorded as an annotation, not as a transition", "a proof lands in the history where it happened" |
@@ -57,7 +61,6 @@ with no test is an intention.
 
 ## Invariants deferred with their phases
 
-- A milestone from one agreement cannot affect another — Phase 6.
 
 Each arrives with the instruction that makes it reachable, and with the negative
 test that proves it holds. Listing an invariant before its state exists would

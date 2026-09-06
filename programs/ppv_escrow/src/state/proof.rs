@@ -112,7 +112,11 @@ mod tests {
             settlement_proof: Pubkey::default(),
             dispute_opened_by: Pubkey::default(),
             state_changed_at: 0,
-            reserved: [0; 64],
+            milestone_count: 0,
+            milestones_settled: 0,
+            milestone_total: 0,
+            settled_total: 0,
+            reserved: [0; 40],
         }
     }
 

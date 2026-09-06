@@ -14,7 +14,8 @@ implemented as three separately deployable Solana programs.
   vault and vault authority derived per agreement; `submit_proof`,
   `approve_proof` and `reject_proof` for agreement-bound evidence; and `cancel`,
   `open_dispute`, `resolve_dispute` and `refund` for the ways an agreement ends
-  other than payment. **Local validator only.**
+  other than payment; and milestone contracts, which escrow one budget and
+  release it in tranches. **Local validator only.**
 - `@gwap/ppv-sdk`: frozen canonicalization v1 and SHA-256 helpers shared by
   every client; the versioned reputation contracts (`ReputationEventV1`,
   `PpvReceiptV1`, seal states, credential eligibility); decoders for the
@@ -25,7 +26,7 @@ implemented as three separately deployable Solana programs.
   endpoint and the SDK — no GWAP database and no privileged access. Run it with
   `npm run replay`.
 
-Not included: invoices, milestones, third-party arbitration, protocol fees,
+Not included: invoices, third-party arbitration, protocol fees,
 document encryption, GNS authority, or any mainnet deployment. Disputes are
 resolved by concession only — the party who would lose signs away its own claim
 — because an arbiter is a trusted third party and the protocol has not yet

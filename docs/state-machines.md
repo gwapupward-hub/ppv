@@ -91,6 +91,50 @@ and named in the settlement event. It is optional on purpose: a plain escrow
 settles on the parties' own signatures, and requiring a proof would fold
 approval into custody.
 
+## Milestone contracts
+
+An agreement of type `MilestoneContract` escrows its whole budget once and
+releases it in tranches. Each tranche runs a child machine of its own:
+
+```text
+PENDING ──submit_milestone()──> SUBMITTED ──approve_milestone()──> APPROVED ──settle_milestone()──> SETTLED
+   ▲                                │
+   └──────reject_milestone()────────┘
+```
+
+| Action | Signer | Legal from | Result |
+| --- | --- | --- | --- |
+| `create_milestone` | creator (buyer) | agreement `Open` | tranche `Pending` |
+| `submit_milestone` | counterparty (seller) | tranche `Pending` | `Submitted` |
+| `approve_milestone` | creator (buyer) | tranche `Submitted` | `Approved` |
+| `reject_milestone` | creator (buyer) | tranche `Submitted` | back to `Pending` |
+| `settle_milestone` | either party | tranche `Approved` | `Settled`, pays that tranche |
+
+Three decisions shape this:
+
+**There is no per-milestone funding.** The whole budget is escrowed once, before
+any tranche exists, and `fund` refuses a milestone contract whose scheduled
+amounts do not add up to it. A buyer therefore funds a plan it has seen in full,
+and a seller knows the money for every tranche is already in the vault. Partial
+funding would let a seller finish work the buyer never escrowed for.
+
+**The schedule is fixed before the money arrives.** `create_milestone` is
+`Open`-only, and the running total can never exceed the agreement amount.
+
+**A milestone holds no custody of its own.** The money is in the agreement's
+single vault; a milestone records which part of it has been earned. Giving each
+tranche a vault would multiply the custody surface by the number of tranches for
+no gain.
+
+A rejected tranche returns to `Pending` so the seller can try again — unlike a
+proof decision, which is about a fixed set of bytes and is final. Tranche work
+stops while the agreement is `Disputed`, and a refund midway returns only what
+no tranche has earned.
+
+`mark_completed` and the agreement-level `settle` do not apply to a milestone
+contract: it has no single moment of completion, and it finishes when its last
+tranche is paid.
+
 ### Disputes are resolved by concession, not by a judge
 
 `resolve_dispute` has no arbiter and trusts nobody. The signer surrenders its

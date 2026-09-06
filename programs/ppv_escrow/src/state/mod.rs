@@ -1,9 +1,11 @@
 pub mod agreement;
 pub mod enums;
+pub mod milestone;
 pub mod proof;
 
 pub use agreement::*;
 pub use enums::*;
+pub use milestone::*;
 pub use proof::*;
 
 #[cfg(test)]
@@ -29,14 +31,17 @@ mod tests {
             + 32                  // settlement proof
             + 32                  // dispute opened by
             + 8                   // state changed at
-            + 64; // reserved
+            + 4 * 2               // milestone count + settled count
+            + 8 * 2               // milestone total + settled total
+            + 40; // reserved
         assert_eq!(Agreement::INIT_SPACE, expected);
         // Phases 3 and 4 fit inside the original reserved block, so the account
         // stayed at 278 bytes. Phase 5 needed more than it had left and grew
-        // the account instead, restoring the reserved headroom. That is free
-        // only because nothing is deployed: after the first deployment, growth
-        // needs a realloc and a migration, which is what the reserved block
-        // exists to avoid.
+        // the account to 354, restoring the headroom; Phase 6's milestone
+        // counters then came out of that headroom, so the size is unchanged
+        // again. Growing is free only because nothing is deployed: after the
+        // first deployment it needs a realloc and a migration, which is exactly
+        // what the reserved block exists to avoid.
         assert_eq!(expected, 354);
     }
 

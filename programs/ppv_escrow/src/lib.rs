@@ -24,7 +24,7 @@ pub mod state;
 
 pub use constants::*;
 pub use instructions::*;
-pub use state::{AgreementState, AgreementType, DisputeOutcome, ProofStatus};
+pub use state::{AgreementState, AgreementType, DisputeOutcome, MilestoneState, ProofStatus};
 
 // Build-only placeholder. Run `anchor keys sync` with controlled program
 // keypairs before deployment and commit the resulting deployment manifest.
@@ -69,6 +69,40 @@ pub mod ppv_escrow {
     /// terminal, which is what makes a second settlement impossible.
     pub fn settle(ctx: Context<Settle>) -> Result<()> {
         instructions::settle::handle_settle(ctx)
+    }
+
+    /// Adds a tranche to a milestone contract's schedule. Buyer-only and
+    /// `Open`-only: the plan is fixed before the money arrives, so the buyer
+    /// funds a schedule it has seen in full and the seller knows every tranche
+    /// is covered.
+    pub fn create_milestone(
+        ctx: Context<CreateMilestone>,
+        amount: u64,
+        terms_hash: [u8; 32],
+    ) -> Result<()> {
+        instructions::milestone::handle_create_milestone(ctx, amount, terms_hash)
+    }
+
+    /// Seller-only. Says a tranche of work is done; moves no money.
+    pub fn submit_milestone(ctx: Context<UpdateMilestone>) -> Result<()> {
+        instructions::milestone::handle_submit_milestone(ctx)
+    }
+
+    /// Buyer-only. Accepts a submitted tranche; moves no money.
+    pub fn approve_milestone(ctx: Context<UpdateMilestone>) -> Result<()> {
+        instructions::milestone::handle_approve_milestone(ctx)
+    }
+
+    /// Buyer-only. Sends a submitted tranche back to `Pending` so the seller
+    /// can try again.
+    pub fn reject_milestone(ctx: Context<UpdateMilestone>) -> Result<()> {
+        instructions::milestone::handle_reject_milestone(ctx)
+    }
+
+    /// Releases one approved tranche to the seller. The agreement itself
+    /// settles when the last one is paid.
+    pub fn settle_milestone(ctx: Context<SettleMilestone>) -> Result<()> {
+        instructions::milestone::handle_settle_milestone(ctx)
     }
 
     /// Abandons an agreement nobody funded. Creator-only, `Open`-only, and it

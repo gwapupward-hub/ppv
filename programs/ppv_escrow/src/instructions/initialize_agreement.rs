@@ -64,11 +64,13 @@ pub fn handle_initialize_agreement(
         terms_hash.iter().any(|byte| *byte != 0),
         EscrowError::InvalidTermsHash
     );
-    // The kernel implements one type. Every other variant is reserved wire
-    // format, and an agreement whose semantics do not exist yet must not be
-    // creatable on chain.
+    // Only the types whose semantics exist. Every other variant is reserved
+    // wire format, and an agreement nothing can act on must not be creatable.
     require!(
-        agreement_type == AgreementType::Escrow,
+        matches!(
+            agreement_type,
+            AgreementType::Escrow | AgreementType::MilestoneContract
+        ),
         EscrowError::UnsupportedAgreementType
     );
 
@@ -101,7 +103,11 @@ pub fn handle_initialize_agreement(
     agreement.settlement_proof = Pubkey::default();
     agreement.dispute_opened_by = Pubkey::default();
     agreement.state_changed_at = 0;
-    agreement.reserved = [0; 64];
+    agreement.milestone_count = 0;
+    agreement.milestones_settled = 0;
+    agreement.milestone_total = 0;
+    agreement.settled_total = 0;
+    agreement.reserved = [0; 40];
 
     emit_cpi!(AgreementCreated {
         agreement: agreement_key,

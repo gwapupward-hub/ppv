@@ -29,7 +29,10 @@ export const AGREEMENT_TYPES = [
 export type AgreementType = (typeof AGREEMENT_TYPES)[number];
 
 /** The agreement types the deployed kernel will actually create. */
-export const IMPLEMENTED_AGREEMENT_TYPES: readonly AgreementType[] = ["Escrow"];
+export const IMPLEMENTED_AGREEMENT_TYPES: readonly AgreementType[] = [
+  "Escrow",
+  "MilestoneContract",
+];
 
 export const PROOF_STATUSES = ["Submitted", "Approved", "Rejected"] as const;
 export type ProofStatus = (typeof PROOF_STATUSES)[number];
@@ -38,6 +41,56 @@ export function proofStatusFromIndex(index: number): ProofStatus {
   const status = PROOF_STATUSES[index];
   if (!status) throw new RangeError(`unknown proof status ${index}`);
   return status;
+}
+
+export const MILESTONE_STATES = ["Pending", "Submitted", "Approved", "Settled"] as const;
+export type MilestoneState = (typeof MILESTONE_STATES)[number];
+
+export function milestoneStateFromIndex(index: number): MilestoneState {
+  const state = MILESTONE_STATES[index];
+  if (!state) throw new RangeError(`unknown milestone state ${index}`);
+  return state;
+}
+
+export const MILESTONE_ACTIONS = [
+  "submit_milestone",
+  "approve_milestone",
+  "reject_milestone",
+  "settle_milestone",
+] as const;
+export type MilestoneAction = (typeof MILESTONE_ACTIONS)[number];
+
+const MILESTONE_TRANSITIONS: Readonly<
+  Record<MilestoneAction, { from: MilestoneState; to: MilestoneState }>
+> = {
+  submit_milestone: { from: "Pending", to: "Submitted" },
+  approve_milestone: { from: "Submitted", to: "Approved" },
+  // A refusal sends the tranche back to be redone, unlike a proof decision.
+  reject_milestone: { from: "Submitted", to: "Pending" },
+  settle_milestone: { from: "Approved", to: "Settled" },
+};
+
+export const MILESTONE_ACTION_SIGNER: Readonly<
+  Record<MilestoneAction, "buyer" | "seller" | "either_party">
+> = {
+  submit_milestone: "seller",
+  approve_milestone: "buyer",
+  reject_milestone: "buyer",
+  settle_milestone: "either_party",
+};
+
+export function isLegalMilestoneTransition(
+  state: MilestoneState,
+  action: MilestoneAction,
+): boolean {
+  return MILESTONE_TRANSITIONS[action].from === state;
+}
+
+export function milestoneStateAfter(
+  state: MilestoneState,
+  action: MilestoneAction,
+): MilestoneState | null {
+  return isLegalMilestoneTransition(state, action) ? MILESTONE_TRANSITIONS[action].to : null;
 }
 
 export const DISPUTE_OUTCOMES = ["SellerPaid", "BuyerRefunded"] as const;

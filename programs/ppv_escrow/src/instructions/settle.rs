@@ -59,7 +59,10 @@ pub fn handle_settle(ctx: Context<Settle>) -> Result<()> {
     let signer = ctx.accounts.signer.key();
     ctx.accounts.agreement.require_settleable(&signer)?;
 
-    let amount = ctx.accounts.agreement.amount;
+    // What the vault still owes, not what the agreement was worth. For a
+    // single-payment agreement these are the same number; the distinction
+    // exists because a milestone contract can already have paid some of it out.
+    let amount = ctx.accounts.agreement.remaining();
     let agreement_key = ctx.accounts.agreement.key();
 
     // Checked before any custody moves: a settlement that cites evidence must
@@ -91,6 +94,7 @@ pub fn handle_settle(ctx: Context<Settle>) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
     let destination = ctx.accounts.seller_token_account.key();
     let agreement = &mut ctx.accounts.agreement;
+    agreement.record_payout(amount)?;
     let previous_state = agreement.record_settled(now);
     agreement.settlement_proof = cited_proof.unwrap_or_default();
 

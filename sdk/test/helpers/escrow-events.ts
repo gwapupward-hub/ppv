@@ -13,6 +13,7 @@ import {
   type EscrowProofRejectedEvent,
   type EscrowProofSubmittedEvent,
   type EscrowRefundExecutedEvent,
+  type EscrowSettlementExecutedEvent,
   type PpvEscrowEvent,
 } from "../../src/index.js";
 
@@ -64,6 +65,10 @@ function state(value: AgreementState): Buffer {
 
 function agreementType(value: AgreementType): Buffer {
   return Buffer.from([AGREEMENT_TYPES.indexOf(value)]);
+}
+
+function milestoneState(value: "Pending" | "Submitted" | "Approved" | "Settled"): Buffer {
+  return Buffer.from([["Pending", "Submitted", "Approved", "Settled"].indexOf(value)]);
 }
 
 function outcome(value: "SellerPaid" | "BuyerRefunded"): Buffer {
@@ -210,6 +215,50 @@ export function encodeEscrowEvent(event: PpvEscrowEvent): Uint8Array {
         pubkey(event.destination),
         state(event.previousState),
         state(event.newState),
+        i64(event.timestamp),
+      ]);
+      break;
+    case "MilestoneCreated":
+      body = Buffer.concat([
+        pubkey(event.agreement),
+        pubkey(event.milestone),
+        pubkey(event.creator),
+        pubkey(event.counterparty),
+        u32(event.milestoneIndex),
+        u64(event.amount),
+        Buffer.from(event.termsHash, "hex"),
+        state(event.agreementState),
+        i64(event.timestamp),
+      ]);
+      break;
+    case "MilestoneSubmitted":
+    case "MilestoneApproved":
+    case "MilestoneRejected":
+      body = Buffer.concat([
+        pubkey(event.agreement),
+        pubkey(event.milestone),
+        pubkey(event.creator),
+        pubkey(event.counterparty),
+        u32(event.milestoneIndex),
+        milestoneState(event.previousState),
+        milestoneState(event.newState),
+        state(event.agreementState),
+        i64(event.timestamp),
+      ]);
+      break;
+    case "MilestoneSettled":
+      body = Buffer.concat([
+        pubkey(event.agreement),
+        pubkey(event.milestone),
+        pubkey(event.creator),
+        pubkey(event.counterparty),
+        u32(event.milestoneIndex),
+        u64(event.amount),
+        pubkey(event.destination),
+        optionalPubkey(event.proof),
+        milestoneState(event.previousState),
+        milestoneState(event.newState),
+        state(event.agreementState),
         i64(event.timestamp),
       ]);
       break;
@@ -383,4 +432,103 @@ export const CANCELLED_FIXTURE: PpvEscrowEvent = {
   timestamp: 1_700_000_050,
 };
 
-export const FIXTURE_ADDRESSES = { BUYER, SELLER, MINT, VAULT, AGREEMENT, SELLER_ATA, PROOF, BUYER_ATA };
+/** The settlement step of the lifecycle, narrowed for tests that vary it. */
+export const SETTLEMENT_FIXTURE: EscrowSettlementExecutedEvent = (() => {
+  const event = LIFECYCLE_FIXTURE[3];
+  if (event?.name !== "SettlementExecuted") throw new Error("fixture order changed");
+  return event;
+})();
+
+const MILESTONE_A = addressFromByte(14);
+const MILESTONE_B = addressFromByte(15);
+
+/**
+ * A two-tranche contract funded once and released in parts. The settlement
+ * events are the same ones a single-payment agreement emits: the first leaves
+ * the agreement Funded, the last one settles it.
+ */
+export const MILESTONE_FIXTURE: readonly PpvEscrowEvent[] = [
+  {
+    program: "ppv_escrow",
+    name: "MilestoneCreated",
+    agreement: AGREEMENT,
+    milestone: MILESTONE_A,
+    creator: BUYER,
+    counterparty: SELLER,
+    milestoneIndex: 0,
+    amount: 60_000_000n,
+    termsHash: hexFromByte(31, 32),
+    agreementState: "Open",
+    timestamp: 1_700_000_010,
+  },
+  {
+    program: "ppv_escrow",
+    name: "MilestoneCreated",
+    agreement: AGREEMENT,
+    milestone: MILESTONE_B,
+    creator: BUYER,
+    counterparty: SELLER,
+    milestoneIndex: 1,
+    amount: 40_000_000n,
+    termsHash: hexFromByte(32, 32),
+    agreementState: "Open",
+    timestamp: 1_700_000_011,
+  },
+  {
+    program: "ppv_escrow",
+    name: "MilestoneSubmitted",
+    agreement: AGREEMENT,
+    milestone: MILESTONE_A,
+    creator: BUYER,
+    counterparty: SELLER,
+    milestoneIndex: 0,
+    previousState: "Pending",
+    newState: "Submitted",
+    agreementState: "Funded",
+    timestamp: 1_700_000_120,
+  },
+  {
+    program: "ppv_escrow",
+    name: "MilestoneApproved",
+    agreement: AGREEMENT,
+    milestone: MILESTONE_A,
+    creator: BUYER,
+    counterparty: SELLER,
+    milestoneIndex: 0,
+    previousState: "Submitted",
+    newState: "Approved",
+    agreementState: "Funded",
+    timestamp: 1_700_000_130,
+  },
+  {
+    program: "ppv_escrow",
+    name: "MilestoneRejected",
+    agreement: AGREEMENT,
+    milestone: MILESTONE_B,
+    creator: BUYER,
+    counterparty: SELLER,
+    milestoneIndex: 1,
+    previousState: "Submitted",
+    newState: "Pending",
+    agreementState: "Funded",
+    timestamp: 1_700_000_140,
+  },
+  {
+    program: "ppv_escrow",
+    name: "MilestoneSettled",
+    agreement: AGREEMENT,
+    milestone: MILESTONE_A,
+    creator: BUYER,
+    counterparty: SELLER,
+    milestoneIndex: 0,
+    amount: 60_000_000n,
+    destination: SELLER_ATA,
+    proof: null,
+    previousState: "Approved",
+    newState: "Settled",
+    agreementState: "Funded",
+    timestamp: 1_700_000_150,
+  },
+];
+
+export const FIXTURE_ADDRESSES = { BUYER, SELLER, MINT, VAULT, AGREEMENT, SELLER_ATA, PROOF, BUYER_ATA, MILESTONE_A, MILESTONE_B };

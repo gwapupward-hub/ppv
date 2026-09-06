@@ -33,6 +33,7 @@ deployment artifact regenerated per environment.
 | Vault authority | `["vault", agreement]` | One authority per agreement. No global authority exists to compromise. |
 | Vault (token account) | `["vault_token", agreement]` | Owned by the vault authority, fixed to the agreement's mint at creation. |
 | Proof | `["proof", agreement, proof_index_le_u32]` | The index is the agreement's own counter, not a client's choice. |
+| Milestone | `["milestone", agreement, milestone_index_le_u32]` | Likewise counter-assigned; the schedule is dense and ordered. |
 
 `agreement_id` is a `u64` chosen by the creator and encoded little-endian, the
 same bytes the program seeds with.

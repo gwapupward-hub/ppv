@@ -84,6 +84,15 @@ cases in `programs/ppv_escrow/src/state/agreement.rs`.
 | Refund as the seller | PASS | ✓ |
 | Refund as the buyer, or redirected away from the buyer | FAIL | ✓ |
 | Act on a settled, refunded, or cancelled agreement | FAIL | ✓ |
+| Schedule a milestone as the seller, or after funding | FAIL | ✓ |
+| Schedule more than the agreement amount | FAIL | ✓ |
+| Fund a partly-scheduled milestone contract | FAIL | ✓ |
+| Submit a tranche as the buyer, or approve your own | FAIL | ✓ |
+| Settle a tranche that is not approved, or twice | FAIL | ✓ |
+| Redirect a tranche away from the seller | FAIL | ✓ |
+| Use another agreement's tranche | FAIL | ✓ |
+| Work a tranche while disputed | FAIL | ✓ |
+| Refund a milestone contract midway | PASS — returns only the unearned tranches | ✓ |
 | Observe an event from a failed settlement | FAIL | ✓ |
 | Take a donated surplus along with settlement | FAIL | ✓ |
 

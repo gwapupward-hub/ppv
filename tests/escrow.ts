@@ -31,6 +31,7 @@ const AGREEMENT_SEED = new TextEncoder().encode("agreement");
 const VAULT_AUTHORITY_SEED = new TextEncoder().encode("vault");
 const VAULT_TOKEN_SEED = new TextEncoder().encode("vault_token");
 const PROOF_SEED = new TextEncoder().encode("proof");
+const MILESTONE_SEED = new TextEncoder().encode("milestone");
 const DECIMALS = 6;
 const AMOUNT = 100_000_000n; // 100 tokens
 
@@ -70,6 +71,15 @@ function proofAddress(programId: PublicKey, agreement: PublicKey, index: number)
   seed.writeUInt32LE(index);
   return PublicKey.findProgramAddressSync(
     [PROOF_SEED, agreement.toBytes(), seed],
+    programId,
+  )[0];
+}
+
+function milestoneAddress(programId: PublicKey, agreement: PublicKey, index: number): PublicKey {
+  const seed = Buffer.alloc(4);
+  seed.writeUInt32LE(index);
+  return PublicKey.findProgramAddressSync(
+    [MILESTONE_SEED, agreement.toBytes(), seed],
     programId,
   )[0];
 }
@@ -1182,6 +1192,293 @@ describe("PPV escrow kernel", () => {
       await cancel(cancelled);
       await expectAnchorError(fund(cancelled), "BadState");
       await expectAnchorError(cancel(cancelled), "BadState");
+    });
+  });
+
+  describe("milestones", () => {
+    const FIRST = 60_000_000n;
+    const SECOND = 40_000_000n;
+
+    function createMilestone(
+      agreement: Awaited<ReturnType<typeof initialize>>,
+      index: number,
+      amount: bigint,
+      signer: Keypair = buyer,
+    ) {
+      return escrow.methods
+        .createMilestone(new BN(amount.toString()), hash32(31 + index))
+        .accounts({
+          creator: signer.publicKey,
+          agreement: agreement.agreement,
+          milestone: milestoneAddress(escrow.programId, agreement.agreement, index),
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([signer])
+        .rpc();
+    }
+
+    function step(
+      method: "submitMilestone" | "approveMilestone" | "rejectMilestone",
+      agreement: Awaited<ReturnType<typeof initialize>>,
+      index: number,
+      signer: Keypair,
+    ) {
+      return escrow.methods[method]()
+        .accounts({
+          signer: signer.publicKey,
+          agreement: agreement.agreement,
+          milestone: milestoneAddress(escrow.programId, agreement.agreement, index),
+        })
+        .signers([signer])
+        .rpc();
+    }
+
+    function settleMilestone(
+      agreement: Awaited<ReturnType<typeof initialize>>,
+      index: number,
+      overrides?: { signer?: Keypair; destination?: PublicKey },
+    ) {
+      const signer = overrides?.signer ?? seller;
+      return escrow.methods
+        .settleMilestone()
+        .accounts({
+          signer: signer.publicKey,
+          agreement: agreement.agreement,
+          milestone: milestoneAddress(escrow.programId, agreement.agreement, index),
+          mint: agreement.mint,
+          vault: agreement.vault,
+          vaultAuthority: agreement.vaultAuthority,
+          sellerTokenAccount: overrides?.destination ?? sellerTokens,
+          settlementProof: null,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([signer])
+        .rpc();
+    }
+
+    /** A funded two-tranche contract, the shape most tests start from. */
+    async function scheduledContract() {
+      const agreement = await initialize({ agreementType: { milestoneContract: {} } });
+      await createMilestone(agreement, 0, FIRST);
+      await createMilestone(agreement, 1, SECOND);
+      await fund(agreement);
+      return agreement;
+    }
+
+    it("plans the whole schedule before any money arrives", async () => {
+      const agreement = await initialize({ agreementType: { milestoneContract: {} } });
+      const signature = await createMilestone(agreement, 0, FIRST);
+
+      const milestone = await escrow.account.milestone.fetch(
+        milestoneAddress(escrow.programId, agreement.agreement, 0),
+      );
+      assert.equal(milestone.agreement.toBase58(), agreement.agreement.toBase58());
+      assert.equal(milestone.amount.toString(), FIRST.toString());
+      assert.ok("pending" in milestone.state);
+
+      const account = await escrow.account.agreement.fetch(agreement.agreement);
+      assert.equal(account.milestoneCount, 1);
+      assert.equal(account.milestoneTotal.toString(), FIRST.toString());
+      assert.ok("open" in account.state, "scheduling is not funding");
+
+      const event = eventNamed(await eventsOf(signature), "milestoneCreated");
+      assert.equal(event.milestoneIndex, 0);
+      assert.equal(event.amount.toString(), FIRST.toString());
+    });
+
+    it("refuses funding a contract whose schedule does not add up", async () => {
+      const agreement = await initialize({ agreementType: { milestoneContract: {} } });
+      await createMilestone(agreement, 0, FIRST);
+
+      // Escrowing money no milestone can release would leave a refund as the
+      // only way to get it back.
+      await expectAnchorError(fund(agreement), "MilestonesNotFullyScheduled");
+
+      await createMilestone(agreement, 1, SECOND);
+      await fund(agreement);
+      const vault = await getAccount(connection, agreement.vault);
+      assert.equal(vault.amount, AMOUNT);
+    });
+
+    it("refuses a schedule that promises more than the escrow holds", async () => {
+      const agreement = await initialize({ agreementType: { milestoneContract: {} } });
+      await createMilestone(agreement, 0, FIRST);
+      await expectAnchorError(
+        createMilestone(agreement, 1, AMOUNT),
+        "MilestoneTotalMismatch",
+      );
+    });
+
+    it("refuses scheduling by the seller, or after funding", async () => {
+      const agreement = await initialize({ agreementType: { milestoneContract: {} } });
+      await expectAnchorError(createMilestone(agreement, 0, FIRST, seller), "NotTheBuyer");
+
+      const funded = await scheduledContract();
+      await expectAnchorError(createMilestone(funded, 2, 1n), "BadState");
+
+      // A plain escrow has no schedule at all.
+      const plain = await initialize();
+      await expectAnchorError(createMilestone(plain, 0, FIRST), "WrongAgreementType");
+    });
+
+    it("releases a tranche without ending the agreement", async () => {
+      const agreement = await scheduledContract();
+      await step("submitMilestone", agreement, 0, seller);
+      await step("approveMilestone", agreement, 0, buyer);
+
+      const before = await getAccount(connection, sellerTokens);
+      const signature = await settleMilestone(agreement, 0);
+      const after = await getAccount(connection, sellerTokens);
+
+      assert.equal(after.amount - before.amount, FIRST);
+      const vault = await getAccount(connection, agreement.vault);
+      assert.equal(vault.amount, SECOND, "the unearned tranche stays escrowed");
+
+      const account = await escrow.account.agreement.fetch(agreement.agreement);
+      assert.ok("funded" in account.state, "one tranche does not finish the agreement");
+      assert.equal(account.settledTotal.toString(), FIRST.toString());
+      assert.equal(account.milestonesSettled, 1);
+
+      const events = await eventsOf(signature);
+      const settled = eventNamed(events, "milestoneSettled");
+      assert.equal(settled.amount.toString(), FIRST.toString());
+      // The payment is reported by the same event a single-payment agreement
+      // emits, with equal previous and new agreement states.
+      const payment = eventNamed(events, "settlementExecuted");
+      assert.equal(payment.amount.toString(), FIRST.toString());
+      assert.ok("funded" in payment.previousState);
+      assert.ok("funded" in payment.newState);
+    });
+
+    it("settles the agreement when the last tranche is paid", async () => {
+      const agreement = await scheduledContract();
+      for (const index of [0, 1]) {
+        await step("submitMilestone", agreement, index, seller);
+        await step("approveMilestone", agreement, index, buyer);
+        await settleMilestone(agreement, index);
+      }
+
+      const account = await escrow.account.agreement.fetch(agreement.agreement);
+      assert.ok("settled" in account.state);
+      assert.equal(account.settledTotal.toString(), AMOUNT.toString());
+      const vault = await getAccount(connection, agreement.vault);
+      assert.equal(vault.amount, 0n);
+    });
+
+    it("gives each step to the right party and only from the right state", async () => {
+      const agreement = await scheduledContract();
+
+      await expectAnchorError(step("submitMilestone", agreement, 0, buyer), "NotTheSeller");
+      await expectAnchorError(step("approveMilestone", agreement, 0, buyer), "MilestoneBadState");
+      await expectAnchorError(settleMilestone(agreement, 0), "MilestoneBadState");
+
+      await step("submitMilestone", agreement, 0, seller);
+      // The seller cannot approve its own submission.
+      await expectAnchorError(step("approveMilestone", agreement, 0, seller), "NotTheBuyer");
+      await expectAnchorError(step("submitMilestone", agreement, 0, seller), "MilestoneBadState");
+      await expectAnchorError(settleMilestone(agreement, 0), "MilestoneBadState");
+
+      await step("approveMilestone", agreement, 0, buyer);
+      await expectAnchorError(step("approveMilestone", agreement, 0, buyer), "MilestoneBadState");
+      await expectAnchorError(settleMilestone(agreement, 0, { signer: attacker }), "NotAParty");
+      await expectAnchorError(
+        settleMilestone(agreement, 0, { destination: attackerTokens }),
+        "DestinationNotOwnedBySeller",
+      );
+    });
+
+    it("lets a refused tranche be redone", async () => {
+      const agreement = await scheduledContract();
+      await step("submitMilestone", agreement, 0, seller);
+      const signature = await step("rejectMilestone", agreement, 0, buyer);
+
+      const milestone = await escrow.account.milestone.fetch(
+        milestoneAddress(escrow.programId, agreement.agreement, 0),
+      );
+      assert.ok("pending" in milestone.state, "a refusal sends it back to be redone");
+      eventNamed(await eventsOf(signature), "milestoneRejected");
+
+      await step("submitMilestone", agreement, 0, seller);
+      await step("approveMilestone", agreement, 0, buyer);
+      await settleMilestone(agreement, 0);
+    });
+
+    it("refuses paying one tranche twice", async () => {
+      const agreement = await scheduledContract();
+      await step("submitMilestone", agreement, 0, seller);
+      await step("approveMilestone", agreement, 0, buyer);
+      await settleMilestone(agreement, 0);
+
+      await expectAnchorError(settleMilestone(agreement, 0), "MilestoneBadState");
+      const vault = await getAccount(connection, agreement.vault);
+      assert.equal(vault.amount, SECOND);
+    });
+
+    it("refuses another agreement's tranche", async () => {
+      const mine = await scheduledContract();
+      const theirs = await scheduledContract();
+
+      await assert.rejects(
+        escrow.methods
+          .submitMilestone()
+          .accounts({
+            signer: seller.publicKey,
+            agreement: theirs.agreement,
+            milestone: milestoneAddress(escrow.programId, mine.agreement, 0),
+          })
+          .signers([seller])
+          .rpc(),
+      );
+    });
+
+    it("has no single moment of completion to settle at", async () => {
+      const agreement = await scheduledContract();
+      // A milestone contract is finished by its tranches, not by one
+      // completion and one payment.
+      await expectAnchorError(markCompleted(agreement), "WrongAgreementType");
+    });
+
+    it("refunds only what no tranche has earned", async () => {
+      const agreement = await scheduledContract();
+      await step("submitMilestone", agreement, 0, seller);
+      await step("approveMilestone", agreement, 0, buyer);
+      await settleMilestone(agreement, 0);
+
+      const before = await getAccount(connection, buyerTokens);
+      await escrow.methods
+        .refund()
+        .accounts({
+          seller: seller.publicKey,
+          agreement: agreement.agreement,
+          mint: agreement.mint,
+          vault: agreement.vault,
+          vaultAuthority: agreement.vaultAuthority,
+          buyerTokenAccount: buyerTokens,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([seller])
+        .rpc();
+      const after = await getAccount(connection, buyerTokens);
+
+      // The tranche the seller earned is not the buyer's to take back.
+      assert.equal(after.amount - before.amount, SECOND);
+      const vault = await getAccount(connection, agreement.vault);
+      assert.equal(vault.amount, 0n);
+    });
+
+    it("stops tranche work while disputed", async () => {
+      const agreement = await scheduledContract();
+      await step("submitMilestone", agreement, 0, seller);
+      await escrow.methods
+        .openDispute(hash32(21))
+        .accounts({ party: buyer.publicKey, agreement: agreement.agreement })
+        .signers([buyer])
+        .rpc();
+
+      await expectAnchorError(step("approveMilestone", agreement, 0, buyer), "BadState");
+      await expectAnchorError(settleMilestone(agreement, 0), "BadState");
+      const vault = await getAccount(connection, agreement.vault);
+      assert.equal(vault.amount, AMOUNT);
     });
   });
 

@@ -67,3 +67,25 @@ pub enum DisputeOutcome {
     SellerPaid,
     BuyerRefunded,
 }
+
+/// One milestone's lifecycle, a child machine of the agreement's.
+///
+/// ```text
+/// Pending ─submit_milestone()─> Submitted ─approve_milestone()─> Approved ─settle_milestone()─> Settled
+///    ▲                              │
+///    └────reject_milestone()────────┘
+/// ```
+///
+/// There is no `Funded` here, and that is a deliberate departure from a
+/// per-milestone funding model: the whole budget is escrowed once, up front, and
+/// milestones release tranches of it. A buyer therefore knows exactly what it is
+/// funding before any money moves, and a seller knows the money for every
+/// milestone is already in the vault. Partial funding would mean a seller can
+/// finish work the buyer never escrowed for.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq, InitSpace)]
+pub enum MilestoneState {
+    Pending,
+    Submitted,
+    Approved,
+    Settled,
+}

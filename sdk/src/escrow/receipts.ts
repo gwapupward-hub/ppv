@@ -39,28 +39,29 @@ export const ESCROW_RECEIPT_ACTIONS = {
   DisputeOpened: "DISPUTE_OPENED",
   DisputeResolved: "DISPUTE_RESOLVED",
   RefundExecuted: "REFUND_EXECUTED",
+  MilestoneCreated: "MILESTONE_CREATED",
+  MilestoneSubmitted: "MILESTONE_SUBMITTED",
+  MilestoneApproved: "MILESTONE_APPROVED",
+  MilestoneRejected: "MILESTONE_REJECTED",
+  MilestoneSettled: "MILESTONE_SETTLED",
 } as const;
 
 /**
- * Not every protocol fact moves the state machine. A transition is a step in
- * the lifecycle; an annotation is something that happened *during* a step —
- * evidence anchored, a decision recorded — and carries no custody or state
- * consequence of its own.
+ * Not every protocol fact moves the agreement. A transition is a step in the
+ * lifecycle; an annotation is something that happened *during* a step —
+ * evidence anchored, a decision recorded, one milestone of many paid out.
  *
- * Keeping the two apart is what lets reconstruction chain a history: an
- * annotation whose `previousState` equalled its `newState` would look like a
- * transition that went nowhere, and a chain-walk cannot tell those apart.
+ * Which one a receipt is follows from the fact itself: it is a transition when
+ * the agreement's state changed, and an annotation when it did not. Deciding by
+ * event name instead would be a second source of truth that could disagree with
+ * the states the event actually reports — and it could not express a
+ * `SettlementExecuted` that paid a milestone without ending the agreement.
  */
 export type EscrowReceiptKind = "transition" | "annotation";
 
-const ANNOTATION_ACTIONS = new Set<string>([
-  "PROOF_SUBMITTED",
-  "PROOF_APPROVED",
-  "PROOF_REJECTED",
-  // The transition out of `Disputed` is carried by the settlement or refund
-  // emitted beside this one.
-  "DISPUTE_RESOLVED",
-]);
+function kindOf(previousState: AgreementState | null, newState: AgreementState): EscrowReceiptKind {
+  return previousState === null || previousState !== newState ? "transition" : "annotation";
+}
 
 export type EscrowReceiptAction =
   (typeof ESCROW_RECEIPT_ACTIONS)[keyof typeof ESCROW_RECEIPT_ACTIONS];
@@ -97,6 +98,9 @@ export type PpvEscrowReceiptV1 = {
   destination: string | null;
   proof: string | null;
   proofIndex: number | null;
+  /** The tranche this receipt concerns, for milestone contracts. */
+  milestone: string | null;
+  milestoneIndex: number | null;
   previousState: AgreementState | null;
   newState: AgreementState;
   occurredAt: string;
@@ -139,6 +143,11 @@ export function escrowReceiptId(
 }
 
 export function escrowReceiptFromEvent(envelope: EscrowEventEnvelope): PpvEscrowReceiptV1 {
+  const receipt = buildReceipt(envelope);
+  return { ...receipt, kind: kindOf(receipt.previousState, receipt.newState) };
+}
+
+function buildReceipt(envelope: EscrowEventEnvelope): Omit<PpvEscrowReceiptV1, "kind"> {
   const { event } = envelope;
   if (!envelope.transactionSignature) throw new ReceiptError("receipt requires a transaction signature");
   if (!Number.isInteger(envelope.instructionIndex) || envelope.instructionIndex < 0) {
@@ -152,7 +161,6 @@ export function escrowReceiptFromEvent(envelope: EscrowEventEnvelope): PpvEscrow
   const action = ESCROW_RECEIPT_ACTIONS[event.name];
   const common = {
     schemaVersion: ESCROW_RECEIPT_SCHEMA_VERSION,
-    kind: (ANNOTATION_ACTIONS.has(action) ? "annotation" : "transition") as EscrowReceiptKind,
     receiptId: escrowReceiptId(
       envelope.programId,
       envelope.transactionSignature,
@@ -183,6 +191,8 @@ export function escrowReceiptFromEvent(envelope: EscrowEventEnvelope): PpvEscrow
         destination: null,
         proof: null,
         proofIndex: null,
+        milestone: null,
+        milestoneIndex: null,
         previousState: null,
         newState: event.newState,
       };
@@ -201,6 +211,8 @@ export function escrowReceiptFromEvent(envelope: EscrowEventEnvelope): PpvEscrow
         destination: event.vault,
         proof: null,
         proofIndex: null,
+        milestone: null,
+        milestoneIndex: null,
         previousState: event.previousState,
         newState: event.newState,
       };
@@ -216,6 +228,8 @@ export function escrowReceiptFromEvent(envelope: EscrowEventEnvelope): PpvEscrow
         destination: null,
         proof: null,
         proofIndex: null,
+        milestone: null,
+        milestoneIndex: null,
         previousState: event.previousState,
         newState: event.newState,
       };
@@ -231,8 +245,65 @@ export function escrowReceiptFromEvent(envelope: EscrowEventEnvelope): PpvEscrow
         destination: event.destination,
         proof: event.proof,
         proofIndex: null,
+        milestone: null,
+        milestoneIndex: null,
         previousState: event.previousState,
         newState: event.newState,
+      };
+    case "MilestoneCreated":
+      return {
+        ...common,
+        agreementId: 0n,
+        buyer: event.creator,
+        seller: event.counterparty,
+        actor: event.creator,
+        mint: null,
+        amount: event.amount,
+        destination: null,
+        proof: null,
+        proofIndex: null,
+        milestone: event.milestone,
+        milestoneIndex: event.milestoneIndex,
+        previousState: event.agreementState,
+        newState: event.agreementState,
+      };
+    case "MilestoneSubmitted":
+    case "MilestoneApproved":
+    case "MilestoneRejected":
+      return {
+        ...common,
+        agreementId: 0n,
+        buyer: event.creator,
+        seller: event.counterparty,
+        actor: event.name === "MilestoneSubmitted" ? event.counterparty : event.creator,
+        mint: null,
+        amount: null,
+        destination: null,
+        proof: null,
+        proofIndex: null,
+        milestone: event.milestone,
+        milestoneIndex: event.milestoneIndex,
+        previousState: event.agreementState,
+        newState: event.agreementState,
+      };
+    case "MilestoneSettled":
+      return {
+        ...common,
+        agreementId: 0n,
+        buyer: event.creator,
+        seller: event.counterparty,
+        actor: event.counterparty,
+        mint: null,
+        // The payment is reported by the SettlementExecuted emitted beside
+        // this one. Counting it here too would double the settled total.
+        amount: null,
+        destination: event.destination,
+        proof: event.proof,
+        proofIndex: null,
+        milestone: event.milestone,
+        milestoneIndex: event.milestoneIndex,
+        previousState: event.agreementState,
+        newState: event.agreementState,
       };
     case "AgreementCancelled":
       return {
@@ -246,6 +317,8 @@ export function escrowReceiptFromEvent(envelope: EscrowEventEnvelope): PpvEscrow
         destination: null,
         proof: null,
         proofIndex: null,
+        milestone: null,
+        milestoneIndex: null,
         previousState: event.previousState,
         newState: event.newState,
       };
@@ -261,6 +334,8 @@ export function escrowReceiptFromEvent(envelope: EscrowEventEnvelope): PpvEscrow
         destination: null,
         proof: null,
         proofIndex: null,
+        milestone: null,
+        milestoneIndex: null,
         previousState: event.previousState,
         newState: event.newState,
       };
@@ -276,6 +351,8 @@ export function escrowReceiptFromEvent(envelope: EscrowEventEnvelope): PpvEscrow
         destination: null,
         proof: null,
         proofIndex: null,
+        milestone: null,
+        milestoneIndex: null,
         previousState: event.resultingState,
         newState: event.resultingState,
       };
@@ -291,6 +368,8 @@ export function escrowReceiptFromEvent(envelope: EscrowEventEnvelope): PpvEscrow
         destination: event.destination,
         proof: null,
         proofIndex: null,
+        milestone: null,
+        milestoneIndex: null,
         previousState: event.previousState,
         newState: event.newState,
       };
@@ -307,6 +386,8 @@ export function escrowReceiptFromEvent(envelope: EscrowEventEnvelope): PpvEscrow
         destination: null,
         proof: event.proof,
         proofIndex: event.proofIndex,
+        milestone: null,
+        milestoneIndex: null,
         previousState: event.agreementState,
         newState: event.agreementState,
       };
@@ -322,6 +403,8 @@ export function escrowReceiptFromEvent(envelope: EscrowEventEnvelope): PpvEscrow
         destination: null,
         proof: event.proof,
         proofIndex: event.proofIndex,
+        milestone: null,
+        milestoneIndex: null,
         // An annotation starts and ends in the same state, because it did not
         // move the agreement at all.
         previousState: event.agreementState,
@@ -347,8 +430,20 @@ export type AgreementLifecycle = {
   lastSlot: number;
   /** Evidence anchored to this agreement, in the order it was submitted. */
   proofs: readonly ProofRecord[];
+  /** The tranche schedule, for a milestone contract. Empty otherwise. */
+  milestones: readonly MilestoneRecord[];
   /** Transitions in chain order, with annotations placed where they landed. */
   receipts: readonly PpvEscrowReceiptV1[];
+};
+
+export type MilestoneRecord = {
+  milestone: string;
+  milestoneIndex: number;
+  amount: bigint;
+  state: "Pending" | "Submitted" | "Approved" | "Settled";
+  /** Where the tranche was paid, once it was. */
+  destination: string | null;
+  slot: number;
 };
 
 export type ProofRecord = {
@@ -417,6 +512,56 @@ function proofRecords(annotations: readonly PpvEscrowReceiptV1[]): ProofRecord[]
     record.decidedBy = receipt.actor;
   }
   return [...byProof.values()];
+}
+
+/**
+ * Folds the milestone annotations into one record per tranche. The state a
+ * tranche ends on is the state its last step reported, which is why every
+ * milestone event carries both sides of its own transition.
+ */
+function milestoneRecords(annotations: readonly PpvEscrowReceiptV1[]): MilestoneRecord[] {
+  const byMilestone = new Map<string, MilestoneRecord>();
+  for (const receipt of annotations) {
+    if (receipt.action === "MILESTONE_CREATED") {
+      byMilestone.set(receipt.milestone as string, {
+        milestone: receipt.milestone as string,
+        milestoneIndex: receipt.milestoneIndex as number,
+        amount: receipt.amount as bigint,
+        state: "Pending",
+        destination: null,
+        slot: receipt.slot,
+      });
+    }
+  }
+  for (const receipt of annotations) {
+    const record = byMilestone.get(receipt.milestone ?? "");
+    if (!record) {
+      if (receipt.milestone && receipt.action !== "MILESTONE_CREATED") {
+        throw new ReceiptError(
+          `a milestone step names ${receipt.milestone}, which was never created`,
+        );
+      }
+      continue;
+    }
+    switch (receipt.action) {
+      case "MILESTONE_SUBMITTED":
+        record.state = "Submitted";
+        break;
+      case "MILESTONE_APPROVED":
+        record.state = "Approved";
+        break;
+      case "MILESTONE_REJECTED":
+        record.state = "Pending";
+        break;
+      case "MILESTONE_SETTLED":
+        record.state = "Settled";
+        record.destination = receipt.destination;
+        break;
+      default:
+        break;
+    }
+  }
+  return [...byMilestone.values()].sort((a, b) => a.milestoneIndex - b.milestoneIndex);
 }
 
 export function reconstructAgreementLifecycle(
@@ -524,25 +669,50 @@ export function reconstructAgreementLifecycle(
   });
 
   const funded = ordered.find((receipt) => receipt.action === "AGREEMENT_FUNDED");
+
+  // Custody can leave the vault in more than one payment — a milestone
+  // contract settles in tranches — so what has to match the funded amount is
+  // the total paid out, not any single event. Annotations count: a tranche that
+  // did not end the agreement still moved money.
+  const all = [...ordered, ...annotations];
+  const paidOut = (action: EscrowReceiptAction) =>
+    all
+      .filter((receipt) => receipt.action === action)
+      .reduce<bigint | null>((total, receipt) => (total ?? 0n) + (receipt.amount ?? 0n), null);
+
+  const settledTotal = paidOut("SETTLEMENT_EXECUTED");
   const settled = ordered.find((receipt) => receipt.action === "SETTLEMENT_EXECUTED");
-  if (settled && funded && settled.amount !== funded.amount) {
-    throw new ReceiptError("settled amount does not match the funded amount");
-  }
-  if (settled && !funded) {
+  if (settledTotal !== null && !funded) {
     throw new ReceiptError("settlement without the funding it pays out");
   }
+  // Only a finished agreement must add up: a milestone contract mid-flight has
+  // paid out less than it holds, and that is not an inconsistency.
+  if (settled && funded && settledTotal !== funded.amount) {
+    throw new ReceiptError("settled amount does not match the funded amount");
+  }
   const refunded = ordered.find((receipt) => receipt.action === "REFUND_EXECUTED");
+  const refundedTotal = paidOut("REFUND_EXECUTED");
   if (settled && refunded) {
     throw new ReceiptError("an agreement cannot be both settled and refunded");
   }
-  if (refunded && !funded) {
+  if (refundedTotal !== null && !funded) {
     throw new ReceiptError("refund without the funding it returns");
   }
-  if (refunded && funded && refunded.amount !== funded.amount) {
-    throw new ReceiptError("refunded amount does not match the funded amount");
+  // A refund returns whatever is left, which is the whole amount unless
+  // milestones already paid some of it out.
+  if (refunded && funded) {
+    const returnedAndPaid = (refundedTotal ?? 0n) + (settledTotal ?? 0n);
+    if (returnedAndPaid !== funded.amount) {
+      throw new ReceiptError("refunded and settled amounts do not add up to the funded amount");
+    }
   }
 
   const proofs = proofRecords(sortedAnnotations);
+  const milestones = milestoneRecords(sortedAnnotations);
+  const scheduled = milestones.reduce((total, record) => total + record.amount, 0n);
+  if (milestones.length > 0 && funded && scheduled !== funded.amount) {
+    throw new ReceiptError("the milestone schedule does not add up to the funded amount");
+  }
   if (settled?.proof) {
     const cited = proofs.find((record) => record.proof === settled.proof);
     if (!cited) {
@@ -561,8 +731,8 @@ export function reconstructAgreementLifecycle(
     mint: created.mint as string,
     state,
     fundedAmount: funded?.amount ?? null,
-    settledAmount: settled?.amount ?? null,
-    refundedAmount: refunded?.amount ?? null,
+    settledAmount: settledTotal,
+    refundedAmount: refundedTotal,
     settlementDestination: settled?.destination ?? refunded?.destination ?? null,
     outcome:
       state === "Settled"
@@ -574,6 +744,7 @@ export function reconstructAgreementLifecycle(
             : "open",
     lastSlot: previous.slot,
     proofs,
+    milestones,
     receipts: withAnnotations,
   };
 }

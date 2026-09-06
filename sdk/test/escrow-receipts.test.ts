@@ -14,10 +14,12 @@ import {
   DISPUTE_FIXTURE,
   FIXTURE_ADDRESSES,
   LIFECYCLE_FIXTURE,
+  MILESTONE_FIXTURE,
   PROOF_APPROVED_FIXTURE,
   REFUND_FIXTURE,
   PROOF_FIXTURE,
   PROOF_REJECTED_FIXTURE,
+  SETTLEMENT_FIXTURE,
   addressFromByte,
   signatureFromByte,
 } from "./helpers/escrow-events.js";
@@ -465,7 +467,7 @@ test("an agreement cannot be both settled and refunded", () => {
   );
 });
 
-test("a refund must return exactly what was funded", () => {
+test("a refund must return everything that was not already paid out", () => {
   const receipts = [
     escrowReceiptFromEvent(envelope(LIFECYCLE_FIXTURE[0]!, 0)),
     escrowReceiptFromEvent(envelope(LIFECYCLE_FIXTURE[1]!, 1)),
@@ -481,6 +483,89 @@ test("a refund must return exactly what was funded", () => {
   });
   assert.throws(
     () => reconstructAgreementLifecycle([...receipts, shortRefund]),
-    /refunded amount does not match/,
+    /do not add up to the funded amount/,
+  );
+});
+
+test("a milestone contract rebuilds as a schedule paid in tranches", () => {
+  // Funded once for the whole budget, released in parts. The tranche payments
+  // are ordinary SettlementExecuted events whose agreement state does not
+  // change until the last one.
+  const created = escrowReceiptFromEvent(envelope(LIFECYCLE_FIXTURE[0]!, 0));
+  const funded = escrowReceiptFromEvent(envelope(LIFECYCLE_FIXTURE[1]!, 1));
+  const milestones = MILESTONE_FIXTURE.map((event, index) =>
+    escrowReceiptFromEvent({
+      event,
+      programId: PROGRAM_ID,
+      transactionSignature: signatureFromByte(140 + index),
+      slot: 1_000 + (index < 2 ? 0 : 2),
+      instructionIndex: 0,
+      innerInstructionIndex: index,
+      blockTime: event.timestamp,
+    }),
+  );
+  // The first tranche's payment: money moved, the agreement did not.
+  const tranche = escrowReceiptFromEvent({
+    event: {
+      ...SETTLEMENT_FIXTURE,
+      amount: 60_000_000n,
+      previousState: "Funded",
+      newState: "Funded",
+    },
+    programId: PROGRAM_ID,
+    transactionSignature: signatureFromByte(150),
+    slot: 1_002,
+    instructionIndex: 0,
+    innerInstructionIndex: 1,
+    blockTime: 1_700_000_150,
+  });
+
+  assert.equal(tranche.kind, "annotation", "a tranche payment is not a lifecycle step");
+  const lifecycle = reconstructAgreementLifecycle([created, funded, ...milestones, tranche]);
+
+  assert.equal(lifecycle.state, "Funded", "the agreement is not finished");
+  assert.equal(lifecycle.settledAmount, 60_000_000n, "one tranche paid so far");
+  assert.equal(lifecycle.milestones.length, 2);
+  assert.equal(lifecycle.milestones[0]?.state, "Settled");
+  assert.equal(lifecycle.milestones[0]?.destination, FIXTURE_ADDRESSES.SELLER_ATA);
+  // The second was submitted and refused, so it is back to Pending.
+  assert.equal(lifecycle.milestones[1]?.state, "Pending");
+  assert.equal(lifecycle.milestones[1]?.amount, 40_000_000n);
+});
+
+test("a schedule that does not add up to the escrow is refused", () => {
+  const created = escrowReceiptFromEvent(envelope(LIFECYCLE_FIXTURE[0]!, 0));
+  const funded = escrowReceiptFromEvent(envelope(LIFECYCLE_FIXTURE[1]!, 1));
+  // Only the first tranche of the two.
+  const partial = escrowReceiptFromEvent({
+    event: MILESTONE_FIXTURE[0]!,
+    programId: PROGRAM_ID,
+    transactionSignature: signatureFromByte(160),
+    slot: 1_000,
+    instructionIndex: 0,
+    innerInstructionIndex: 0,
+    blockTime: MILESTONE_FIXTURE[0]!.timestamp,
+  });
+  assert.throws(
+    () => reconstructAgreementLifecycle([created, funded, partial]),
+    /schedule does not add up/,
+  );
+});
+
+test("a milestone step for a tranche that was never created is refused", () => {
+  const created = escrowReceiptFromEvent(envelope(LIFECYCLE_FIXTURE[0]!, 0));
+  const funded = escrowReceiptFromEvent(envelope(LIFECYCLE_FIXTURE[1]!, 1));
+  const orphan = escrowReceiptFromEvent({
+    event: MILESTONE_FIXTURE[2]!,
+    programId: PROGRAM_ID,
+    transactionSignature: signatureFromByte(170),
+    slot: 1_002,
+    instructionIndex: 0,
+    innerInstructionIndex: 0,
+    blockTime: MILESTONE_FIXTURE[2]!.timestamp,
+  });
+  assert.throws(
+    () => reconstructAgreementLifecycle([created, funded, orphan]),
+    /which was never created/,
   );
 });

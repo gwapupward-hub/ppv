@@ -14,3 +14,7 @@ pub const VAULT_TOKEN_SEED: &[u8] = b"vault_token";
 /// Namespace of an agreement-bound proof. The agreement is in the seeds, so a
 /// proof anchored to one agreement can never be presented for another.
 pub const PROOF_SEED: &[u8] = b"proof";
+
+/// Namespace of a milestone. As with proofs, the agreement is in the seeds, so
+/// one agreement's milestones cannot affect another's.
+pub const MILESTONE_SEED: &[u8] = b"milestone";

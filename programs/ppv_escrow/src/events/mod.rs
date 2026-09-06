@@ -1,10 +1,12 @@
 pub mod agreement;
 pub mod dispute;
+pub mod milestone;
 pub mod proof;
 pub mod settlement;
 
 pub use agreement::*;
 pub use dispute::*;
+pub use milestone::*;
 pub use proof::*;
 pub use settlement::*;
 
@@ -45,6 +47,26 @@ mod tests {
         assert_eq!(DisputeOpened::DISCRIMINATOR, expected("DisputeOpened"));
         assert_eq!(DisputeResolved::DISCRIMINATOR, expected("DisputeResolved"));
         assert_eq!(RefundExecuted::DISCRIMINATOR, expected("RefundExecuted"));
+        assert_eq!(
+            MilestoneCreated::DISCRIMINATOR,
+            expected("MilestoneCreated")
+        );
+        assert_eq!(
+            MilestoneSubmitted::DISCRIMINATOR,
+            expected("MilestoneSubmitted")
+        );
+        assert_eq!(
+            MilestoneApproved::DISCRIMINATOR,
+            expected("MilestoneApproved")
+        );
+        assert_eq!(
+            MilestoneRejected::DISCRIMINATOR,
+            expected("MilestoneRejected")
+        );
+        assert_eq!(
+            MilestoneSettled::DISCRIMINATOR,
+            expected("MilestoneSettled")
+        );
     }
 
     // `ppv_commerce` emits an `AgreementCreated` too, and Anchor derives the

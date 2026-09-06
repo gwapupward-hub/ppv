@@ -16,6 +16,7 @@ export const AGREEMENT_SEED = new TextEncoder().encode("agreement");
 export const VAULT_AUTHORITY_SEED = new TextEncoder().encode("vault");
 export const VAULT_TOKEN_SEED = new TextEncoder().encode("vault_token");
 export const PROOF_SEED = new TextEncoder().encode("proof");
+export const MILESTONE_SEED = new TextEncoder().encode("milestone");
 
 const PDA_MARKER = new TextEncoder().encode("ProgramDerivedAddress");
 const MAX_SEED_LENGTH = 32;
@@ -118,10 +119,13 @@ export function deriveVault(programId: Address, agreement: Address): { address: 
   return findProgramAddress([VAULT_TOKEN_SEED, addressBytes(agreement)], programId);
 }
 
-/** `proof_index` is a u32 assigned by the agreement, encoded little-endian. */
+/**
+ * A u32 index assigned by the agreement, encoded little-endian. Proofs and
+ * milestones are both numbered this way by their agreement's own counter.
+ */
 export function proofIndexSeed(proofIndex: number): Uint8Array {
   if (!Number.isInteger(proofIndex) || proofIndex < 0 || proofIndex > 0xffff_ffff) {
-    throw new PdaError("proof index out of u32 range");
+    throw new PdaError("index out of u32 range");
   }
   const out = new Uint8Array(4);
   new DataView(out.buffer).setUint32(0, proofIndex, true);
@@ -140,6 +144,21 @@ export function deriveProof(
 ): { address: Address; bump: number } {
   return findProgramAddress(
     [PROOF_SEED, addressBytes(agreement), proofIndexSeed(proofIndex)],
+    programId,
+  );
+}
+
+/**
+ * As with proofs, the agreement is in the seeds, so one agreement's milestones
+ * have no address under another (Invariant 12).
+ */
+export function deriveMilestone(
+  programId: Address,
+  agreement: Address,
+  milestoneIndex: number,
+): { address: Address; bump: number } {
+  return findProgramAddress(
+    [MILESTONE_SEED, addressBytes(agreement), proofIndexSeed(milestoneIndex)],
     programId,
   );
 }

@@ -42,6 +42,18 @@ pub enum EscrowError {
     CannotConcedeToSelf,
     #[msg("Destination is not owned by a party to this agreement")]
     DestinationNotAParty,
+    #[msg("This instruction does not apply to this agreement type")]
+    WrongAgreementType,
+    #[msg("Milestone amounts must not exceed the agreement amount")]
+    MilestoneTotalMismatch,
+    #[msg("A milestone contract must be fully scheduled before it is funded")]
+    MilestonesNotFullyScheduled,
+    #[msg("Milestone does not belong to this agreement")]
+    MilestoneAgreementMismatch,
+    #[msg("Milestone is not in a valid state for this instruction")]
+    MilestoneBadState,
+    #[msg("Milestone amount must be greater than zero")]
+    InvalidMilestoneAmount,
     #[msg("Vault address already holds data")]
     VaultAlreadyInitialized,
     #[msg("Arithmetic overflow")]

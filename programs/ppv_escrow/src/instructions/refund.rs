@@ -58,7 +58,9 @@ pub fn handle_refund(ctx: Context<Refund>) -> Result<()> {
     let seller = ctx.accounts.seller.key();
     ctx.accounts.agreement.require_refundable(&seller)?;
 
-    let amount = ctx.accounts.agreement.amount;
+    // Whatever is left. A milestone contract abandoned midway returns the
+    // tranches nobody earned, not the whole original budget.
+    let amount = ctx.accounts.agreement.remaining();
     let agreement_key = ctx.accounts.agreement.key();
 
     pay_out_of_vault(
@@ -75,6 +77,7 @@ pub fn handle_refund(ctx: Context<Refund>) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
     let destination = ctx.accounts.buyer_token_account.key();
     let agreement = &mut ctx.accounts.agreement;
+    agreement.record_payout(amount)?;
     let previous_state = agreement.record_refunded(now);
 
     emit_cpi!(RefundExecuted {

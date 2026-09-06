@@ -43,6 +43,17 @@ pub struct Fund<'info> {
 pub fn handle_fund(ctx: Context<Fund>) -> Result<()> {
     let buyer = ctx.accounts.buyer.key();
     ctx.accounts.agreement.require_fundable(&buyer)?;
+    // A milestone contract's schedule is fixed before its money arrives, and
+    // the tranches must account for all of it. Funding a partly-planned
+    // contract would escrow money no milestone can ever release, and only a
+    // refund could get it back.
+    if ctx.accounts.agreement.is_milestone_contract() {
+        require_eq!(
+            ctx.accounts.agreement.milestone_total,
+            ctx.accounts.agreement.amount,
+            EscrowError::MilestonesNotFullyScheduled
+        );
+    }
 
     let amount = ctx.accounts.agreement.amount;
     let balance_before = ctx.accounts.vault.amount;

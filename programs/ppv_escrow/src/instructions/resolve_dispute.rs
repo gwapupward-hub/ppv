@@ -72,7 +72,7 @@ pub fn handle_resolve_dispute(ctx: Context<ResolveDispute>) -> Result<()> {
         .agreement
         .require_resolvable(&signer, &beneficiary)?;
 
-    let amount = ctx.accounts.agreement.amount;
+    let amount = ctx.accounts.agreement.remaining();
     let agreement_key = ctx.accounts.agreement.key();
     let outcome = ctx.accounts.agreement.outcome_for(&beneficiary);
 
@@ -90,6 +90,7 @@ pub fn handle_resolve_dispute(ctx: Context<ResolveDispute>) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
     let destination = ctx.accounts.destination.key();
     let agreement = &mut ctx.accounts.agreement;
+    agreement.record_payout(amount)?;
     let previous_state = match outcome {
         DisputeOutcome::SellerPaid => agreement.record_settled(now),
         DisputeOutcome::BuyerRefunded => agreement.record_refunded(now),
