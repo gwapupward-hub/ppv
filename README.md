@@ -18,6 +18,9 @@ implemented as three separately deployable Solana programs.
   programs' `emit_cpi!` events; and dependency-free PDA derivation, account
   decoding, and deterministic receipt reconstruction for the escrow kernel.
   PPV records facts; GwapScore interprets them.
+- `@gwap/ppv-indexer`: rebuilds an agreement's whole lifecycle from a public RPC
+  endpoint and the SDK — no GWAP database and no privileged access. Run it with
+  `npm run replay`.
 
 Not included: invoices, milestones, disputes, refunds, cancellation,
 arbitration, protocol fees, document encryption, GNS authority, or any mainnet
@@ -67,11 +70,18 @@ Prerequisites: Rust 1.85.1, Anchor 0.30.1, Solana CLI 1.18.17, and Node 22+.
 
 ```bash
 npm ci
-npm test                                          # typecheck + SDK tests
+npm test                                          # typecheck + SDK and indexer tests
 cargo fmt --all -- --check
 cargo test --workspace --locked
 cargo clippy --workspace --all-targets --locked
 npm run test:f1                                   # the complete F1 gate
+```
+
+Two read-only tools work against any cluster, and need only a program id:
+
+```bash
+npm run derive:addresses -- --program <ID> --creator <WALLET> --id 42
+npm run replay -- --rpc <RPC_URL> --program <ID> --creator <WALLET> --id 42
 ```
 
 `npm run test:f1` is the gate: it pins the toolchains, generates ephemeral
@@ -99,6 +109,7 @@ manifest. Never deploy these placeholder IDs.
 - [Address derivation](docs/pdas.md)
 - [Protocol events](docs/events.md)
 - [Receipts](docs/receipts.md)
+- [Indexing](docs/indexing.md)
 - [Escrow security model and attack matrix](docs/security-model.md)
 - [Threat model](docs/threat-model.md)
 - [Canonicalization v1](docs/canonicalization-v1.md)

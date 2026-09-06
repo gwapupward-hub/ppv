@@ -43,6 +43,8 @@ export type EscrowEventEnvelope = {
   /** Program id the event CPI targeted. An event is only identified by the pair. */
   programId: string;
   transactionSignature: string;
+  /** Slot the transaction committed in. Orders events across transactions. */
+  slot: number;
   instructionIndex: number;
   innerInstructionIndex: number | null;
   /** Unix seconds from the block; falls back to the event's own timestamp. */
@@ -69,6 +71,7 @@ export type PpvEscrowReceiptV1 = {
   newState: AgreementState;
   occurredAt: string;
   transactionSignature: string;
+  slot: number;
   instructionIndex: number;
   innerInstructionIndex: number | null;
 };
@@ -112,6 +115,10 @@ export function escrowReceiptFromEvent(envelope: EscrowEventEnvelope): PpvEscrow
     throw new ReceiptError("invalid instruction index");
   }
 
+  if (!Number.isInteger(envelope.slot) || envelope.slot < 0) {
+    throw new ReceiptError("invalid slot");
+  }
+
   const action = ESCROW_RECEIPT_ACTIONS[event.name];
   const common = {
     schemaVersion: ESCROW_RECEIPT_SCHEMA_VERSION,
@@ -127,6 +134,7 @@ export function escrowReceiptFromEvent(envelope: EscrowEventEnvelope): PpvEscrow
     agreement: event.agreement,
     occurredAt: isoFromUnix(envelope.blockTime ?? event.timestamp),
     transactionSignature: envelope.transactionSignature,
+    slot: envelope.slot,
     instructionIndex: envelope.instructionIndex,
     innerInstructionIndex: envelope.innerInstructionIndex,
   };
@@ -204,6 +212,8 @@ export type AgreementLifecycle = {
   fundedAmount: bigint | null;
   settledAmount: bigint | null;
   settlementDestination: string | null;
+  /** Slot of the most recent transition, for cursor bookkeeping. */
+  lastSlot: number;
   receipts: readonly PpvEscrowReceiptV1[];
 };
 
@@ -213,7 +223,15 @@ export type AgreementLifecycle = {
  * PPV database would report — and refuses a history that does not chain.
  *
  * Receipts arrive out of order and more than once; both are normal for webhook
- * delivery, and neither may change the result.
+ * and RPC delivery, and neither may change the result.
+ *
+ * Order comes from the state machine, not from a table of action ranks. Each
+ * receipt names the state it started from, so the transitions link into exactly
+ * one path from creation, and that path is the history. Chain coordinates are
+ * then a *check* on it rather than its source: a transition cannot have
+ * committed in an earlier slot than the transition it depends on. Ranking
+ * actions instead would work only for a lifecycle that never branches, and
+ * disputes, refunds, and milestones all branch.
  */
 export function reconstructAgreementLifecycle(
   receipts: readonly PpvEscrowReceiptV1[],
@@ -229,40 +247,66 @@ export function reconstructAgreementLifecycle(
     byId.set(receipt.receiptId, receipt);
   }
 
-  const order: Record<EscrowReceiptAction, number> = {
-    AGREEMENT_CREATED: 0,
-    AGREEMENT_FUNDED: 1,
-    WORK_COMPLETED: 2,
-    SETTLEMENT_EXECUTED: 3,
-  };
-  const ordered = [...byId.values()].sort((a, b) => order[a.action] - order[b.action]);
-
-  const agreement = ordered[0]?.agreement as string;
-  for (const receipt of ordered) {
+  const agreement = [...byId.values()][0]?.agreement as string;
+  for (const receipt of byId.values()) {
     if (receipt.agreement !== agreement) {
       throw new ReceiptError("receipts describe more than one agreement");
     }
   }
 
-  const created = ordered.find((receipt) => receipt.action === "AGREEMENT_CREATED");
-  if (!created) throw new ReceiptError("lifecycle is missing its creation receipt");
+  // Exactly one receipt opens a history: the one that started from no state.
+  const roots = [...byId.values()].filter((receipt) => receipt.previousState === null);
+  if (roots.length === 0) throw new ReceiptError("lifecycle is missing its creation receipt");
+  if (roots.length > 1) throw new ReceiptError("lifecycle has more than one creation receipt");
+  const created = roots[0] as PpvEscrowReceiptV1;
 
-  // Every step must claim to start where the previous one ended. A receipt that
-  // does not chain is a receipt that does not describe this agreement's history.
-  let state: AgreementState = created.newState;
-  for (const receipt of ordered.slice(1)) {
-    if (receipt.previousState !== state) {
+  // Every other receipt is a transition out of exactly one state. Two receipts
+  // leaving the same state would mean the chain forked, which the program's
+  // state machine makes impossible — so it means the input is wrong.
+  const transitions = new Map<AgreementState, PpvEscrowReceiptV1>();
+  for (const receipt of byId.values()) {
+    if (receipt.previousState === null) continue;
+    const existing = transitions.get(receipt.previousState);
+    if (existing && existing.receiptId !== receipt.receiptId) {
+      throw new ReceiptError(`two transitions leave ${receipt.previousState}`);
+    }
+    transitions.set(receipt.previousState, receipt);
+  }
+
+  const ordered: PpvEscrowReceiptV1[] = [created];
+  const visited = new Set<AgreementState>([created.newState]);
+  let state = created.newState;
+  let previous = created;
+
+  for (let next = transitions.get(state); next; next = transitions.get(state)) {
+    if (next.slot < previous.slot) {
       throw new ReceiptError(
-        `${receipt.action} claims to start from ${receipt.previousState}, chain is at ${state}`,
+        `${next.action} committed in slot ${next.slot}, before the ${previous.action} it follows`,
       );
     }
-    state = receipt.newState;
+    transitions.delete(state);
+    ordered.push(next);
+    state = next.newState;
+    previous = next;
+    if (visited.has(state)) throw new ReceiptError(`lifecycle revisits ${state}`);
+    visited.add(state);
+  }
+
+  // Anything left over never attached to the path out of creation.
+  const orphan = [...transitions.values()][0];
+  if (orphan) {
+    throw new ReceiptError(
+      `${orphan.action} claims to start from ${orphan.previousState}, which this history never reached`,
+    );
   }
 
   const funded = ordered.find((receipt) => receipt.action === "AGREEMENT_FUNDED");
   const settled = ordered.find((receipt) => receipt.action === "SETTLEMENT_EXECUTED");
   if (settled && funded && settled.amount !== funded.amount) {
     throw new ReceiptError("settled amount does not match the funded amount");
+  }
+  if (settled && !funded) {
+    throw new ReceiptError("settlement without the funding it pays out");
   }
 
   return {
@@ -275,6 +319,7 @@ export function reconstructAgreementLifecycle(
     fundedAmount: funded?.amount ?? null,
     settledAmount: settled?.amount ?? null,
     settlementDestination: settled?.destination ?? null,
+    lastSlot: previous.slot,
     receipts: ordered,
   };
 }

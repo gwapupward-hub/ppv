@@ -3,15 +3,21 @@
   "version": "0.1.0",
   "private": true,
   "workspaces": [
-    "sdk"
+    "sdk",
+    "indexer"
   ],
   "scripts": {
+    "build": "npm run build:sdk && npm run build:indexer",
+    "build:indexer": "npm run build --workspace @gwap/ppv-indexer",
     "build:sdk": "npm run build --workspace @gwap/ppv-sdk",
-    "test": "npm run typecheck && npm run test:sdk",
-    "test:sdk": "npm run test --workspace @gwap/ppv-sdk",
+    "derive:addresses": "npm run build:sdk --silent && node --import tsx scripts/derive-addresses.mts",
+    "replay": "npm run build --silent && node --import tsx scripts/replay-agreement.mts",
+    "test": "npm run typecheck && npm run test:sdk && npm run test:indexer",
     "test:anchor": "node --import tsx ./node_modules/mocha/bin/mocha.js --timeout 1000000 \"tests/**/*.ts\"",
     "test:f1": "./scripts/verify-f1.sh",
-    "typecheck": "tsc --noEmit -p tsconfig.json && npm run typecheck --workspace @gwap/ppv-sdk"
+    "test:indexer": "npm run build:sdk && npm run test --workspace @gwap/ppv-indexer",
+    "test:sdk": "npm run test --workspace @gwap/ppv-sdk",
+    "typecheck": "tsc --noEmit -p tsconfig.json && npm run typecheck --workspace @gwap/ppv-sdk && npm run build:sdk && npm run typecheck --workspace @gwap/ppv-indexer && npm run build:indexer && tsc --noEmit -p scripts/tsconfig.json"
   },
   "devDependencies": {
     "@coral-xyz/anchor": "0.30.1",

@@ -16,6 +16,7 @@ import {
   SystemProgram,
 } from "@solana/web3.js";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 
 /**
  * On-chain adversarial suite for the PPV escrow kernel.
@@ -605,6 +606,131 @@ describe("PPV escrow kernel", () => {
 
       const vault = await getAccount(connection, mine.vault);
       assert.equal(vault.amount, AMOUNT);
+    });
+  });
+
+  describe("chain-data reconstruction", () => {
+    // `@gwap/ppv-indexer` rebuilds an agreement's history from RPC alone, and
+    // its unit tests run against fixtures this repository writes. That proves
+    // the indexer matches our idea of Anchor's output. These assertions check
+    // the idea itself against the real thing, on the exact RPC shape the
+    // indexer consumes — because every one of them, if wrong, produces an
+    // agreement that silently looks like it never happened.
+    const EVENT_IX_TAG = Buffer.from([0xe4, 0x45, 0xa5, 0x2e, 0x51, 0xcb, 0x9a, 0x1d]);
+
+    function eventDiscriminator(name: string): Buffer {
+      return createHash("sha256").update(`event:${name}`).digest().subarray(0, 8);
+    }
+
+    async function rawTransaction(signature: string): Promise<any> {
+      await connection.confirmTransaction(signature, "confirmed");
+      const response = await fetch(connection.rpcEndpoint, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "getTransaction",
+          params: [
+            signature,
+            { commitment: "confirmed", encoding: "json", maxSupportedTransactionVersion: 0 },
+          ],
+        }),
+      });
+      const body = (await response.json()) as { result?: any; error?: { message?: string } };
+      assert.equal(body.error, undefined, `getTransaction failed: ${body.error?.message}`);
+      assert.ok(body.result, "the RPC returned no transaction");
+      return body.result;
+    }
+
+    /** The account list instruction indices address, in RPC order. */
+    function accountKeys(tx: any): string[] {
+      return [
+        ...tx.transaction.message.accountKeys,
+        ...(tx.meta?.loadedAddresses?.writable ?? []),
+        ...(tx.meta?.loadedAddresses?.readonly ?? []),
+      ];
+    }
+
+    function eventInstructions(tx: any, eventAuthority: PublicKey) {
+      const keys = accountKeys(tx);
+      const found: Array<{ data: Buffer; innerInstructionIndex: number; instructionIndex: number }> = [];
+      for (const group of tx.meta?.innerInstructions ?? []) {
+        group.instructions.forEach((ix: any, innerInstructionIndex: number) => {
+          if (keys[ix.programIdIndex] !== escrow.programId.toBase58()) return;
+          if (keys[ix.accounts[0]] !== eventAuthority.toBase58()) return;
+          found.push({
+            data: Buffer.from(anchor.utils.bytes.bs58.decode(ix.data)),
+            innerInstructionIndex,
+            instructionIndex: group.index,
+          });
+        });
+      }
+      return found;
+    }
+
+    it("emits events an outside indexer can find and attribute", async () => {
+      const [eventAuthority] = PublicKey.findProgramAddressSync(
+        [Buffer.from("__event_authority")],
+        escrow.programId,
+      );
+
+      const agreement = await initialize();
+      const fundSignature = await fund(agreement);
+      const completeSignature = await markCompleted(agreement);
+      const settleSignature = await settle(agreement);
+
+      const steps: Array<[string, string]> = [
+        [agreement.signature, "AgreementCreated"],
+        [fundSignature, "AgreementFunded"],
+        [completeSignature, "WorkCompleted"],
+        [settleSignature, "SettlementExecuted"],
+      ];
+
+      for (const [signature, name] of steps) {
+        const tx = await rawTransaction(signature);
+        assert.equal(tx.meta.err, null);
+
+        const events = eventInstructions(tx, eventAuthority);
+        assert.equal(events.length, 1, `expected exactly one event in the ${name} transaction`);
+        const [event] = events;
+
+        // The wire format the SDK decoder assumes: an event-ix tag, then the
+        // discriminator derived from the event name, then the borsh fields.
+        assert.deepEqual(event!.data.subarray(0, 8), EVENT_IX_TAG);
+        assert.deepEqual(event!.data.subarray(8, 16), eventDiscriminator(name));
+        // Every escrow event opens with the agreement it describes, which is
+        // what lets an indexer attribute one without reading the account.
+        assert.equal(
+          new PublicKey(event!.data.subarray(16, 48)).toBase58(),
+          agreement.agreement.toBase58(),
+        );
+      }
+    });
+
+    it("puts no event in the transaction of a rejected instruction", async () => {
+      const [eventAuthority] = PublicKey.findProgramAddressSync(
+        [Buffer.from("__event_authority")],
+        escrow.programId,
+      );
+      const funded = await fundedAgreement();
+
+      // A settlement that the state machine refuses. Nothing commits, so an
+      // indexer reading only committed transactions can never see it.
+      await expectAnchorError(settle(funded), "BadState");
+
+      const history = await connection.getSignaturesForAddress(funded.agreement, { limit: 20 });
+      for (const entry of history) {
+        assert.equal(entry.err, null);
+        const tx = await rawTransaction(entry.signature);
+        for (const event of eventInstructions(tx, eventAuthority)) {
+          assert.notDeepEqual(
+            event.data.subarray(8, 16),
+            eventDiscriminator("SettlementExecuted"),
+            "a refused settlement must leave no settlement event behind",
+          );
+        }
+      }
     });
   });
 });

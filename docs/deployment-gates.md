@@ -30,6 +30,8 @@ machine behavior only. It does not authorize deployment.
 - Controlled program keypairs replace placeholders.
 - Devnet upgrade authorities and program IDs are documented.
 - Indexer consumes CPI events idempotently and reconciles against chain state.
+  `@gwap/ppv-indexer` does this; `scripts/replay-agreement.mts` is the
+  reconciliation check to run against a deployed program.
 - GWAP uses PPV internally for real, non-sensitive agreements.
 - No private document is stored in plaintext.
 

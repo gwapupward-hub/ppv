@@ -66,6 +66,14 @@ pub struct SettlementExecuted {
 `proof` is always `None` today. It is present from the first release so that
 Phase 3 can populate it without moving a byte for existing consumers.
 
+## Reading events back
+
+Decoding bytes is not the same as accepting history. An indexer must also
+establish that the bytes came from a committed transaction, from an inner
+instruction rather than a submitted one, and with the program's event authority
+present. Those three rules, and the versioned-transaction account ordering that
+trips up a naive reader, are in [indexing.md](indexing.md).
+
 ## Design rules
 
 1. **Facts, never judgements.** `SettlementExecuted`, not `SellerWasReliable`.

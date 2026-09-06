@@ -27,6 +27,11 @@ receiptId = "ppvr_" + sha256(
 )[..20 bytes]
 ```
 
+The slot is recorded on the receipt but is deliberately **not** in the id. An id
+must depend only on what identifies the event, and a transaction's signature
+already does that; including the slot would let a re-read that disagreed about
+the slot mint a second receipt for one fact.
+
 Nothing in that derivation comes from wall-clock time, a random value, or a
 database sequence. Replaying the same transaction produces the same receipt id,
 so an indexer's receipt table is idempotent under at-least-once delivery without
@@ -61,16 +66,35 @@ const lifecycle = reconstructAgreementLifecycle(receipts);
 // → { state: "Settled", fundedAmount, settledAmount, settlementDestination, … }
 ```
 
+Order comes from the **state chain**, not from a timestamp, a slot, or a table
+of action ranks. Each receipt names the state its transition started from, so
+the transitions link into exactly one path out of creation, and that path is the
+history. Slots are then a check on the result rather than its source: a
+transition cannot have committed in an earlier slot than the transition it
+depends on.
+
+The alternatives all fail. `blockTime` is a validator estimate and is not
+monotonic. Slots tie, because two transitions can land in one slot. Ranking
+actions works only while the lifecycle never branches, and disputes, refunds,
+and milestones all branch.
+
 `reconstructAgreementLifecycle` is deliberately strict. It refuses a history
 where:
 
-- a step does not start from the state the previous step ended in,
+- a step does not start from a state the history reached,
+- two transitions leave the same state (a fork the program cannot produce),
+- the chain revisits a state,
+- a transition committed in an earlier slot than the one it follows,
+- a settlement appears without the funding it pays out,
 - the settled amount disagrees with the funded amount,
 - receipts from more than one agreement are mixed,
-- the creation receipt is missing.
+- the creation receipt is missing, or there is more than one.
 
 Out-of-order and duplicated delivery are *not* errors — both are normal for
-webhooks, and neither may change the result.
+webhooks and RPC backfills, and neither may change the result.
+
+Turning chain data into these receipts is the indexer's job, and the rules that
+decide what counts as an event at all are in [indexing.md](indexing.md).
 
 ## Rules
 

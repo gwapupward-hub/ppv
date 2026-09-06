@@ -115,13 +115,32 @@ Open --fund()--> Funded --mark_completed()--> Completed --settle()--> Settled
 Negotiation state and custody state are never merged into one enum. See
 [state-machines.md](state-machines.md).
 
+## Reconstruction
+
+```text
+ppv_escrow events (emit_cpi!)
+        │
+        ▼
+@gwap/ppv-indexer   extraction → receipts → projection
+        │
+        ▼
+Agreement lifecycle  identical for anyone with an RPC endpoint
+```
+
+`@gwap/ppv-indexer` rebuilds an agreement's whole history from a public RPC
+endpoint and the SDK — no GWAP database, no privileged access. It is the
+executable form of the protocol's success criterion, and
+`scripts/replay-agreement.mts` runs it against any cluster. See
+[indexing.md](indexing.md).
+
 ## Off-chain responsibilities
 
 - Canonicalize and hash documents locally.
 - Encrypt private documents before storage. Encryption is not included until a
   wallet-compatible scheme receives dedicated cryptographic review.
 - Store private ciphertext in access-controlled, deletable object storage.
-- Treat chain state as truth and indexed database records as a cache.
+- Treat chain state as truth and indexed database records as a cache. Where the
+  two disagree, `@gwap/ppv-indexer` decides.
 - Resolve GNS names separately and label historical claims accurately.
 
 ## Upgrade model

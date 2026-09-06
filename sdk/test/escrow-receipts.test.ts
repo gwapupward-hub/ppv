@@ -23,6 +23,7 @@ function envelope(event: PpvEscrowEvent, index: number): EscrowEventEnvelope {
     event,
     programId: PROGRAM_ID,
     transactionSignature: signatureFromByte(index + 1),
+    slot: 1_000 + index,
     instructionIndex: 0,
     innerInstructionIndex: index,
     blockTime: event.timestamp,
@@ -104,10 +105,52 @@ test("a history that does not chain is refused", () => {
   // Settlement without the completion that legally precedes it.
   assert.throws(
     () => reconstructAgreementLifecycle([receipts[0]!, receipts[1]!, receipts[3]!]),
-    ReceiptError,
+    /never reached/,
   );
   // A lifecycle with no creation has no identity to describe.
   assert.throws(() => reconstructAgreementLifecycle(receipts.slice(1)), /missing its creation receipt/);
+  // A settlement with no funding pays out custody that was never taken.
+  assert.throws(
+    () => reconstructAgreementLifecycle([receipts[0]!, { ...receipts[3]!, previousState: "Open" }]),
+    /settlement without the funding/,
+  );
+});
+
+test("order comes from the state chain, not from the order of arrival", () => {
+  // The same four transitions delivered in reverse, with slots that agree,
+  // must produce the same ordered history.
+  const receipts = lifecycleReceipts();
+  const lifecycle = reconstructAgreementLifecycle([...receipts].reverse());
+  assert.deepEqual(
+    lifecycle.receipts.map((receipt) => receipt.action),
+    ["AGREEMENT_CREATED", "AGREEMENT_FUNDED", "WORK_COMPLETED", "SETTLEMENT_EXECUTED"],
+  );
+  assert.equal(lifecycle.lastSlot, 1_003);
+});
+
+test("a transition cannot commit before the transition it depends on", () => {
+  // Causality is the one thing the state chain cannot check on its own: two
+  // receipts can link perfectly and still describe an impossible history.
+  const receipts = lifecycleReceipts();
+  const backwards = [receipts[0]!, receipts[1]!, { ...receipts[2]!, slot: 5 }];
+  assert.throws(() => reconstructAgreementLifecycle(backwards), /before the .* it follows/);
+});
+
+test("a forked history is refused rather than silently resolved", () => {
+  const receipts = lifecycleReceipts();
+  // Two different receipts both claiming to leave Funded.
+  const rival = { ...receipts[2]!, receiptId: "ppvr_rival", actor: receipts[2]!.buyer };
+  assert.throws(
+    () => reconstructAgreementLifecycle([...receipts, rival]),
+    /two transitions leave Funded/,
+  );
+});
+
+test("a receipt cannot be built without a slot", () => {
+  assert.throws(
+    () => escrowReceiptFromEvent({ ...envelope(LIFECYCLE_FIXTURE[0]!, 0), slot: -1 }),
+    /invalid slot/,
+  );
 });
 
 test("receipts from two agreements cannot be merged into one history", () => {
