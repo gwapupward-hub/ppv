@@ -72,6 +72,18 @@ cases in `programs/ppv_escrow/src/state/agreement.rs`.
 | Settle as an outsider | FAIL | ✓ |
 | Settle as the buyer (destination still the seller's) | PASS | ✓ |
 | Drain another agreement's vault through your own agreement | FAIL | ✓ |
+| Cancel an unfunded agreement | PASS | ✓ |
+| Cancel as the seller, or after funding | FAIL | ✓ |
+| Open a dispute as either party over escrowed money | PASS | ✓ |
+| Open a dispute as an outsider, or before funding | FAIL | ✓ |
+| Settle while disputed | FAIL | ✓ |
+| Resolve a dispute in your own favour | FAIL | ✓ |
+| Resolve a dispute to a non-party | FAIL | ✓ |
+| Resolve an agreement that is not disputed, or twice | FAIL | ✓ |
+| Concede a dispute to the other party | PASS | ✓ |
+| Refund as the seller | PASS | ✓ |
+| Refund as the buyer, or redirected away from the buyer | FAIL | ✓ |
+| Act on a settled, refunded, or cancelled agreement | FAIL | ✓ |
 | Observe an event from a failed settlement | FAIL | ✓ |
 | Take a donated surplus along with settlement | FAIL | ✓ |
 
@@ -100,10 +112,11 @@ it is a review step, not a committed change.
 - **Classic SPL Token only.** A Token-2022 mint with a transfer fee would break
   "the vault received exactly the amount agreed". Token-2022 arrives with
   accounting rules of its own, not by widening an account type.
-- **No cancellation or refund.** An `Open` agreement can be abandoned but not
-  closed, and a `Funded` agreement cannot be refunded. Both are Phase 5, and
-  both need the dispute machine to be meaningful. Until then, the buyer's own
-  signature is required for funds to leave their wallet at all.
+- **Disputes end only by concession.** There is no arbiter, so a dispute where
+  neither party will concede stays open, with the money in the vault. That is a
+  deliberate trade: an arbiter is a trusted third party, and the protocol has
+  not yet decided who may be one or under what policy. Phase 13, behind the
+  arbiter policy gate, is where splits and third-party judgement arrive.
 - **No expiry.** Nothing forces an agreement forward. A seller who never marks
   work complete leaves tokens in the vault indefinitely. Time-based release is a
   design decision with its own attack surface and is deferred, not forgotten.

@@ -1,9 +1,10 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::{self, Mint, Token, TokenAccount, TransferChecked};
+use anchor_spl::token::{Mint, Token, TokenAccount};
 
 use crate::constants::{AGREEMENT_SEED, VAULT_AUTHORITY_SEED, VAULT_TOKEN_SEED};
 use crate::errors::EscrowError;
 use crate::events::SettlementExecuted;
+use crate::instructions::custody::pay_out_of_vault;
 use crate::state::{Agreement, Proof};
 
 #[event_cpi]
@@ -76,45 +77,16 @@ pub fn handle_settle(ctx: Context<Settle>) -> Result<()> {
         None => None,
     };
 
-    let vault_before = ctx.accounts.vault.amount;
-    let seller_before = ctx.accounts.seller_token_account.amount;
-
-    let signer_seeds: &[&[&[u8]]] = &[&[
-        VAULT_AUTHORITY_SEED,
-        agreement_key.as_ref(),
-        &[ctx.accounts.agreement.vault_authority_bump],
-    ]];
-
-    token::transfer_checked(
-        CpiContext::new_with_signer(
-            ctx.accounts.token_program.to_account_info(),
-            TransferChecked {
-                from: ctx.accounts.vault.to_account_info(),
-                mint: ctx.accounts.mint.to_account_info(),
-                to: ctx.accounts.seller_token_account.to_account_info(),
-                authority: ctx.accounts.vault_authority.to_account_info(),
-            },
-            signer_seeds,
-        ),
+    pay_out_of_vault(
+        &ctx.accounts.token_program,
+        &mut ctx.accounts.vault,
+        &ctx.accounts.vault_authority,
+        &ctx.accounts.mint,
+        &mut ctx.accounts.seller_token_account,
+        &agreement_key,
+        ctx.accounts.agreement.vault_authority_bump,
         amount,
-        ctx.accounts.mint.decimals,
     )?;
-
-    // Assert both sides of the movement. A settlement event must describe a
-    // transfer that actually happened, at the amount the agreement fixed.
-    ctx.accounts.vault.reload()?;
-    ctx.accounts.seller_token_account.reload()?;
-    let debited = vault_before
-        .checked_sub(ctx.accounts.vault.amount)
-        .ok_or(EscrowError::CustodyMismatch)?;
-    let credited = ctx
-        .accounts
-        .seller_token_account
-        .amount
-        .checked_sub(seller_before)
-        .ok_or(EscrowError::CustodyMismatch)?;
-    require_eq!(debited, amount, EscrowError::CustodyMismatch);
-    require_eq!(credited, amount, EscrowError::CustodyMismatch);
 
     let now = Clock::get()?.unix_timestamp;
     let destination = ctx.accounts.seller_token_account.key();

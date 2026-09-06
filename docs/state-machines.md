@@ -15,17 +15,23 @@ is the vulnerability.
 ## Escrow custody lifecycle (`ppv_escrow`)
 
 ```text
-   OPEN
-     │  fund()            buyer only
-     ▼
-  FUNDED
-     │  mark_completed()  seller only, moves no money
-     ▼
-COMPLETED
-     │  settle()          either party, pays the seller
-     ▼
-  SETTLED   (terminal)
+        OPEN ──cancel()──> CANCELLED          buyer only, no money exists yet
+          │ fund()                            buyer only
+          ▼
+    ┌── FUNDED ──────────────────┐
+    │     │ mark_completed()     │ open_dispute()   either party
+    │     ▼                      │ refund()         seller only
+    │ COMPLETED ──open_dispute()─┤
+    │     │ settle()             ▼
+    │     │                  DISPUTED
+    │     │                      │ resolve_dispute()   the conceding party
+    │     ▼                      ├──────────> SETTLED
+    │  SETTLED <─────────────────┘
+    └──refund()──────────────────────────────> REFUNDED
 ```
+
+`SETTLED`, `REFUNDED` and `CANCELLED` are terminal. Every way an agreement can
+end is final: paid, refunded, or abandoned before money was ever involved.
 
 | Action | Signer | Legal from | Result | Custody effect |
 | --- | --- | --- | --- | --- |
@@ -33,9 +39,13 @@ COMPLETED
 | `fund` | creator (buyer) | `Open` | `Funded` | Buyer ATA → vault, exactly `amount` |
 | `mark_completed` | counterparty (seller) | `Funded` | `Completed` | None |
 | `settle` | either party | `Completed` | `Settled` | Vault → seller ATA, exactly `amount` |
-| `submit_proof` | either party | `Funded`, `Completed` | unchanged | None |
-| `approve_proof` | the party who did not submit | `Funded`, `Completed` | unchanged | None |
-| `reject_proof` | the party who did not submit | `Funded`, `Completed` | unchanged | None |
+| `cancel` | creator (buyer) | `Open` | `Cancelled` | None — the vault is empty by construction |
+| `open_dispute` | either party | `Funded`, `Completed` | `Disputed` | None |
+| `resolve_dispute` | the conceding party | `Disputed` | `Settled` or `Refunded` | Vault → the *other* party, exactly `amount` |
+| `refund` | counterparty (seller) | `Funded`, `Completed` | `Refunded` | Vault → buyer ATA, exactly `amount` |
+| `submit_proof` | either party | `Funded`, `Completed`, `Disputed` | unchanged | None |
+| `approve_proof` | the party who did not submit | `Funded`, `Completed`, `Disputed` | unchanged | None |
+| `reject_proof` | the party who did not submit | `Funded`, `Completed`, `Disputed` | unchanged | None |
 
 Explicitly rejected, and covered by tests:
 
@@ -80,6 +90,34 @@ with its hash intact.
 and named in the settlement event. It is optional on purpose: a plain escrow
 settles on the parties' own signatures, and requiring a proof would fold
 approval into custody.
+
+### Disputes are resolved by concession, not by a judge
+
+`resolve_dispute` has no arbiter and trusts nobody. The signer surrenders its
+own claim and the money goes to the **other** party:
+
+```text
+buyer signs  → seller is paid    → SETTLED
+seller signs → buyer is refunded → REFUNDED
+```
+
+So the only party who can send this vault to the seller is the buyer, and the
+only one who can send it back to the buyer is the seller. Neither can take it.
+The beneficiary is read from the destination account's owner rather than passed
+as a flag, so one fact decides the outcome instead of two that could disagree.
+
+That is the whole of Phase 5's resolution model — one side whole, never a split.
+Percentage splits, designated arbiters, and multisig arbitration are Phase 13,
+behind the arbiter policy gate. Concession is what a protocol can do safely
+before it has decided who is allowed to judge.
+
+### Cancellation and refund are not the same act
+
+`cancel` exists only for `Open`, where the vault is empty by construction — it
+takes no token accounts at all, so there is nothing it could move even if it
+were wrong. Once money is escrowed, giving it back is `refund`, which moves
+custody and is the seller's to give. A buyer who wants its money back over the
+seller's objection has to `open_dispute`; it cannot simply take it.
 
 ### Why completion and settlement are separate
 

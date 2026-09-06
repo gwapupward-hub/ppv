@@ -35,6 +35,10 @@ export const ESCROW_RECEIPT_ACTIONS = {
   ProofSubmitted: "PROOF_SUBMITTED",
   ProofApproved: "PROOF_APPROVED",
   ProofRejected: "PROOF_REJECTED",
+  AgreementCancelled: "AGREEMENT_CANCELLED",
+  DisputeOpened: "DISPUTE_OPENED",
+  DisputeResolved: "DISPUTE_RESOLVED",
+  RefundExecuted: "REFUND_EXECUTED",
 } as const;
 
 /**
@@ -53,6 +57,9 @@ const ANNOTATION_ACTIONS = new Set<string>([
   "PROOF_SUBMITTED",
   "PROOF_APPROVED",
   "PROOF_REJECTED",
+  // The transition out of `Disputed` is carried by the settlement or refund
+  // emitted beside this one.
+  "DISPUTE_RESOLVED",
 ]);
 
 export type EscrowReceiptAction =
@@ -227,6 +234,66 @@ export function escrowReceiptFromEvent(envelope: EscrowEventEnvelope): PpvEscrow
         previousState: event.previousState,
         newState: event.newState,
       };
+    case "AgreementCancelled":
+      return {
+        ...common,
+        agreementId: 0n,
+        buyer: event.creator,
+        seller: event.counterparty,
+        actor: event.cancelledBy,
+        mint: null,
+        amount: null,
+        destination: null,
+        proof: null,
+        proofIndex: null,
+        previousState: event.previousState,
+        newState: event.newState,
+      };
+    case "DisputeOpened":
+      return {
+        ...common,
+        agreementId: 0n,
+        buyer: event.creator,
+        seller: event.counterparty,
+        actor: event.openedBy,
+        mint: null,
+        amount: null,
+        destination: null,
+        proof: null,
+        proofIndex: null,
+        previousState: event.previousState,
+        newState: event.newState,
+      };
+    case "DisputeResolved":
+      return {
+        ...common,
+        agreementId: 0n,
+        buyer: event.creator,
+        seller: event.counterparty,
+        actor: event.resolvedBy,
+        mint: null,
+        amount: null,
+        destination: null,
+        proof: null,
+        proofIndex: null,
+        previousState: event.resultingState,
+        newState: event.resultingState,
+      };
+    case "RefundExecuted":
+      return {
+        ...common,
+        agreementId: 0n,
+        buyer: event.buyer,
+        seller: event.seller,
+        actor: event.refundedBy,
+        mint: event.mint,
+        amount: event.amount,
+        destination: event.destination,
+        proof: null,
+        proofIndex: null,
+        previousState: event.previousState,
+        newState: event.newState,
+      };
     case "ProofApproved":
     case "ProofRejected":
       return {
@@ -272,7 +339,10 @@ export type AgreementLifecycle = {
   state: AgreementState;
   fundedAmount: bigint | null;
   settledAmount: bigint | null;
+  refundedAmount: bigint | null;
   settlementDestination: string | null;
+  /** How the money left the vault, when it did. */
+  outcome: "settled" | "refunded" | "cancelled" | "open" | null;
   /** Slot of the most recent transition, for cursor bookkeeping. */
   lastSlot: number;
   /** Evidence anchored to this agreement, in the order it was submitted. */
@@ -461,6 +531,17 @@ export function reconstructAgreementLifecycle(
   if (settled && !funded) {
     throw new ReceiptError("settlement without the funding it pays out");
   }
+  const refunded = ordered.find((receipt) => receipt.action === "REFUND_EXECUTED");
+  if (settled && refunded) {
+    throw new ReceiptError("an agreement cannot be both settled and refunded");
+  }
+  if (refunded && !funded) {
+    throw new ReceiptError("refund without the funding it returns");
+  }
+  if (refunded && funded && refunded.amount !== funded.amount) {
+    throw new ReceiptError("refunded amount does not match the funded amount");
+  }
+
   const proofs = proofRecords(sortedAnnotations);
   if (settled?.proof) {
     const cited = proofs.find((record) => record.proof === settled.proof);
@@ -481,7 +562,16 @@ export function reconstructAgreementLifecycle(
     state,
     fundedAmount: funded?.amount ?? null,
     settledAmount: settled?.amount ?? null,
-    settlementDestination: settled?.destination ?? null,
+    refundedAmount: refunded?.amount ?? null,
+    settlementDestination: settled?.destination ?? refunded?.destination ?? null,
+    outcome:
+      state === "Settled"
+        ? "settled"
+        : state === "Refunded"
+          ? "refunded"
+          : state === "Cancelled"
+            ? "cancelled"
+            : "open",
     lastSlot: previous.slot,
     proofs,
     receipts: withAnnotations,

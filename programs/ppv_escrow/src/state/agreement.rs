@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 
 use crate::errors::EscrowError;
-use crate::state::enums::{AgreementState, AgreementType};
+use crate::state::enums::{AgreementState, AgreementType, DisputeOutcome};
 
 pub const AGREEMENT_SCHEMA_VERSION: u8 = 1;
 
@@ -40,10 +40,15 @@ pub struct Agreement {
     /// cited none. Recording it here makes a settlement auditable from the
     /// account alone, without replaying its event.
     pub settlement_proof: Pubkey,
-    /// Reserved account space for compatible schema evolution. Phase 3 spent
-    /// four of the original sixty-four bytes on `proof_count` and Phase 4 spent
-    /// thirty-two on `settlement_proof`; the account size is unchanged.
-    pub reserved: [u8; 28],
+    /// Who opened the dispute, or the default address when none was opened.
+    pub dispute_opened_by: Pubkey,
+    /// When the agreement last changed state by a Phase 5 path — cancelled,
+    /// disputed, or refunded. The earlier per-state timestamps stay as they
+    /// are; adding one field per state would duplicate the event log on chain,
+    /// which is the thing receipts exist to avoid.
+    pub state_changed_at: i64,
+    /// Reserved account space for compatible schema evolution.
+    pub reserved: [u8; 64],
 }
 
 impl Agreement {
@@ -109,8 +114,94 @@ impl Agreement {
     pub fn is_live(&self) -> bool {
         matches!(
             self.state,
-            AgreementState::Funded | AgreementState::Completed
+            AgreementState::Funded | AgreementState::Completed | AgreementState::Disputed
         )
+    }
+
+    /// Abandoning an agreement nobody funded. Cancellation and refund are not
+    /// the same act and must never share a path: this one moves no money
+    /// because there is none to move, and the check that keeps it that way is
+    /// the `Open` requirement.
+    pub fn require_cancellable(&self, signer: &Pubkey) -> Result<()> {
+        require_keys_eq!(*signer, self.creator, EscrowError::NotTheBuyer);
+        require!(self.state == AgreementState::Open, EscrowError::BadState);
+        Ok(())
+    }
+
+    pub fn record_cancelled(&mut self, now: i64) -> AgreementState {
+        let previous = self.state;
+        self.state = AgreementState::Cancelled;
+        self.state_changed_at = now;
+        previous
+    }
+
+    /// Either party may raise a dispute over money already escrowed. Doing so
+    /// halts the normal settlement path, because `settle` demands `Completed`
+    /// and this state is not it (Invariant 9).
+    pub fn require_disputable(&self, signer: &Pubkey) -> Result<()> {
+        require!(self.is_party(signer), EscrowError::NotAParty);
+        require!(
+            matches!(
+                self.state,
+                AgreementState::Funded | AgreementState::Completed
+            ),
+            EscrowError::BadState
+        );
+        Ok(())
+    }
+
+    pub fn record_disputed(&mut self, opened_by: Pubkey, now: i64) -> AgreementState {
+        let previous = self.state;
+        self.state = AgreementState::Disputed;
+        self.dispute_opened_by = opened_by;
+        self.state_changed_at = now;
+        previous
+    }
+
+    /// Resolution by concession: the signer gives up its own claim, and the
+    /// beneficiary is the other party. Nobody can direct this agreement's money
+    /// to a party that did not have it conceded to them, and no third party is
+    /// trusted to decide, because none is consulted.
+    pub fn require_resolvable(&self, signer: &Pubkey, beneficiary: &Pubkey) -> Result<()> {
+        require!(
+            self.state == AgreementState::Disputed,
+            EscrowError::BadState
+        );
+        require!(self.is_party(signer), EscrowError::NotAParty);
+        require!(self.is_party(beneficiary), EscrowError::NotAParty);
+        require!(signer != beneficiary, EscrowError::CannotConcedeToSelf);
+        Ok(())
+    }
+
+    /// A seller giving the money back without an argument. Restricted to the
+    /// seller because it is the seller's claim being surrendered; a buyer who
+    /// wants its money back over the seller's objection has to dispute.
+    pub fn require_refundable(&self, signer: &Pubkey) -> Result<()> {
+        require_keys_eq!(*signer, self.counterparty, EscrowError::NotTheSeller);
+        require!(
+            matches!(
+                self.state,
+                AgreementState::Funded | AgreementState::Completed
+            ),
+            EscrowError::BadState
+        );
+        Ok(())
+    }
+
+    pub fn record_refunded(&mut self, now: i64) -> AgreementState {
+        let previous = self.state;
+        self.state = AgreementState::Refunded;
+        self.state_changed_at = now;
+        previous
+    }
+
+    /// Which side a resolution favours, derived from who receives the money.
+    pub fn outcome_for(&self, beneficiary: &Pubkey) -> DisputeOutcome {
+        if *beneficiary == self.counterparty {
+            DisputeOutcome::SellerPaid
+        } else {
+            DisputeOutcome::BuyerRefunded
+        }
     }
 
     /// Evidence may be anchored while the agreement is live. Submission is not
@@ -166,7 +257,9 @@ mod tests {
             settled_at: 0,
             proof_count: 0,
             settlement_proof: Pubkey::default(),
-            reserved: [0; 28],
+            dispute_opened_by: Pubkey::default(),
+            state_changed_at: 0,
+            reserved: [0; 64],
         }
     }
 
@@ -309,6 +402,143 @@ mod tests {
         assert_eq!(agreement.record_proof().unwrap(), 1);
         assert_eq!(agreement.record_proof().unwrap(), 2);
         assert_eq!(agreement.proof_count, 3);
+    }
+
+    #[test]
+    fn cancellation_is_only_for_an_agreement_nobody_funded() {
+        let (buyer, seller, attacker) = parties();
+        let mut agreement = open(buyer, seller);
+
+        assert!(agreement.require_cancellable(&seller).is_err());
+        assert!(agreement.require_cancellable(&attacker).is_err());
+        assert!(agreement.require_cancellable(&buyer).is_ok());
+
+        // Once money is escrowed, giving it back is a refund, not a
+        // cancellation, and it has to move custody.
+        agreement.record_funded(20);
+        assert!(agreement.require_cancellable(&buyer).is_err());
+    }
+
+    #[test]
+    fn a_dispute_halts_settlement() {
+        let (buyer, seller, attacker) = parties();
+        let mut agreement = open(buyer, seller);
+
+        assert!(
+            agreement.require_disputable(&buyer).is_err(),
+            "nothing escrowed yet"
+        );
+        agreement.record_funded(20);
+        assert!(agreement.require_disputable(&attacker).is_err());
+        assert!(agreement.require_disputable(&buyer).is_ok());
+
+        agreement.record_completed(30);
+        assert_eq!(
+            agreement.record_disputed(seller, 40),
+            AgreementState::Completed
+        );
+        assert_eq!(agreement.dispute_opened_by, seller);
+
+        // Invariant 9, and not as a separate check: settlement demands
+        // Completed, and the agreement is no longer in it.
+        assert!(agreement.require_settleable(&buyer).is_err());
+        assert!(agreement.require_completable(&seller).is_err());
+    }
+
+    #[test]
+    fn resolution_gives_the_money_to_the_other_party() {
+        let (buyer, seller, attacker) = parties();
+        let mut agreement = open(buyer, seller);
+        agreement.record_funded(20);
+        agreement.record_disputed(buyer, 30);
+
+        // Each party can only concede: neither can direct the money to itself.
+        assert!(agreement.require_resolvable(&buyer, &seller).is_ok());
+        assert!(agreement.require_resolvable(&seller, &buyer).is_ok());
+        assert!(agreement.require_resolvable(&buyer, &buyer).is_err());
+        assert!(agreement.require_resolvable(&seller, &seller).is_err());
+        assert!(agreement.require_resolvable(&attacker, &seller).is_err());
+        assert!(agreement.require_resolvable(&buyer, &attacker).is_err());
+
+        assert_eq!(agreement.outcome_for(&seller), DisputeOutcome::SellerPaid);
+        assert_eq!(agreement.outcome_for(&buyer), DisputeOutcome::BuyerRefunded);
+    }
+
+    #[test]
+    fn only_a_disputed_agreement_can_be_resolved() {
+        let (buyer, seller, _) = parties();
+        let mut agreement = open(buyer, seller);
+        assert!(agreement.require_resolvable(&buyer, &seller).is_err());
+        agreement.record_funded(20);
+        assert!(agreement.require_resolvable(&buyer, &seller).is_err());
+        agreement.record_completed(30);
+        assert!(agreement.require_resolvable(&buyer, &seller).is_err());
+    }
+
+    #[test]
+    fn a_refund_is_the_sellers_to_give() {
+        let (buyer, seller, attacker) = parties();
+        let mut agreement = open(buyer, seller);
+
+        assert!(
+            agreement.require_refundable(&seller).is_err(),
+            "nothing escrowed yet"
+        );
+        agreement.record_funded(20);
+        // A buyer wanting its money back over the seller's objection has to
+        // dispute; it cannot simply take it.
+        assert!(agreement.require_refundable(&buyer).is_err());
+        assert!(agreement.require_refundable(&attacker).is_err());
+        assert!(agreement.require_refundable(&seller).is_ok());
+
+        assert_eq!(agreement.record_refunded(40), AgreementState::Funded);
+        assert!(agreement.state.is_terminal());
+        assert!(agreement.require_refundable(&seller).is_err());
+    }
+
+    #[test]
+    fn every_ending_is_final() {
+        let (buyer, seller, _) = parties();
+        for ending in ["cancelled", "refunded", "settled"] {
+            let mut agreement = open(buyer, seller);
+            match ending {
+                "cancelled" => {
+                    agreement.record_cancelled(20);
+                }
+                "refunded" => {
+                    agreement.record_funded(20);
+                    agreement.record_refunded(30);
+                }
+                _ => {
+                    agreement.record_funded(20);
+                    agreement.record_completed(30);
+                    agreement.record_settled(40);
+                }
+            }
+
+            assert!(agreement.state.is_terminal(), "{ending} must be terminal");
+            assert!(agreement.require_fundable(&buyer).is_err());
+            assert!(agreement.require_completable(&seller).is_err());
+            assert!(agreement.require_settleable(&buyer).is_err());
+            assert!(agreement.require_disputable(&buyer).is_err());
+            assert!(agreement.require_refundable(&seller).is_err());
+            assert!(agreement.require_cancellable(&buyer).is_err());
+            assert!(agreement.require_resolvable(&buyer, &seller).is_err());
+            assert!(agreement.require_proof_submittable(&seller).is_err());
+        }
+    }
+
+    #[test]
+    fn evidence_can_still_be_anchored_during_a_dispute() {
+        let (buyer, seller, _) = parties();
+        let mut agreement = open(buyer, seller);
+        agreement.record_funded(20);
+        agreement.record_disputed(buyer, 30);
+
+        // A dispute is exactly when the parties most need to put evidence on
+        // the record.
+        assert!(agreement.require_proof_submittable(&buyer).is_ok());
+        assert!(agreement.require_proof_submittable(&seller).is_ok());
     }
 
     #[test]

@@ -24,6 +24,8 @@ pub enum EscrowError {
     SourceNotOwnedByBuyer,
     #[msg("Settlement destination is not owned by the seller")]
     DestinationNotOwnedBySeller,
+    #[msg("Refund destination is not owned by the buyer")]
+    DestinationNotOwnedByBuyer,
     #[msg("Custody did not move by exactly the agreement amount")]
     CustodyMismatch,
     #[msg("Proof content hash must not be all zeroes")]
@@ -36,6 +38,10 @@ pub enum EscrowError {
     ProofAlreadyDecided,
     #[msg("Settlement can only cite an approved proof")]
     ProofNotApproved,
+    #[msg("A party cannot concede a dispute to itself")]
+    CannotConcedeToSelf,
+    #[msg("Destination is not owned by a party to this agreement")]
+    DestinationNotAParty,
     #[msg("Vault address already holds data")]
     VaultAlreadyInitialized,
     #[msg("Arithmetic overflow")]

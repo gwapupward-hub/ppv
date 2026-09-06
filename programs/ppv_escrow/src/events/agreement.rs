@@ -45,3 +45,16 @@ pub struct WorkCompleted {
     pub new_state: AgreementState,
     pub timestamp: i64,
 }
+
+/// An agreement abandoned before it was ever funded. There is no custody event
+/// beside it because there was no custody.
+#[event]
+pub struct AgreementCancelled {
+    pub agreement: Pubkey,
+    pub creator: Pubkey,
+    pub counterparty: Pubkey,
+    pub cancelled_by: Pubkey,
+    pub previous_state: AgreementState,
+    pub new_state: AgreementState,
+    pub timestamp: i64,
+}

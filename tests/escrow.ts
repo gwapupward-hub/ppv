@@ -914,6 +914,277 @@ describe("PPV escrow kernel", () => {
     });
   });
 
+  describe("cancellation, disputes and refunds", () => {
+    function cancel(agreement: Awaited<ReturnType<typeof initialize>>, signer: Keypair = buyer) {
+      return escrow.methods
+        .cancel()
+        .accounts({ creator: signer.publicKey, agreement: agreement.agreement })
+        .signers([signer])
+        .rpc();
+    }
+
+    function openDispute(
+      agreement: Awaited<ReturnType<typeof initialize>>,
+      signer: Keypair = buyer,
+      reason: number[] = hash32(21),
+    ) {
+      return escrow.methods
+        .openDispute(reason)
+        .accounts({ party: signer.publicKey, agreement: agreement.agreement })
+        .signers([signer])
+        .rpc();
+    }
+
+    function resolveDispute(
+      agreement: Awaited<ReturnType<typeof initialize>>,
+      signer: Keypair,
+      destination: PublicKey,
+    ) {
+      return escrow.methods
+        .resolveDispute()
+        .accounts({
+          signer: signer.publicKey,
+          agreement: agreement.agreement,
+          mint: agreement.mint,
+          vault: agreement.vault,
+          vaultAuthority: agreement.vaultAuthority,
+          destination,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([signer])
+        .rpc();
+    }
+
+    function refund(
+      agreement: Awaited<ReturnType<typeof initialize>>,
+      overrides?: { signer?: Keypair; destination?: PublicKey },
+    ) {
+      const signer = overrides?.signer ?? seller;
+      return escrow.methods
+        .refund()
+        .accounts({
+          seller: signer.publicKey,
+          agreement: agreement.agreement,
+          mint: agreement.mint,
+          vault: agreement.vault,
+          vaultAuthority: agreement.vaultAuthority,
+          buyerTokenAccount: overrides?.destination ?? buyerTokens,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([signer])
+        .rpc();
+    }
+
+    it("cancels an unfunded agreement without touching custody", async () => {
+      const agreement = await initialize();
+      const signature = await cancel(agreement);
+
+      const account = await escrow.account.agreement.fetch(agreement.agreement);
+      assert.ok("cancelled" in account.state);
+      const vault = await getAccount(connection, agreement.vault);
+      assert.equal(vault.amount, 0n);
+
+      const event = eventNamed(await eventsOf(signature), "agreementCancelled");
+      assert.ok("open" in event.previousState);
+      assert.ok("cancelled" in event.newState);
+    });
+
+    it("refuses cancellation by the seller, and once money is escrowed", async () => {
+      const unfunded = await initialize();
+      await expectAnchorError(cancel(unfunded, seller), "NotTheBuyer");
+
+      // After funding, giving the money back is a refund. The two are separate
+      // instructions precisely so a cancellation can never strand funds.
+      const funded = await fundedAgreement();
+      await expectAnchorError(cancel(funded), "BadState");
+      const vault = await getAccount(connection, funded.vault);
+      assert.equal(vault.amount, AMOUNT);
+    });
+
+    it("halts settlement the moment a dispute is opened", async () => {
+      const agreement = await completedAgreement();
+      const signature = await openDispute(agreement, seller);
+
+      const account = await escrow.account.agreement.fetch(agreement.agreement);
+      assert.ok("disputed" in account.state);
+      assert.equal(account.disputeOpenedBy.toBase58(), seller.publicKey.toBase58());
+
+      // Invariant 9, and not as a separate check: settle demands Completed.
+      await expectAnchorError(settle(agreement), "BadState");
+      const vault = await getAccount(connection, agreement.vault);
+      assert.equal(vault.amount, AMOUNT);
+
+      const event = eventNamed(await eventsOf(signature), "disputeOpened");
+      assert.equal(event.openedBy.toBase58(), seller.publicKey.toBase58());
+      assert.ok("completed" in event.previousState);
+      assert.ok("disputed" in event.newState);
+    });
+
+    it("refuses a dispute from an outsider or over nothing", async () => {
+      const open = await initialize();
+      await expectAnchorError(openDispute(open), "BadState");
+
+      const funded = await fundedAgreement();
+      await expectAnchorError(openDispute(funded, attacker), "NotAParty");
+      await expectAnchorError(
+        openDispute(funded, buyer, Array<number>(32).fill(0)),
+        "InvalidContentHash",
+      );
+    });
+
+    it("still accepts evidence while disputed", async () => {
+      // A dispute is exactly when the parties most need the record.
+      const agreement = await fundedAgreement();
+      await openDispute(agreement);
+      await escrow.methods
+        .submitProof(hash32(12), hash32(0))
+        .accounts({
+          submitter: seller.publicKey,
+          agreement: agreement.agreement,
+          proof: proofAddress(escrow.programId, agreement.agreement, 0),
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([seller])
+        .rpc();
+
+      const proof = await escrow.account.proof.fetch(
+        proofAddress(escrow.programId, agreement.agreement, 0),
+      );
+      assert.equal(proof.submitter.toBase58(), seller.publicKey.toBase58());
+    });
+
+    it("lets the buyer concede, paying the seller", async () => {
+      const agreement = await fundedAgreement();
+      await openDispute(agreement, seller);
+      const before = await getAccount(connection, sellerTokens);
+
+      const signature = await resolveDispute(agreement, buyer, sellerTokens);
+
+      const after = await getAccount(connection, sellerTokens);
+      assert.equal(after.amount - before.amount, AMOUNT);
+      const account = await escrow.account.agreement.fetch(agreement.agreement);
+      assert.ok("settled" in account.state);
+
+      const events = await eventsOf(signature);
+      const resolved = eventNamed(events, "disputeResolved");
+      assert.equal(resolved.resolvedBy.toBase58(), buyer.publicKey.toBase58());
+      assert.equal(resolved.beneficiary.toBase58(), seller.publicKey.toBase58());
+      assert.ok("sellerPaid" in resolved.outcome);
+      // The custody event is the same one the undisputed path emits, so a
+      // consumer counting payments has one event type to count.
+      const settled = eventNamed(events, "settlementExecuted");
+      assert.ok("disputed" in settled.previousState);
+      assert.ok("settled" in settled.newState);
+    });
+
+    it("lets the seller concede, refunding the buyer", async () => {
+      const agreement = await fundedAgreement();
+      await openDispute(agreement, buyer);
+      const before = await getAccount(connection, buyerTokens);
+
+      const signature = await resolveDispute(agreement, seller, buyerTokens);
+
+      const after = await getAccount(connection, buyerTokens);
+      assert.equal(after.amount - before.amount, AMOUNT);
+      const account = await escrow.account.agreement.fetch(agreement.agreement);
+      assert.ok("refunded" in account.state);
+
+      const events = await eventsOf(signature);
+      assert.ok("buyerRefunded" in eventNamed(events, "disputeResolved").outcome);
+      eventNamed(events, "refundExecuted");
+    });
+
+    it("refuses anyone taking the money for themselves", async () => {
+      const agreement = await fundedAgreement();
+      await openDispute(agreement, buyer);
+
+      // The whole safety of concession: a party can give its claim away and
+      // cannot take the other's.
+      await expectAnchorError(resolveDispute(agreement, buyer, buyerTokens), "CannotConcedeToSelf");
+      await expectAnchorError(
+        resolveDispute(agreement, seller, sellerTokens),
+        "CannotConcedeToSelf",
+      );
+      await expectAnchorError(
+        resolveDispute(agreement, attacker, sellerTokens),
+        "NotAParty",
+      );
+      await expectAnchorError(
+        resolveDispute(agreement, buyer, attackerTokens),
+        "DestinationNotAParty",
+      );
+
+      const vault = await getAccount(connection, agreement.vault);
+      assert.equal(vault.amount, AMOUNT, "no refused resolution moved anything");
+    });
+
+    it("refuses resolution of an agreement that is not disputed", async () => {
+      const funded = await fundedAgreement();
+      await expectAnchorError(resolveDispute(funded, buyer, sellerTokens), "BadState");
+
+      const completed = await completedAgreement();
+      await expectAnchorError(resolveDispute(completed, buyer, sellerTokens), "BadState");
+    });
+
+    it("refuses a second resolution of a resolved dispute", async () => {
+      const agreement = await fundedAgreement();
+      await openDispute(agreement, buyer);
+      await resolveDispute(agreement, seller, buyerTokens);
+      await expectAnchorError(resolveDispute(agreement, seller, buyerTokens), "BadState");
+    });
+
+    it("lets the seller hand the money back without an argument", async () => {
+      const agreement = await fundedAgreement();
+      const before = await getAccount(connection, buyerTokens);
+
+      const signature = await refund(agreement);
+
+      const after = await getAccount(connection, buyerTokens);
+      assert.equal(after.amount - before.amount, AMOUNT);
+      const account = await escrow.account.agreement.fetch(agreement.agreement);
+      assert.ok("refunded" in account.state);
+
+      const event = eventNamed(await eventsOf(signature), "refundExecuted");
+      assert.equal(event.refundedBy.toBase58(), seller.publicKey.toBase58());
+      assert.ok("funded" in event.previousState);
+      assert.ok("refunded" in event.newState);
+    });
+
+    it("refuses a buyer taking its own refund, and a redirected one", async () => {
+      const agreement = await fundedAgreement();
+
+      // A buyer who wants its money back over the seller's objection has to
+      // dispute; it cannot simply take it.
+      await expectAnchorError(refund(agreement, { signer: buyer }), "NotTheSeller");
+      await expectAnchorError(refund(agreement, { signer: attacker }), "NotTheSeller");
+      await expectAnchorError(
+        refund(agreement, { destination: attackerTokens }),
+        "DestinationNotOwnedByBuyer",
+      );
+      await expectAnchorError(
+        refund(agreement, { destination: sellerTokens }),
+        "DestinationNotOwnedByBuyer",
+      );
+
+      const vault = await getAccount(connection, agreement.vault);
+      assert.equal(vault.amount, AMOUNT);
+    });
+
+    it("closes every ending for good", async () => {
+      const refunded = await fundedAgreement();
+      await refund(refunded);
+      await expectAnchorError(refund(refunded), "BadState");
+      await expectAnchorError(openDispute(refunded), "BadState");
+      await expectAnchorError(markCompleted(refunded), "BadState");
+      await expectAnchorError(settle(refunded), "BadState");
+
+      const cancelled = await initialize();
+      await cancel(cancelled);
+      await expectAnchorError(fund(cancelled), "BadState");
+      await expectAnchorError(cancel(cancelled), "BadState");
+    });
+  });
+
   describe("chain-data reconstruction", () => {
     // `@gwap/ppv-indexer` rebuilds an agreement's history from RPC alone, and
     // its unit tests run against fixtures this repository writes. That proves

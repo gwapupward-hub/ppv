@@ -12,6 +12,8 @@ import {
 } from "../src/index.js";
 import { encodePpvEvent } from "./helpers/ppv-events.js";
 import {
+  CANCELLED_FIXTURE,
+  DISPUTE_FIXTURE,
   LIFECYCLE_FIXTURE,
   PROOF_APPROVED_FIXTURE,
   PROOF_FIXTURE,
@@ -27,6 +29,8 @@ test("every escrow event round-trips through the decoder", () => {
     PROOF_FIXTURE,
     PROOF_APPROVED_FIXTURE,
     PROOF_REJECTED_FIXTURE,
+    ...DISPUTE_FIXTURE,
+    CANCELLED_FIXTURE,
   ];
   for (const fixture of all) {
     assert.deepEqual(decodeEscrowEventData(encodeEscrowEvent(fixture)), fixture);
@@ -141,4 +145,19 @@ test("approval and rejection are one shape told apart by their discriminator", (
 
   assert.equal(decodeEscrowEventData(approved)?.name, "ProofApproved");
   assert.equal(decodeEscrowEventData(rejected)?.name, "ProofRejected");
+});
+
+test("a resolved dispute reports its outcome without claiming a transition", () => {
+  // The settlement or refund beside it carries the transition. If this event
+  // claimed one too, a consumer would see two transitions leaving Disputed.
+  const resolved = DISPUTE_FIXTURE.find((event) => event.name === "DisputeResolved");
+  assert.ok(resolved);
+  const decoded = decodeEscrowEventData(encodeEscrowEvent(resolved));
+  assert.equal(decoded?.name, "DisputeResolved");
+  if (decoded?.name !== "DisputeResolved") return;
+  assert.equal(decoded.outcome, "BuyerRefunded");
+  assert.equal(decoded.resolvedBy, decoded.counterparty, "the seller conceded");
+  assert.equal(decoded.beneficiary, decoded.creator);
+  assert.equal(decoded.resultingState, "Refunded");
+  assert.ok(!("previousState" in decoded));
 });

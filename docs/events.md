@@ -49,6 +49,10 @@ transition committed.
 | `ProofSubmitted` | `submit_proof` | none — reports the state it saw |
 | `ProofApproved` | `approve_proof` | none — reports the state it saw |
 | `ProofRejected` | `reject_proof` | none — reports the state it saw |
+| `AgreementCancelled` | `cancel` | `Open` → `Cancelled` |
+| `DisputeOpened` | `open_dispute` | `Funded`/`Completed` → `Disputed` |
+| `DisputeResolved` | `resolve_dispute` | none — the custody event beside it carries the transition |
+| `RefundExecuted` | `refund`, `resolve_dispute` | → `Refunded` |
 
 ```rust
 #[event]
@@ -82,6 +86,20 @@ instruction rather than a submitted one, and with the program's event authority
 present. Those three rules, and the versioned-transaction account ordering that
 trips up a naive reader, are in [indexing.md](indexing.md).
 
+### One transition, one event
+
+`resolve_dispute` emits two events: `DisputeResolved`, and the
+`SettlementExecuted` or `RefundExecuted` that describes the money. Only the
+custody event reports the state transition. If both claimed to leave
+`Disputed`, a consumer rebuilding history would see two transitions out of one
+state — a fork the program cannot produce — so `DisputeResolved` names the
+resulting state instead and carries the reason and the concession.
+
+The same principle keeps the custody events shared across paths: a settlement
+reached through a dispute emits the same `SettlementExecuted` as one reached
+normally, so a consumer counting payments has one event type to count however
+the payment came about.
+
 ## Design rules
 
 1. **Facts, never judgements.** `SettlementExecuted`, not `SellerWasReliable`.
@@ -108,9 +126,8 @@ gets a new event name and the old one keeps its layout until consumers migrate.
 
 ## Later phases
 
-`MilestoneCreated`,
-`MilestoneFunded`, `MilestoneSubmitted`, `MilestoneApproved`, `DisputeOpened`,
-`DisputeResolved`, `RefundExecuted`, `AgreementCancelled`, `InvoiceCreated`, and
-`InvoicePaid` arrive with the instructions that emit them. Each is added to the
+`MilestoneCreated`, `MilestoneFunded`, `MilestoneSubmitted`,
+`MilestoneApproved`, `InvoiceCreated`, and `InvoicePaid` arrive with the
+instructions that emit them. Each is added to the
 SDK decoder and the reputation contracts in the same change as the instruction,
 never ahead of it.

@@ -10,9 +10,12 @@ import {
   type PpvEscrowReceiptV1,
 } from "../src/index.js";
 import {
+  CANCELLED_FIXTURE,
+  DISPUTE_FIXTURE,
   FIXTURE_ADDRESSES,
   LIFECYCLE_FIXTURE,
   PROOF_APPROVED_FIXTURE,
+  REFUND_FIXTURE,
   PROOF_FIXTURE,
   PROOF_REJECTED_FIXTURE,
   addressFromByte,
@@ -385,4 +388,99 @@ test("a settlement can only cite evidence this history approved", () => {
   ]);
   assert.equal(lifecycle.state, "Settled");
   assert.equal(lifecycle.receipts.at(-1)?.proof, FIXTURE_ADDRESSES.PROOF);
+});
+
+test("a cancelled agreement is a complete history with no money in it", () => {
+  const created = escrowReceiptFromEvent(envelope(LIFECYCLE_FIXTURE[0]!, 0));
+  const cancelled = escrowReceiptFromEvent({
+    event: CANCELLED_FIXTURE,
+    programId: PROGRAM_ID,
+    transactionSignature: signatureFromByte(70),
+    slot: 1_001,
+    instructionIndex: 0,
+    innerInstructionIndex: 0,
+    blockTime: CANCELLED_FIXTURE.timestamp,
+  });
+
+  const lifecycle = reconstructAgreementLifecycle([created, cancelled]);
+  assert.equal(lifecycle.state, "Cancelled");
+  assert.equal(lifecycle.outcome, "cancelled");
+  assert.equal(lifecycle.fundedAmount, null);
+  assert.equal(lifecycle.settledAmount, null);
+  assert.equal(lifecycle.refundedAmount, null);
+});
+
+test("a conceded dispute rebuilds as a refund, with the concession recorded", () => {
+  const receipts = [
+    escrowReceiptFromEvent(envelope(LIFECYCLE_FIXTURE[0]!, 0)),
+    escrowReceiptFromEvent(envelope(LIFECYCLE_FIXTURE[1]!, 1)),
+    ...DISPUTE_FIXTURE.map((event, index) =>
+      escrowReceiptFromEvent({
+        event,
+        programId: PROGRAM_ID,
+        transactionSignature: signatureFromByte(80 + index),
+        slot: 1_010 + (index === 0 ? 0 : 1),
+        instructionIndex: 0,
+        innerInstructionIndex: index,
+        blockTime: event.timestamp,
+      }),
+    ),
+  ];
+
+  const lifecycle = reconstructAgreementLifecycle(receipts);
+  assert.equal(lifecycle.state, "Refunded");
+  assert.equal(lifecycle.outcome, "refunded");
+  assert.equal(lifecycle.refundedAmount, 100_000_000n);
+  assert.equal(lifecycle.settledAmount, null);
+  assert.equal(lifecycle.settlementDestination, FIXTURE_ADDRESSES.BUYER_ATA);
+  assert.deepEqual(
+    lifecycle.receipts.map((entry) => entry.action),
+    ["AGREEMENT_CREATED", "AGREEMENT_FUNDED", "DISPUTE_OPENED", "REFUND_EXECUTED", "DISPUTE_RESOLVED"],
+  );
+});
+
+test("an agreement cannot be both settled and refunded", () => {
+  const receipts = lifecycleReceipts();
+  const refund = escrowReceiptFromEvent({
+    event: REFUND_FIXTURE,
+    programId: PROGRAM_ID,
+    transactionSignature: signatureFromByte(85),
+    slot: 1_003,
+    instructionIndex: 0,
+    innerInstructionIndex: 0,
+    blockTime: 1_700_000_500,
+  });
+  // Chained so the fork check cannot fire first: this history claims the money
+  // was paid to the seller and then also returned to the buyer.
+  assert.throws(
+    () => reconstructAgreementLifecycle([...receipts, { ...refund, previousState: "Settled" }]),
+    /both settled and refunded/,
+  );
+
+  // And a fork — settlement and refund both leaving Completed — is caught as a
+  // fork, because the program cannot produce one.
+  assert.throws(
+    () => reconstructAgreementLifecycle([...receipts, { ...refund, previousState: "Completed" }]),
+    /two transitions leave Completed/,
+  );
+});
+
+test("a refund must return exactly what was funded", () => {
+  const receipts = [
+    escrowReceiptFromEvent(envelope(LIFECYCLE_FIXTURE[0]!, 0)),
+    escrowReceiptFromEvent(envelope(LIFECYCLE_FIXTURE[1]!, 1)),
+  ];
+  const shortRefund = escrowReceiptFromEvent({
+    event: { ...REFUND_FIXTURE, previousState: "Funded", amount: 1n },
+    programId: PROGRAM_ID,
+    transactionSignature: signatureFromByte(86),
+    slot: 1_002,
+    instructionIndex: 0,
+    innerInstructionIndex: 0,
+    blockTime: 1_700_000_500,
+  });
+  assert.throws(
+    () => reconstructAgreementLifecycle([...receipts, shortRefund]),
+    /refunded amount does not match/,
+  );
 });

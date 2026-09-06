@@ -11,9 +11,10 @@ implemented as three separately deployable Solana programs.
   and cancellation. Non-custodial.
 - `ppv_escrow`: the custody kernel — `initialize_agreement`, `fund`,
   `mark_completed`, `settle` over `Open → Funded → Completed → Settled`, with a
-  vault and vault authority derived per agreement, plus `submit_proof`,
-  `approve_proof` and `reject_proof` for agreement-bound evidence and the
-  decisions made about it. **Local validator only.**
+  vault and vault authority derived per agreement; `submit_proof`,
+  `approve_proof` and `reject_proof` for agreement-bound evidence; and `cancel`,
+  `open_dispute`, `resolve_dispute` and `refund` for the ways an agreement ends
+  other than payment. **Local validator only.**
 - `@gwap/ppv-sdk`: frozen canonicalization v1 and SHA-256 helpers shared by
   every client; the versioned reputation contracts (`ReputationEventV1`,
   `PpvReceiptV1`, seal states, credential eligibility); decoders for the
@@ -24,9 +25,11 @@ implemented as three separately deployable Solana programs.
   endpoint and the SDK — no GWAP database and no privileged access. Run it with
   `npm run replay`.
 
-Not included: invoices, milestones, disputes, refunds, cancellation,
-arbitration, protocol fees, document encryption, GNS authority, or any mainnet
-deployment.
+Not included: invoices, milestones, third-party arbitration, protocol fees,
+document encryption, GNS authority, or any mainnet deployment. Disputes are
+resolved by concession only — the party who would lose signs away its own claim
+— because an arbiter is a trusted third party and the protocol has not yet
+decided who may be one.
 
 `ppv_escrow` is the only program that holds value, and it is deliberately absent
 from `[programs.devnet]` and from the devnet deploy workflow. That exclusion is

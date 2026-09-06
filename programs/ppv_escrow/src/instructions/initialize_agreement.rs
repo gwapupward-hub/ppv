@@ -99,7 +99,9 @@ pub fn handle_initialize_agreement(
     agreement.settled_at = 0;
     agreement.proof_count = 0;
     agreement.settlement_proof = Pubkey::default();
-    agreement.reserved = [0; 28];
+    agreement.dispute_opened_by = Pubkey::default();
+    agreement.state_changed_at = 0;
+    agreement.reserved = [0; 64];
 
     emit_cpi!(AgreementCreated {
         agreement: agreement_key,

@@ -51,7 +51,9 @@ function encodeAgreementAccount(account: AgreementAccount): Uint8Array {
         return out;
       })(),
       pubkey(account.settlementProof),
-      Buffer.alloc(28),
+      pubkey(account.disputeOpenedBy),
+      i64(account.stateChangedAt),
+      Buffer.alloc(64),
     ]),
   );
 }
@@ -76,6 +78,8 @@ const FIXTURE: AgreementAccount = {
   settledAt: 1_700_000_300,
   proofCount: 2,
   settlementProof: addressFromByte(8),
+  disputeOpenedBy: addressFromByte(0),
+  stateChangedAt: 0,
 };
 
 test("the account discriminator is the anchor derivation", () => {
@@ -89,7 +93,7 @@ test("an agreement account round-trips at the size the program allocates", () =>
   const encoded = encodeAgreementAccount(FIXTURE);
   // 8 + Agreement::INIT_SPACE, pinned at 278 in the Rust unit tests.
   assert.equal(encoded.length, AGREEMENT_ACCOUNT_SIZE);
-  assert.equal(AGREEMENT_ACCOUNT_SIZE, 8 + 278);
+  assert.equal(AGREEMENT_ACCOUNT_SIZE, 8 + 354);
   assert.deepEqual(decodeAgreementAccount(encoded), FIXTURE);
 });
 

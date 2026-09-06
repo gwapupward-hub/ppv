@@ -7,9 +7,12 @@ import {
   encodeBase58,
   type AgreementState,
   type AgreementType,
+  type EscrowDisputeOpenedEvent,
+  type EscrowDisputeResolvedEvent,
   type EscrowProofApprovedEvent,
   type EscrowProofRejectedEvent,
   type EscrowProofSubmittedEvent,
+  type EscrowRefundExecutedEvent,
   type PpvEscrowEvent,
 } from "../../src/index.js";
 
@@ -61,6 +64,10 @@ function state(value: AgreementState): Buffer {
 
 function agreementType(value: AgreementType): Buffer {
   return Buffer.from([AGREEMENT_TYPES.indexOf(value)]);
+}
+
+function outcome(value: "SellerPaid" | "BuyerRefunded"): Buffer {
+  return Buffer.from([value === "SellerPaid" ? 0 : 1]);
 }
 
 function optionalPubkey(value: string | null): Buffer {
@@ -153,6 +160,56 @@ export function encodeEscrowEvent(event: PpvEscrowEvent): Uint8Array {
         u32(event.proofIndex),
         Buffer.from(event.contentHash, "hex"),
         state(event.agreementState),
+        i64(event.timestamp),
+      ]);
+      break;
+    case "AgreementCancelled":
+      body = Buffer.concat([
+        pubkey(event.agreement),
+        pubkey(event.creator),
+        pubkey(event.counterparty),
+        pubkey(event.cancelledBy),
+        state(event.previousState),
+        state(event.newState),
+        i64(event.timestamp),
+      ]);
+      break;
+    case "DisputeOpened":
+      body = Buffer.concat([
+        pubkey(event.agreement),
+        pubkey(event.creator),
+        pubkey(event.counterparty),
+        pubkey(event.openedBy),
+        Buffer.from(event.reasonHash, "hex"),
+        state(event.previousState),
+        state(event.newState),
+        i64(event.timestamp),
+      ]);
+      break;
+    case "DisputeResolved":
+      body = Buffer.concat([
+        pubkey(event.agreement),
+        pubkey(event.creator),
+        pubkey(event.counterparty),
+        pubkey(event.resolvedBy),
+        pubkey(event.beneficiary),
+        outcome(event.outcome),
+        pubkey(event.openedBy),
+        state(event.resultingState),
+        i64(event.timestamp),
+      ]);
+      break;
+    case "RefundExecuted":
+      body = Buffer.concat([
+        pubkey(event.agreement),
+        pubkey(event.buyer),
+        pubkey(event.seller),
+        pubkey(event.refundedBy),
+        u64(event.amount),
+        pubkey(event.mint),
+        pubkey(event.destination),
+        state(event.previousState),
+        state(event.newState),
         i64(event.timestamp),
       ]);
       break;
@@ -263,4 +320,67 @@ export const PROOF_REJECTED_FIXTURE: EscrowProofRejectedEvent = {
   name: "ProofRejected",
 };
 
-export const FIXTURE_ADDRESSES = { BUYER, SELLER, MINT, VAULT, AGREEMENT, SELLER_ATA, PROOF };
+const BUYER_ATA = addressFromByte(13);
+
+/** A dispute the seller conceded: the buyer gets its money back. */
+export const DISPUTE_OPENED_FIXTURE: EscrowDisputeOpenedEvent = {
+  program: "ppv_escrow",
+  name: "DisputeOpened",
+  agreement: AGREEMENT,
+  creator: BUYER,
+  counterparty: SELLER,
+  openedBy: BUYER,
+  reasonHash: hexFromByte(21, 32),
+  previousState: "Funded",
+  newState: "Disputed",
+  timestamp: 1_700_000_400,
+};
+
+export const REFUND_FIXTURE: EscrowRefundExecutedEvent = {
+  program: "ppv_escrow",
+  name: "RefundExecuted",
+  agreement: AGREEMENT,
+  buyer: BUYER,
+  seller: SELLER,
+  refundedBy: SELLER,
+  amount: 100_000_000n,
+  mint: MINT,
+  destination: BUYER_ATA,
+  previousState: "Disputed",
+  newState: "Refunded",
+  timestamp: 1_700_000_500,
+};
+
+export const DISPUTE_RESOLVED_FIXTURE: EscrowDisputeResolvedEvent = {
+  program: "ppv_escrow",
+  name: "DisputeResolved",
+  agreement: AGREEMENT,
+  creator: BUYER,
+  counterparty: SELLER,
+  resolvedBy: SELLER,
+  beneficiary: BUYER,
+  outcome: "BuyerRefunded",
+  openedBy: BUYER,
+  resultingState: "Refunded",
+  timestamp: 1_700_000_500,
+};
+
+export const DISPUTE_FIXTURE: readonly PpvEscrowEvent[] = [
+  DISPUTE_OPENED_FIXTURE,
+  REFUND_FIXTURE,
+  DISPUTE_RESOLVED_FIXTURE,
+];
+
+export const CANCELLED_FIXTURE: PpvEscrowEvent = {
+  program: "ppv_escrow",
+  name: "AgreementCancelled",
+  agreement: AGREEMENT,
+  creator: BUYER,
+  counterparty: SELLER,
+  cancelledBy: BUYER,
+  previousState: "Open",
+  newState: "Cancelled",
+  timestamp: 1_700_000_050,
+};
+
+export const FIXTURE_ADDRESSES = { BUYER, SELLER, MINT, VAULT, AGREEMENT, SELLER_ATA, PROOF, BUYER_ATA };

@@ -24,7 +24,7 @@ pub mod state;
 
 pub use constants::*;
 pub use instructions::*;
-pub use state::{AgreementState, AgreementType, ProofStatus};
+pub use state::{AgreementState, AgreementType, DisputeOutcome, ProofStatus};
 
 // Build-only placeholder. Run `anchor keys sync` with controlled program
 // keypairs before deployment and commit the resulting deployment manifest.
@@ -69,6 +69,31 @@ pub mod ppv_escrow {
     /// terminal, which is what makes a second settlement impossible.
     pub fn settle(ctx: Context<Settle>) -> Result<()> {
         instructions::settle::handle_settle(ctx)
+    }
+
+    /// Abandons an agreement nobody funded. Creator-only, `Open`-only, and it
+    /// takes no token accounts because there is nothing to move.
+    pub fn cancel(ctx: Context<Cancel>) -> Result<()> {
+        instructions::cancel::handle_cancel(ctx)
+    }
+
+    /// Halts the normal settlement path. Either party, over money already
+    /// escrowed. Moves nothing; `settle` becomes impossible because it demands
+    /// `Completed` and this is not it.
+    pub fn open_dispute(ctx: Context<OpenDispute>, reason_hash: [u8; 32]) -> Result<()> {
+        instructions::open_dispute::handle_open_dispute(ctx, reason_hash)
+    }
+
+    /// Ends a dispute by concession: the signer surrenders its own claim and
+    /// the money goes to the other party. No arbiter is consulted because none
+    /// is trusted.
+    pub fn resolve_dispute(ctx: Context<ResolveDispute>) -> Result<()> {
+        instructions::resolve_dispute::handle_resolve_dispute(ctx)
+    }
+
+    /// Returns escrowed money to the buyer on the seller's own signature.
+    pub fn refund(ctx: Context<Refund>) -> Result<()> {
+        instructions::refund::handle_refund(ctx)
     }
 
     /// Records that the other party accepted a piece of evidence. Moves no

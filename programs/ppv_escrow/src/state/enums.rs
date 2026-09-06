@@ -20,22 +20,50 @@ pub enum AgreementType {
 /// how illegal transitions get smuggled in.
 ///
 /// ```text
-/// Open --fund()--> Funded --mark_completed()--> Completed --settle()--> Settled
+///                    Open ──cancel()──> Cancelled
+///                      │ fund()
+///                      ▼
+///        ┌────────── Funded ──────────┐
+///        │ mark_completed()           │ open_dispute() / refund()
+///        ▼                            ▼
+///    Completed ─open_dispute()─> Disputed ─resolve_dispute()─> Settled
+///        │ settle()                   └──────────────────────> Refunded
+///        ▼
+///     Settled
 /// ```
 ///
-/// `Settled` is terminal. Dispute, refund, and cancellation states are appended
-/// in later phases; borsh indices of the existing variants never move.
+/// The four original variants keep their borsh indices; Phase 5 appended the
+/// three terminal ones after them, so anything already decoding this enum reads
+/// the same bytes for the same states.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq, InitSpace)]
 pub enum AgreementState {
     Open,
     Funded,
     Completed,
     Settled,
+    Cancelled,
+    Disputed,
+    Refunded,
 }
 
 impl AgreementState {
     /// A terminal state can never return to an active one (Invariant 16).
+    /// Every way an agreement can end is terminal: paid, refunded, or
+    /// abandoned before any money was involved.
     pub fn is_terminal(&self) -> bool {
-        matches!(self, AgreementState::Settled)
+        matches!(
+            self,
+            AgreementState::Settled | AgreementState::Cancelled | AgreementState::Refunded
+        )
     }
+}
+
+/// How a dispute ended. Phase 5 resolves disputes by concession only — the
+/// party who would lose signs away its own claim — so the outcome is always one
+/// side whole and never a split. Percentage splits and third-party arbiters are
+/// Phase 13, behind the arbiter policy gate.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Debug, PartialEq, Eq, InitSpace)]
+pub enum DisputeOutcome {
+    SellerPaid,
+    BuyerRefunded,
 }

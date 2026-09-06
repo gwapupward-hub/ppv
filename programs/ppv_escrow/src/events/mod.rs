@@ -1,8 +1,10 @@
 pub mod agreement;
+pub mod dispute;
 pub mod proof;
 pub mod settlement;
 
 pub use agreement::*;
+pub use dispute::*;
 pub use proof::*;
 pub use settlement::*;
 
@@ -36,6 +38,13 @@ mod tests {
         assert_eq!(ProofSubmitted::DISCRIMINATOR, expected("ProofSubmitted"));
         assert_eq!(ProofApproved::DISCRIMINATOR, expected("ProofApproved"));
         assert_eq!(ProofRejected::DISCRIMINATOR, expected("ProofRejected"));
+        assert_eq!(
+            AgreementCancelled::DISCRIMINATOR,
+            expected("AgreementCancelled")
+        );
+        assert_eq!(DisputeOpened::DISCRIMINATOR, expected("DisputeOpened"));
+        assert_eq!(DisputeResolved::DISCRIMINATOR, expected("DisputeResolved"));
+        assert_eq!(RefundExecuted::DISCRIMINATOR, expected("RefundExecuted"));
     }
 
     // `ppv_commerce` emits an `AgreementCreated` too, and Anchor derives the

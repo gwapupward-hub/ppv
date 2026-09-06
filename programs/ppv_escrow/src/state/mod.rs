@@ -27,12 +27,17 @@ mod tests {
             + 8 * 4               // created / funded / completed / settled
             + 4                   // proof count
             + 32                  // settlement proof
-            + 28; // reserved
+            + 32                  // dispute opened by
+            + 8                   // state changed at
+            + 64; // reserved
         assert_eq!(Agreement::INIT_SPACE, expected);
-        assert_eq!(
-            expected, 278,
-            "spending reserved bytes must not resize the account"
-        );
+        // Phases 3 and 4 fit inside the original reserved block, so the account
+        // stayed at 278 bytes. Phase 5 needed more than it had left and grew
+        // the account instead, restoring the reserved headroom. That is free
+        // only because nothing is deployed: after the first deployment, growth
+        // needs a realloc and a migration, which is what the reserved block
+        // exists to avoid.
+        assert_eq!(expected, 354);
     }
 
     #[test]
@@ -62,6 +67,13 @@ mod tests {
         assert_eq!(AgreementState::Funded.try_to_vec().unwrap(), vec![1]);
         assert_eq!(AgreementState::Completed.try_to_vec().unwrap(), vec![2]);
         assert_eq!(AgreementState::Settled.try_to_vec().unwrap(), vec![3]);
+        // Appended by Phase 5, after the originals, so nothing already decoding
+        // this enum reads a different state for the same byte.
+        assert_eq!(AgreementState::Cancelled.try_to_vec().unwrap(), vec![4]);
+        assert_eq!(AgreementState::Disputed.try_to_vec().unwrap(), vec![5]);
+        assert_eq!(AgreementState::Refunded.try_to_vec().unwrap(), vec![6]);
+        assert_eq!(DisputeOutcome::SellerPaid.try_to_vec().unwrap(), vec![0]);
+        assert_eq!(DisputeOutcome::BuyerRefunded.try_to_vec().unwrap(), vec![1]);
 
         assert_eq!(AgreementType::Escrow.try_to_vec().unwrap(), vec![0]);
         assert_eq!(AgreementType::Invoice.try_to_vec().unwrap(), vec![1]);
@@ -75,12 +87,19 @@ mod tests {
     }
 
     #[test]
-    fn only_settled_is_terminal() {
-        assert!(AgreementState::Settled.is_terminal());
+    fn every_ending_is_terminal_and_nothing_else_is() {
+        for state in [
+            AgreementState::Settled,
+            AgreementState::Cancelled,
+            AgreementState::Refunded,
+        ] {
+            assert!(state.is_terminal());
+        }
         for state in [
             AgreementState::Open,
             AgreementState::Funded,
             AgreementState::Completed,
+            AgreementState::Disputed,
         ] {
             assert!(!state.is_terminal());
         }

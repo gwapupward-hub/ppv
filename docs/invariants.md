@@ -11,7 +11,7 @@ with no test is an intention.
 | # | Invariant | Enforced by | Tested by |
 | --- | --- | --- | --- |
 | 1 | A `Settled` agreement cannot settle again. | `require_settleable` demands `Completed`; `record_settled` is the only writer of `Settled`. | `double_settlement_is_impossible`, "cannot run twice" |
-| 2 | A terminal state never returns to an active one. | Only `Settled` is terminal, and no instruction accepts it. | `a_settled_agreement_cannot_reopen` |
+| 2 | A terminal state never returns to an active one. | `Settled`, `Refunded` and `Cancelled` are terminal, and no instruction accepts them. | `every_ending_is_final`, "closes every ending for good" |
 | 3 | Only the buyer can fund. | `require_keys_eq!(signer, creator)` in `require_fundable`. | `only_the_buyer_can_fund`, "refuses anyone but the buyer" |
 | 4 | Only the seller can mark work complete. | `require_keys_eq!(signer, counterparty)` in `require_completable`. | `completion_requires_funding_and_the_seller`, "refuses the buyer and any outsider" |
 | 5 | Settlement pays only the seller. | `seller_token_account.owner == agreement.counterparty` constraint. | "cannot be redirected away from the seller" |
@@ -21,6 +21,10 @@ with no test is an intention.
 | 9 | Every token movement out of escrow corresponds to an authorized transition. | The vault authority is a PDA that signs only inside `settle`, after `require_settleable`. | "refuses a substituted vault, vault authority, or mint", cross-agreement isolation |
 | 10 | Custody state is never mistaken for protocol state. | State is written only after the CPI, and the vault balance delta is asserted to equal `amount`. | "does not treat a direct token transfer as funding", "leaves a donated surplus untouched" |
 | 11 | An agreement's vault is reachable only through that agreement. | Vault and vault authority seeds both contain the agreement address. | cross-agreement isolation |
+| 9a | Normal settlement is impossible while disputed. | Not a separate check: `settle` demands `Completed`, and `Disputed` is not it. | `a_dispute_halts_settlement`, "halts settlement the moment a dispute is opened" |
+| 9b | A dispute can only be resolved in the other party's favour. | `require_resolvable` rejects a signer that is also the beneficiary. | `resolution_gives_the_money_to_the_other_party`, "refuses anyone taking the money for themselves" |
+| 9c | A refund reaches only the buyer, and only the seller may give it. | Destination owner constraint plus a seller-only signer. | `a_refund_is_the_sellers_to_give`, "refuses a buyer taking its own refund" |
+| 9d | Cancellation cannot strand escrowed money. | `cancel` is `Open`-only and takes no token accounts. | `cancellation_is_only_for_an_agreement_nobody_funded`, "refuses cancellation … once money is escrowed" |
 | 12 | An agreement whose semantics are unimplemented cannot exist. | `agreement_type == Escrow` required at initialization. | "rejects an agreement type the kernel does not implement" |
 | 12a | A proof from one agreement cannot be presented for another. | The agreement is in the proof PDA seeds, so the same index under another agreement is another address. | "keeps one agreement's evidence unusable by another", `escrow-pdas.test.ts` |
 | 12b | Proof indices are dense, ordered, and assigned by the protocol. | The seed is the agreement's own `proof_count`; a client-chosen index is a seeds failure. | "numbers proofs densely, and refuses a client-chosen index" |
@@ -38,6 +42,7 @@ with no test is an intention.
 | 15 | A receipt corresponds to an actual protocol transition. | Receipts are projections of committed events plus chain coordinates; nothing else can produce one. | `escrow-receipts.test.ts` |
 | 16 | Replay produces identical receipt history. | Receipt ids are a hash of (program id, signature, instruction index, inner index, action). | "a receipt is a pure function…", "out-of-order and duplicated delivery…" |
 | 17 | A reconstructed history that does not chain is refused. | `reconstructAgreementLifecycle` verifies each step starts where the previous ended and that settlement matches funding. | "a history that does not chain is refused", "a settlement that disagrees with custody is refused" |
+| 17c | A reconstructed agreement cannot be both settled and refunded, and a refund must return what was funded. | `reconstructAgreementLifecycle` checks both. | "an agreement cannot be both settled and refunded", "a refund must return exactly what was funded" |
 | 17b | A reconstructed settlement cannot cite evidence the history never approved. | `reconstructAgreementLifecycle` resolves the cited proof and its decision. | "a settlement can only cite evidence this history approved" |
 | 17a | A fact that is not a transition cannot be read as one. | Receipts carry `kind`; annotations are placed into the history but excluded from the chain walk. | "evidence is recorded as an annotation, not as a transition", "a proof lands in the history where it happened" |
 | 18 | An event is identified by (program id, discriminator), never the discriminator alone. | `decodeEventForProgram` selects the decoder from the emitting program. | "an escrow event is never mistaken for a commerce event of the same name" |
@@ -52,8 +57,6 @@ with no test is an intention.
 
 ## Invariants deferred with their phases
 
-- Normal settlement cannot occur while `Disputed` — Phase 5, when `Disputed`
-  exists. Until then, no instruction can produce that state at all.
 - A milestone from one agreement cannot affect another — Phase 6.
 
 Each arrives with the instruction that makes it reachable, and with the negative

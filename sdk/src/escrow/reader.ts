@@ -2,9 +2,11 @@ import { encodeBase58 } from "../reputation/base58.js";
 import {
   agreementStateFromIndex,
   agreementTypeFromIndex,
+  disputeOutcomeFromIndex,
   proofStatusFromIndex,
   type AgreementState,
   type AgreementType,
+  type DisputeOutcome,
   type ProofStatus,
 } from "./states.js";
 
@@ -75,6 +77,10 @@ export class BorshReader {
 
   proofStatus(): ProofStatus {
     return proofStatusFromIndex(this.u8());
+  }
+
+  disputeOutcome(): DisputeOutcome {
+    return disputeOutcomeFromIndex(this.u8());
   }
 
   u32(): number {

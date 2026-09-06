@@ -1,7 +1,7 @@
 import { anchorDiscriminator } from "../reputation/hashing.js";
 import { EVENT_IX_TAG } from "../reputation/chain-events.js";
 import { BorshReader, bytesEqual } from "./reader.js";
-import type { AgreementState, AgreementType } from "./states.js";
+import type { AgreementState, AgreementType, DisputeOutcome } from "./states.js";
 
 /**
  * Decoder for the events `ppv_escrow` emits through Anchor's event CPI.
@@ -27,6 +27,10 @@ export const PPV_ESCROW_EVENT_NAMES = [
   "ProofSubmitted",
   "ProofApproved",
   "ProofRejected",
+  "AgreementCancelled",
+  "DisputeOpened",
+  "DisputeResolved",
+  "RefundExecuted",
 ] as const;
 export type PpvEscrowEventName = (typeof PPV_ESCROW_EVENT_NAMES)[number];
 
@@ -106,6 +110,54 @@ type ProofDecision = Base & {
 export type EscrowProofApprovedEvent = ProofDecision & { name: "ProofApproved" };
 export type EscrowProofRejectedEvent = ProofDecision & { name: "ProofRejected" };
 
+export type EscrowAgreementCancelledEvent = Base & {
+  name: "AgreementCancelled";
+  creator: string;
+  counterparty: string;
+  cancelledBy: string;
+  previousState: AgreementState;
+  newState: AgreementState;
+};
+
+export type EscrowDisputeOpenedEvent = Base & {
+  name: "DisputeOpened";
+  creator: string;
+  counterparty: string;
+  openedBy: string;
+  /** A commitment to the complaint, not the complaint. */
+  reasonHash: string;
+  previousState: AgreementState;
+  newState: AgreementState;
+};
+
+/**
+ * Reports how a dispute ended, and deliberately not a state transition: the
+ * `SettlementExecuted` or `RefundExecuted` emitted beside it carries that. Two
+ * events claiming to leave `Disputed` would look like a fork.
+ */
+export type EscrowDisputeResolvedEvent = Base & {
+  name: "DisputeResolved";
+  creator: string;
+  counterparty: string;
+  resolvedBy: string;
+  beneficiary: string;
+  outcome: DisputeOutcome;
+  openedBy: string;
+  resultingState: AgreementState;
+};
+
+export type EscrowRefundExecutedEvent = Base & {
+  name: "RefundExecuted";
+  buyer: string;
+  seller: string;
+  refundedBy: string;
+  amount: bigint;
+  mint: string;
+  destination: string;
+  previousState: AgreementState;
+  newState: AgreementState;
+};
+
 export type PpvEscrowEvent =
   | EscrowAgreementCreatedEvent
   | EscrowAgreementFundedEvent
@@ -113,7 +165,11 @@ export type PpvEscrowEvent =
   | EscrowSettlementExecutedEvent
   | EscrowProofSubmittedEvent
   | EscrowProofApprovedEvent
-  | EscrowProofRejectedEvent;
+  | EscrowProofRejectedEvent
+  | EscrowAgreementCancelledEvent
+  | EscrowDisputeOpenedEvent
+  | EscrowDisputeResolvedEvent
+  | EscrowRefundExecutedEvent;
 
 export function escrowEventDiscriminatorHex(name: PpvEscrowEventName): string {
   return Buffer.from(anchorDiscriminator("event", name)).toString("hex");
@@ -228,6 +284,64 @@ export function decodeEscrowEventData(data: Uint8Array): PpvEscrowEvent | null {
         proofIndex: reader.u32(),
         contentHash: reader.hex(32),
         agreementState: reader.state(),
+        timestamp: reader.i64(),
+      };
+      break;
+    case "AgreementCancelled":
+      event = {
+        program: "ppv_escrow",
+        name: "AgreementCancelled",
+        agreement: reader.pubkey(),
+        creator: reader.pubkey(),
+        counterparty: reader.pubkey(),
+        cancelledBy: reader.pubkey(),
+        previousState: reader.state(),
+        newState: reader.state(),
+        timestamp: reader.i64(),
+      };
+      break;
+    case "DisputeOpened":
+      event = {
+        program: "ppv_escrow",
+        name: "DisputeOpened",
+        agreement: reader.pubkey(),
+        creator: reader.pubkey(),
+        counterparty: reader.pubkey(),
+        openedBy: reader.pubkey(),
+        reasonHash: reader.hex(32),
+        previousState: reader.state(),
+        newState: reader.state(),
+        timestamp: reader.i64(),
+      };
+      break;
+    case "DisputeResolved":
+      event = {
+        program: "ppv_escrow",
+        name: "DisputeResolved",
+        agreement: reader.pubkey(),
+        creator: reader.pubkey(),
+        counterparty: reader.pubkey(),
+        resolvedBy: reader.pubkey(),
+        beneficiary: reader.pubkey(),
+        outcome: reader.disputeOutcome(),
+        openedBy: reader.pubkey(),
+        resultingState: reader.state(),
+        timestamp: reader.i64(),
+      };
+      break;
+    case "RefundExecuted":
+      event = {
+        program: "ppv_escrow",
+        name: "RefundExecuted",
+        agreement: reader.pubkey(),
+        buyer: reader.pubkey(),
+        seller: reader.pubkey(),
+        refundedBy: reader.pubkey(),
+        amount: reader.u64(),
+        mint: reader.pubkey(),
+        destination: reader.pubkey(),
+        previousState: reader.state(),
+        newState: reader.state(),
         timestamp: reader.i64(),
       };
       break;

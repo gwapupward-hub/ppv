@@ -26,13 +26,16 @@ export type AgreementAccount = {
   proofCount: number;
   /** The approved proof settlement cited; the default address when none. */
   settlementProof: string;
+  /** Who opened the dispute; the default address when none was opened. */
+  disputeOpenedBy: string;
+  stateChangedAt: number;
 };
 
 export const AGREEMENT_ACCOUNT_DISCRIMINATOR = anchorDiscriminator("account", "Agreement");
 
 /** 8 discriminator + 4 bumps + 2 keys + u64 + type + 2 keys + u64 + hash + state + 4 times + proof count + reserved. */
 export const AGREEMENT_ACCOUNT_SIZE =
-  8 + 4 + 32 * 2 + 8 + 1 + 32 * 2 + 8 + 32 + 1 + 8 * 4 + 4 + 32 + 28;
+  8 + 4 + 32 * 2 + 8 + 1 + 32 * 2 + 8 + 32 + 1 + 8 * 4 + 4 + 32 + 32 + 8 + 64;
 
 export function decodeAgreementAccount(data: Uint8Array): AgreementAccount {
   if (!bytesEqual(data.subarray(0, 8), AGREEMENT_ACCOUNT_DISCRIMINATOR)) {
@@ -59,8 +62,10 @@ export function decodeAgreementAccount(data: Uint8Array): AgreementAccount {
     settledAt: reader.i64(),
     proofCount: reader.u32(),
     settlementProof: reader.pubkey(),
+    disputeOpenedBy: reader.pubkey(),
+    stateChangedAt: reader.i64(),
   };
-  reader.skip(28); // reserved
+  reader.skip(64); // reserved
   if (reader.remaining !== 0) throw new RangeError("agreement account has trailing bytes");
   return account;
 }
