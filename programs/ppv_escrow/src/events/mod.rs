@@ -1,7 +1,9 @@
 pub mod agreement;
+pub mod proof;
 pub mod settlement;
 
 pub use agreement::*;
+pub use proof::*;
 pub use settlement::*;
 
 #[cfg(test)]
@@ -31,6 +33,7 @@ mod tests {
             SettlementExecuted::DISCRIMINATOR,
             expected("SettlementExecuted")
         );
+        assert_eq!(ProofSubmitted::DISCRIMINATOR, expected("ProofSubmitted"));
     }
 
     // `ppv_commerce` emits an `AgreementCreated` too, and Anchor derives the
@@ -90,6 +93,26 @@ mod tests {
             ..event
         };
         assert_eq!(with_proof.try_to_vec().unwrap().len(), bytes.len() + 32);
+    }
+
+    #[test]
+    fn proof_submitted_layout_is_pinned() {
+        let event = ProofSubmitted {
+            agreement: Pubkey::new_from_array([5; 32]),
+            proof: Pubkey::new_from_array([8; 32]),
+            creator: Pubkey::new_from_array([1; 32]),
+            counterparty: Pubkey::new_from_array([2; 32]),
+            submitter: Pubkey::new_from_array([2; 32]),
+            proof_index: 0,
+            content_hash: [7; 32],
+            metadata_hash: [0; 32],
+            agreement_state: AgreementState::Funded,
+            timestamp: 1_700_000_150,
+        };
+        let bytes = event.try_to_vec().unwrap();
+        assert_eq!(bytes.len(), 32 * 5 + 4 + 32 * 2 + 1 + 8);
+        assert_eq!(&bytes[160..164], &0u32.to_le_bytes());
+        assert_eq!(bytes[228], 1, "AgreementState::Funded");
     }
 
     #[test]

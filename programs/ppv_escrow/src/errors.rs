@@ -26,6 +26,10 @@ pub enum EscrowError {
     DestinationNotOwnedBySeller,
     #[msg("Custody did not move by exactly the agreement amount")]
     CustodyMismatch,
+    #[msg("Proof content hash must not be all zeroes")]
+    InvalidContentHash,
+    #[msg("Proof does not belong to this agreement")]
+    ProofAgreementMismatch,
     #[msg("Vault address already holds data")]
     VaultAlreadyInitialized,
     #[msg("Arithmetic overflow")]

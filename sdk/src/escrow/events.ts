@@ -24,6 +24,7 @@ export const PPV_ESCROW_EVENT_NAMES = [
   "AgreementFunded",
   "WorkCompleted",
   "SettlementExecuted",
+  "ProofSubmitted",
 ] as const;
 export type PpvEscrowEventName = (typeof PPV_ESCROW_EVENT_NAMES)[number];
 
@@ -75,11 +76,25 @@ export type EscrowSettlementExecutedEvent = Base & {
   newState: AgreementState;
 };
 
+export type EscrowProofSubmittedEvent = Base & {
+  name: "ProofSubmitted";
+  proof: string;
+  creator: string;
+  counterparty: string;
+  submitter: string;
+  proofIndex: number;
+  contentHash: string;
+  metadataHash: string;
+  /** The state the agreement was in. Anchoring evidence does not change it. */
+  agreementState: AgreementState;
+};
+
 export type PpvEscrowEvent =
   | EscrowAgreementCreatedEvent
   | EscrowAgreementFundedEvent
   | EscrowWorkCompletedEvent
-  | EscrowSettlementExecutedEvent;
+  | EscrowSettlementExecutedEvent
+  | EscrowProofSubmittedEvent;
 
 export function escrowEventDiscriminatorHex(name: PpvEscrowEventName): string {
   return Buffer.from(anchorDiscriminator("event", name)).toString("hex");
@@ -161,6 +176,22 @@ export function decodeEscrowEventData(data: Uint8Array): PpvEscrowEvent | null {
         proof: reader.optionalPubkey(),
         previousState: reader.state(),
         newState: reader.state(),
+        timestamp: reader.i64(),
+      };
+      break;
+    case "ProofSubmitted":
+      event = {
+        program: "ppv_escrow",
+        name: "ProofSubmitted",
+        agreement: reader.pubkey(),
+        proof: reader.pubkey(),
+        creator: reader.pubkey(),
+        counterparty: reader.pubkey(),
+        submitter: reader.pubkey(),
+        proofIndex: reader.u32(),
+        contentHash: reader.hex(32),
+        metadataHash: reader.hex(32),
+        agreementState: reader.state(),
         timestamp: reader.i64(),
       };
       break;

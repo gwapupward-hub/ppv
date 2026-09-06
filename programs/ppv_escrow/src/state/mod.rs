@@ -1,8 +1,10 @@
 pub mod agreement;
 pub mod enums;
+pub mod proof;
 
 pub use agreement::*;
 pub use enums::*;
+pub use proof::*;
 
 #[cfg(test)]
 mod tests {
@@ -23,9 +25,34 @@ mod tests {
             + 32                  // terms hash
             + 1                   // state
             + 8 * 4               // created / funded / completed / settled
-            + 64; // reserved
+            + 4                   // proof count
+            + 60; // reserved
         assert_eq!(Agreement::INIT_SPACE, expected);
-        assert_eq!(expected, 278);
+        assert_eq!(
+            expected, 278,
+            "spending reserved bytes must not resize the account"
+        );
+    }
+
+    #[test]
+    fn proof_account_space_is_pinned() {
+        let expected = 2          // schema version + bump
+            + 32 * 2              // agreement + submitter
+            + 4                   // proof index
+            + 32 * 2              // content + metadata hash
+            + 1                   // status
+            + 8 * 2               // created + decided
+            + 32                  // decided by
+            + 32; // reserved
+        assert_eq!(Proof::INIT_SPACE, expected);
+        assert_eq!(expected, 215);
+    }
+
+    #[test]
+    fn proof_status_discriminants_are_pinned() {
+        assert_eq!(ProofStatus::Submitted.try_to_vec().unwrap(), vec![0]);
+        assert_eq!(ProofStatus::Approved.try_to_vec().unwrap(), vec![1]);
+        assert_eq!(ProofStatus::Rejected.try_to_vec().unwrap(), vec![2]);
     }
 
     #[test]

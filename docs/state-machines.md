@@ -33,6 +33,7 @@ COMPLETED
 | `fund` | creator (buyer) | `Open` | `Funded` | Buyer ATA → vault, exactly `amount` |
 | `mark_completed` | counterparty (seller) | `Funded` | `Completed` | None |
 | `settle` | either party | `Completed` | `Settled` | Vault → seller ATA, exactly `amount` |
+| `submit_proof` | either party | `Funded`, `Completed` | unchanged | None |
 
 Explicitly rejected, and covered by tests:
 
@@ -44,6 +45,22 @@ FUNDED    --X-->  FUNDED       (double funding)
 COMPLETED --X-->  COMPLETED    (double completion)
 SETTLED   --X-->  anything     (terminal)
 ```
+
+### Evidence is not a transition
+
+`submit_proof` anchors a hash to the agreement while it is `Funded` or
+`Completed`. It moves no money and changes no state — the agreement's own
+counter advances, and that is all. What follows from a proof is decided
+separately, which is what keeps evidence from becoming an implicit authority to
+release funds.
+
+```text
+FUNDED ──submit_proof()──> FUNDED      (proof 0, proof 1, … anchored)
+COMPLETED ──submit_proof()──> COMPLETED
+```
+
+Neither `Open` nor `Settled` accepts evidence: before funding there is nothing
+escrowed to deliver against, and after settlement the record is closed.
 
 ### Why completion and settlement are separate
 

@@ -97,7 +97,8 @@ pub fn handle_initialize_agreement(
     agreement.funded_at = 0;
     agreement.completed_at = 0;
     agreement.settled_at = 0;
-    agreement.reserved = [0; 64];
+    agreement.proof_count = 0;
+    agreement.reserved = [0; 60];
 
     emit_cpi!(AgreementCreated {
         agreement: agreement_key,

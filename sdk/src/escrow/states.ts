@@ -21,6 +21,15 @@ export type AgreementType = (typeof AGREEMENT_TYPES)[number];
 /** The agreement types the deployed kernel will actually create. */
 export const IMPLEMENTED_AGREEMENT_TYPES: readonly AgreementType[] = ["Escrow"];
 
+export const PROOF_STATUSES = ["Submitted", "Approved", "Rejected"] as const;
+export type ProofStatus = (typeof PROOF_STATUSES)[number];
+
+export function proofStatusFromIndex(index: number): ProofStatus {
+  const status = PROOF_STATUSES[index];
+  if (!status) throw new RangeError(`unknown proof status ${index}`);
+  return status;
+}
+
 export const ESCROW_ACTIONS = ["fund", "mark_completed", "settle"] as const;
 export type EscrowAction = (typeof ESCROW_ACTIONS)[number];
 

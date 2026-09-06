@@ -8,6 +8,7 @@ import {
   createProgramAddress,
   deriveAgreement,
   deriveAgreementAddresses,
+  deriveProof,
   isOnCurve,
 } from "../src/index.js";
 
@@ -106,4 +107,28 @@ test("seed limits are enforced the way the runtime enforces them", () => {
     () => createProgramAddress(Array.from({ length: 17 }, () => SEED), program),
     /too many seeds/,
   );
+});
+
+test("a proof address is bound to its agreement and index", () => {
+  const program = Keypair.generate().publicKey;
+  const agreement = Keypair.generate().publicKey;
+  const other = Keypair.generate().publicKey;
+
+  const index = Buffer.alloc(4);
+  index.writeUInt32LE(3);
+  const [reference, referenceBump] = PublicKey.findProgramAddressSync(
+    [Buffer.from("proof"), agreement.toBytes(), index],
+    program,
+  );
+  const mine = deriveProof(program.toBase58(), agreement.toBase58(), 3);
+  assert.equal(mine.address, reference.toBase58());
+  assert.equal(mine.bump, referenceBump);
+
+  // Invariant 11: the same index under another agreement is another address,
+  // so a proof cannot be presented for an agreement it was not anchored to.
+  assert.notEqual(deriveProof(program.toBase58(), other.toBase58(), 3).address, mine.address);
+  assert.notEqual(deriveProof(program.toBase58(), agreement.toBase58(), 4).address, mine.address);
+
+  assert.throws(() => deriveProof(program.toBase58(), agreement.toBase58(), -1), PdaError);
+  assert.throws(() => deriveProof(program.toBase58(), agreement.toBase58(), 2 ** 32), PdaError);
 });

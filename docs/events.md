@@ -46,6 +46,7 @@ transition committed.
 | `AgreementFunded` | `fund` | `Open` → `Funded` |
 | `WorkCompleted` | `mark_completed` | `Funded` → `Completed` |
 | `SettlementExecuted` | `settle` | `Completed` → `Settled` |
+| `ProofSubmitted` | `submit_proof` | none — reports the state it saw |
 
 ```rust
 #[event]
@@ -100,7 +101,7 @@ gets a new event name and the old one keeps its layout until consumers migrate.
 
 ## Later phases
 
-`ProofSubmitted`, `ProofApproved`, `ProofRejected`, `MilestoneCreated`,
+`ProofApproved`, `ProofRejected`, `MilestoneCreated`,
 `MilestoneFunded`, `MilestoneSubmitted`, `MilestoneApproved`, `DisputeOpened`,
 `DisputeResolved`, `RefundExecuted`, `AgreementCancelled`, `InvoiceCreated`, and
 `InvoicePaid` arrive with the instructions that emit them. Each is added to the

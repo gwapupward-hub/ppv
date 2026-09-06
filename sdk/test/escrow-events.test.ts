@@ -13,20 +13,34 @@ import {
 import { encodePpvEvent } from "./helpers/ppv-events.js";
 import {
   LIFECYCLE_FIXTURE,
+  PROOF_FIXTURE,
   addressFromByte,
   encodeEscrowEvent,
   hexFromByte,
 } from "./helpers/escrow-events.js";
 
 test("every escrow event round-trips through the decoder", () => {
-  for (const fixture of LIFECYCLE_FIXTURE) {
+  const all = [...LIFECYCLE_FIXTURE, PROOF_FIXTURE];
+  for (const fixture of all) {
     assert.deepEqual(decodeEscrowEventData(encodeEscrowEvent(fixture)), fixture);
   }
   assert.equal(
-    new Set(LIFECYCLE_FIXTURE.map((event) => event.name)).size,
+    new Set(all.map((event) => event.name)).size,
     PPV_ESCROW_EVENT_NAMES.length,
-    "the fixture must exercise every escrow event",
+    "the fixtures must exercise every escrow event",
   );
+});
+
+test("a proof event names the agreement it is bound to and the state it saw", () => {
+  const decoded = decodeEscrowEventData(encodeEscrowEvent(PROOF_FIXTURE));
+  assert.equal(decoded?.name, "ProofSubmitted");
+  if (decoded?.name !== "ProofSubmitted") return;
+  assert.equal(decoded.agreement, LIFECYCLE_FIXTURE[0]!.agreement);
+  assert.equal(decoded.proofIndex, 0);
+  // Anchoring evidence does not move the agreement, so the event reports the
+  // state it was already in rather than a transition.
+  assert.equal(decoded.agreementState, "Funded");
+  assert.equal(decoded.metadataHash, "0".repeat(64), "no metadata commitment");
 });
 
 test("discriminators are the anchor derivation and nothing else", () => {

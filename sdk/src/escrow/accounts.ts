@@ -1,6 +1,6 @@
 import { anchorDiscriminator } from "../reputation/hashing.js";
 import { BorshReader, bytesEqual } from "./reader.js";
-import type { AgreementState, AgreementType } from "./states.js";
+import type { AgreementState, AgreementType, ProofStatus } from "./states.js";
 
 /** Mirrors `Agreement` in `programs/ppv_escrow/src/state/agreement.rs`. */
 export type AgreementAccount = {
@@ -23,12 +23,13 @@ export type AgreementAccount = {
   fundedAt: number;
   completedAt: number;
   settledAt: number;
+  proofCount: number;
 };
 
 export const AGREEMENT_ACCOUNT_DISCRIMINATOR = anchorDiscriminator("account", "Agreement");
 
-/** 8 discriminator + 4 bumps + 2 keys + u64 + type + 2 keys + u64 + hash + state + 4 times + reserved. */
-export const AGREEMENT_ACCOUNT_SIZE = 8 + 4 + 32 * 2 + 8 + 1 + 32 * 2 + 8 + 32 + 1 + 8 * 4 + 64;
+/** 8 discriminator + 4 bumps + 2 keys + u64 + type + 2 keys + u64 + hash + state + 4 times + proof count + reserved. */
+export const AGREEMENT_ACCOUNT_SIZE = 8 + 4 + 32 * 2 + 8 + 1 + 32 * 2 + 8 + 32 + 1 + 8 * 4 + 4 + 60;
 
 export function decodeAgreementAccount(data: Uint8Array): AgreementAccount {
   if (!bytesEqual(data.subarray(0, 8), AGREEMENT_ACCOUNT_DISCRIMINATOR)) {
@@ -53,8 +54,54 @@ export function decodeAgreementAccount(data: Uint8Array): AgreementAccount {
     fundedAt: reader.i64(),
     completedAt: reader.i64(),
     settledAt: reader.i64(),
+    proofCount: reader.u32(),
   };
-  reader.skip(64); // reserved
+  reader.skip(60); // reserved
   if (reader.remaining !== 0) throw new RangeError("agreement account has trailing bytes");
+  return account;
+}
+
+/** Mirrors `Proof` in `programs/ppv_escrow/src/state/proof.rs`. */
+export type ProofAccount = {
+  schemaVersion: number;
+  bump: number;
+  agreement: string;
+  submitter: string;
+  proofIndex: number;
+  contentHash: string;
+  /** All zeroes means the submitter committed to no private metadata. */
+  metadataHash: string;
+  status: ProofStatus;
+  createdAt: number;
+  decidedAt: number;
+  /** The default address while the proof is undecided. */
+  decidedBy: string;
+};
+
+export const PROOF_ACCOUNT_DISCRIMINATOR = anchorDiscriminator("account", "Proof");
+
+/** 8 discriminator + 2 bumps + 2 keys + u32 + 2 hashes + status + 2 times + key + reserved. */
+export const PROOF_ACCOUNT_SIZE = 8 + 2 + 32 * 2 + 4 + 32 * 2 + 1 + 8 * 2 + 32 + 32;
+
+export function decodeProofAccount(data: Uint8Array): ProofAccount {
+  if (!bytesEqual(data.subarray(0, 8), PROOF_ACCOUNT_DISCRIMINATOR)) {
+    throw new RangeError("not a ppv_escrow Proof account");
+  }
+  const reader = new BorshReader(data.subarray(8));
+  const account: ProofAccount = {
+    schemaVersion: reader.u8(),
+    bump: reader.u8(),
+    agreement: reader.pubkey(),
+    submitter: reader.pubkey(),
+    proofIndex: reader.u32(),
+    contentHash: reader.hex(32),
+    metadataHash: reader.hex(32),
+    status: reader.proofStatus(),
+    createdAt: reader.i64(),
+    decidedAt: reader.i64(),
+    decidedBy: reader.pubkey(),
+  };
+  reader.skip(32); // reserved
+  if (reader.remaining !== 0) throw new RangeError("proof account has trailing bytes");
   return account;
 }

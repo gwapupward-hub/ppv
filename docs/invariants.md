@@ -22,6 +22,9 @@ with no test is an intention.
 | 10 | Custody state is never mistaken for protocol state. | State is written only after the CPI, and the vault balance delta is asserted to equal `amount`. | "does not treat a direct token transfer as funding", "leaves a donated surplus untouched" |
 | 11 | An agreement's vault is reachable only through that agreement. | Vault and vault authority seeds both contain the agreement address. | cross-agreement isolation |
 | 12 | An agreement whose semantics are unimplemented cannot exist. | `agreement_type == Escrow` required at initialization. | "rejects an agreement type the kernel does not implement" |
+| 12a | A proof from one agreement cannot be presented for another. | The agreement is in the proof PDA seeds, so the same index under another agreement is another address. | "keeps one agreement's evidence unusable by another", `escrow-pdas.test.ts` |
+| 12b | Proof indices are dense, ordered, and assigned by the protocol. | The seed is the agreement's own `proof_count`; a client-chosen index is a seeds failure. | "numbers proofs densely, and refuses a client-chosen index" |
+| 12c | Anchoring evidence changes no state and moves no custody. | `submit_proof` writes only the proof account and the counter. | "anchors evidence to the agreement without moving it" |
 
 ## Events and receipts
 
@@ -32,6 +35,7 @@ with no test is an intention.
 | 15 | A receipt corresponds to an actual protocol transition. | Receipts are projections of committed events plus chain coordinates; nothing else can produce one. | `escrow-receipts.test.ts` |
 | 16 | Replay produces identical receipt history. | Receipt ids are a hash of (program id, signature, instruction index, inner index, action). | "a receipt is a pure function…", "out-of-order and duplicated delivery…" |
 | 17 | A reconstructed history that does not chain is refused. | `reconstructAgreementLifecycle` verifies each step starts where the previous ended and that settlement matches funding. | "a history that does not chain is refused", "a settlement that disagrees with custody is refused" |
+| 17a | A fact that is not a transition cannot be read as one. | Receipts carry `kind`; annotations are placed into the history but excluded from the chain walk. | "evidence is recorded as an annotation, not as a transition", "a proof lands in the history where it happened" |
 | 18 | An event is identified by (program id, discriminator), never the discriminator alone. | `decodeEventForProgram` selects the decoder from the emitting program. | "an escrow event is never mistaken for a commerce event of the same name" |
 
 ## Negotiation (`ppv_commerce`, unchanged by this phase)
@@ -46,7 +50,6 @@ with no test is an intention.
 
 - Normal settlement cannot occur while `Disputed` — Phase 5, when `Disputed`
   exists. Until then, no instruction can produce that state at all.
-- A proof from one agreement cannot authorize another — Phase 3.
 - A milestone from one agreement cannot affect another — Phase 6.
 
 Each arrives with the instruction that makes it reachable, and with the negative

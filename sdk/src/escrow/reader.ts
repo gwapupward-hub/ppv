@@ -1,5 +1,12 @@
 import { encodeBase58 } from "../reputation/base58.js";
-import { agreementStateFromIndex, agreementTypeFromIndex, type AgreementState, type AgreementType } from "./states.js";
+import {
+  agreementStateFromIndex,
+  agreementTypeFromIndex,
+  proofStatusFromIndex,
+  type AgreementState,
+  type AgreementType,
+  type ProofStatus,
+} from "./states.js";
 
 /** Little-endian borsh reader shared by the escrow account and event decoders. */
 export class BorshReader {
@@ -64,6 +71,14 @@ export class BorshReader {
 
   agreementType(): AgreementType {
     return agreementTypeFromIndex(this.u8());
+  }
+
+  proofStatus(): ProofStatus {
+    return proofStatusFromIndex(this.u8());
+  }
+
+  u32(): number {
+    return this.view(4).getUint32(0, true);
   }
 
   skip(length: number): void {

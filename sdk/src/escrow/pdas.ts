@@ -15,6 +15,7 @@ import { isOnCurve } from "./curve.js";
 export const AGREEMENT_SEED = new TextEncoder().encode("agreement");
 export const VAULT_AUTHORITY_SEED = new TextEncoder().encode("vault");
 export const VAULT_TOKEN_SEED = new TextEncoder().encode("vault_token");
+export const PROOF_SEED = new TextEncoder().encode("proof");
 
 const PDA_MARKER = new TextEncoder().encode("ProgramDerivedAddress");
 const MAX_SEED_LENGTH = 32;
@@ -115,6 +116,32 @@ export function deriveVaultAuthority(
 
 export function deriveVault(programId: Address, agreement: Address): { address: Address; bump: number } {
   return findProgramAddress([VAULT_TOKEN_SEED, addressBytes(agreement)], programId);
+}
+
+/** `proof_index` is a u32 assigned by the agreement, encoded little-endian. */
+export function proofIndexSeed(proofIndex: number): Uint8Array {
+  if (!Number.isInteger(proofIndex) || proofIndex < 0 || proofIndex > 0xffff_ffff) {
+    throw new PdaError("proof index out of u32 range");
+  }
+  const out = new Uint8Array(4);
+  new DataView(out.buffer).setUint32(0, proofIndex, true);
+  return out;
+}
+
+/**
+ * Evidence is addressed under the agreement it belongs to. That is the whole
+ * of Invariant 11: a proof anchored to one agreement has no address under
+ * another, so it cannot be presented for one.
+ */
+export function deriveProof(
+  programId: Address,
+  agreement: Address,
+  proofIndex: number,
+): { address: Address; bump: number } {
+  return findProgramAddress(
+    [PROOF_SEED, addressBytes(agreement), proofIndexSeed(proofIndex)],
+    programId,
+  );
 }
 
 export type AgreementAddresses = {

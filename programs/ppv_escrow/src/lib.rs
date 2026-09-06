@@ -24,7 +24,7 @@ pub mod state;
 
 pub use constants::*;
 pub use instructions::*;
-pub use state::{AgreementState, AgreementType};
+pub use state::{AgreementState, AgreementType, ProofStatus};
 
 // Build-only placeholder. Run `anchor keys sync` with controlled program
 // keypairs before deployment and commit the resulting deployment manifest.
@@ -69,5 +69,16 @@ pub mod ppv_escrow {
     /// terminal, which is what makes a second settlement impossible.
     pub fn settle(ctx: Context<Settle>) -> Result<()> {
         instructions::settle::handle_settle(ctx)
+    }
+
+    /// Anchors a hash of evidence to this agreement. Either party may submit
+    /// while the agreement is live. It moves no money and changes no state:
+    /// a proof is a fact, and what follows from it is decided separately.
+    pub fn submit_proof(
+        ctx: Context<SubmitProof>,
+        content_hash: [u8; 32],
+        metadata_hash: [u8; 32],
+    ) -> Result<()> {
+        instructions::submit_proof::handle_submit_proof(ctx, content_hash, metadata_hash)
     }
 }

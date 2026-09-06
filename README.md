@@ -9,9 +9,10 @@ implemented as three separately deployable Solana programs.
   markers. Non-custodial.
 - `ppv_commerce`: bilateral agreement creation, revision, signing, execution,
   and cancellation. Non-custodial.
-- `ppv_escrow`: the Phase 1 custody kernel — `initialize_agreement`, `fund`,
-  `mark_completed`, `settle` — over `Open → Funded → Completed → Settled`, with
-  a vault and vault authority derived per agreement. **Local validator only.**
+- `ppv_escrow`: the custody kernel — `initialize_agreement`, `fund`,
+  `mark_completed`, `settle` over `Open → Funded → Completed → Settled`, with a
+  vault and vault authority derived per agreement, plus `submit_proof` to anchor
+  agreement-bound evidence. **Local validator only.**
 - `@gwap/ppv-sdk`: frozen canonicalization v1 and SHA-256 helpers shared by
   every client; the versioned reputation contracts (`ReputationEventV1`,
   `PpvReceiptV1`, seal states, credential eligibility); decoders for the

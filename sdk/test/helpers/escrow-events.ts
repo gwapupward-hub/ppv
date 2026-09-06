@@ -7,6 +7,7 @@ import {
   encodeBase58,
   type AgreementState,
   type AgreementType,
+  type EscrowProofSubmittedEvent,
   type PpvEscrowEvent,
 } from "../../src/index.js";
 
@@ -40,6 +41,12 @@ function u64(value: bigint): Buffer {
   return out;
 }
 
+function u32(value: number): Buffer {
+  const out = Buffer.alloc(4);
+  out.writeUInt32LE(value);
+  return out;
+}
+
 function i64(value: number): Buffer {
   const out = Buffer.alloc(8);
   out.writeBigInt64LE(BigInt(value));
@@ -63,7 +70,7 @@ function discriminator(name: string): Buffer {
 }
 
 export function encodeEscrowEvent(event: PpvEscrowEvent): Uint8Array {
-  let body: Buffer;
+  let body: Buffer = Buffer.alloc(0);
   switch (event.name) {
     case "AgreementCreated":
       body = Buffer.concat([
@@ -115,6 +122,20 @@ export function encodeEscrowEvent(event: PpvEscrowEvent): Uint8Array {
         optionalPubkey(event.proof),
         state(event.previousState),
         state(event.newState),
+        i64(event.timestamp),
+      ]);
+      break;
+    case "ProofSubmitted":
+      body = Buffer.concat([
+        pubkey(event.agreement),
+        pubkey(event.proof),
+        pubkey(event.creator),
+        pubkey(event.counterparty),
+        pubkey(event.submitter),
+        u32(event.proofIndex),
+        Buffer.from(event.contentHash, "hex"),
+        Buffer.from(event.metadataHash, "hex"),
+        state(event.agreementState),
         i64(event.timestamp),
       ]);
       break;
@@ -186,4 +207,22 @@ export const LIFECYCLE_FIXTURE: readonly PpvEscrowEvent[] = [
   },
 ];
 
-export const FIXTURE_ADDRESSES = { BUYER, SELLER, MINT, VAULT, AGREEMENT, SELLER_ATA };
+const PROOF = addressFromByte(8);
+
+/** One proof anchored while the agreement was Funded, for the annotation tests. */
+export const PROOF_FIXTURE: EscrowProofSubmittedEvent = {
+  program: "ppv_escrow",
+  name: "ProofSubmitted",
+  agreement: AGREEMENT,
+  proof: PROOF,
+  creator: BUYER,
+  counterparty: SELLER,
+  submitter: SELLER,
+  proofIndex: 0,
+  contentHash: hexFromByte(12, 32),
+  metadataHash: hexFromByte(0, 32),
+  agreementState: "Funded",
+  timestamp: 1_700_000_150,
+};
+
+export const FIXTURE_ADDRESSES = { BUYER, SELLER, MINT, VAULT, AGREEMENT, SELLER_ATA, PROOF };

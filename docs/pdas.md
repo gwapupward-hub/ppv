@@ -32,6 +32,7 @@ deployment artifact regenerated per environment.
 | Agreement | `["agreement", creator, agreement_id_le_u64]` | Creator in the seeds: the same number under a different creator is a different agreement. |
 | Vault authority | `["vault", agreement]` | One authority per agreement. No global authority exists to compromise. |
 | Vault (token account) | `["vault_token", agreement]` | Owned by the vault authority, fixed to the agreement's mint at creation. |
+| Proof | `["proof", agreement, proof_index_le_u32]` | The index is the agreement's own counter, not a client's choice. |
 
 `agreement_id` is a `u64` chosen by the creator and encoded little-endian, the
 same bytes the program seeds with.
@@ -47,6 +48,13 @@ vault or vault authority fails the seeds constraint before any token moves.
 | --- | --- |
 | ProofRecord | `["proof", authority, proof_id]` |
 | Agreement (negotiation) | `["agreement", party_a, agreement_id]` |
+
+Both programs also use a `"proof"` seed prefix, for different objects:
+`ppv_core` anchors a standalone wallet proof under `["proof", authority,
+proof_id]`, while `ppv_escrow` anchors agreement-bound evidence under
+`["proof", agreement, index]`. They cannot collide — different programs, and
+different second seeds — and they answer different questions: "this wallet
+committed to these bytes" versus "this evidence belongs to this agreement".
 
 `ppv_commerce` and `ppv_escrow` both use an `"agreement"` seed prefix. They do
 not collide: the program id is part of every derivation, and the two programs

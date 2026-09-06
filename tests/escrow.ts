@@ -30,6 +30,7 @@ import { createHash } from "node:crypto";
 const AGREEMENT_SEED = new TextEncoder().encode("agreement");
 const VAULT_AUTHORITY_SEED = new TextEncoder().encode("vault");
 const VAULT_TOKEN_SEED = new TextEncoder().encode("vault_token");
+const PROOF_SEED = new TextEncoder().encode("proof");
 const DECIMALS = 6;
 const AMOUNT = 100_000_000n; // 100 tokens
 
@@ -62,6 +63,15 @@ function addresses(programId: PublicKey, creator: PublicKey, agreementId: BN) {
     programId,
   );
   return { agreement, vaultAuthority, vault };
+}
+
+function proofAddress(programId: PublicKey, agreement: PublicKey, index: number): PublicKey {
+  const seed = Buffer.alloc(4);
+  seed.writeUInt32LE(index);
+  return PublicKey.findProgramAddressSync(
+    [PROOF_SEED, agreement.toBytes(), seed],
+    programId,
+  )[0];
 }
 
 function errorCode(error: unknown): string | undefined {
@@ -606,6 +616,131 @@ describe("PPV escrow kernel", () => {
 
       const vault = await getAccount(connection, mine.vault);
       assert.equal(vault.amount, AMOUNT);
+    });
+  });
+
+  describe("proofs", () => {
+    function submitProof(
+      agreement: Awaited<ReturnType<typeof initialize>>,
+      overrides?: { signer?: Keypair; index?: number; contentHash?: number[]; metadataHash?: number[] },
+    ) {
+      const signer = overrides?.signer ?? seller;
+      const index = overrides?.index ?? 0;
+      return escrow.methods
+        .submitProof(overrides?.contentHash ?? hash32(12), overrides?.metadataHash ?? hash32(0))
+        .accounts({
+          submitter: signer.publicKey,
+          agreement: agreement.agreement,
+          proof: proofAddress(escrow.programId, agreement.agreement, index),
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([signer])
+        .rpc();
+    }
+
+    it("anchors evidence to the agreement without moving it", async () => {
+      const agreement = await fundedAgreement();
+      const before = await escrow.account.agreement.fetch(agreement.agreement);
+      const vaultBefore = await getAccount(connection, agreement.vault);
+
+      const signature = await submitProof(agreement);
+
+      const proof = await escrow.account.proof.fetch(
+        proofAddress(escrow.programId, agreement.agreement, 0),
+      );
+      assert.equal(proof.agreement.toBase58(), agreement.agreement.toBase58());
+      assert.equal(proof.submitter.toBase58(), seller.publicKey.toBase58());
+      assert.equal(proof.proofIndex, 0);
+      assert.deepEqual([...proof.contentHash], hash32(12));
+      assert.ok("submitted" in proof.status);
+      assert.equal(proof.decidedAt.toNumber(), 0);
+
+      // A proof is a fact about the agreement, not a step in it.
+      const after = await escrow.account.agreement.fetch(agreement.agreement);
+      assert.deepEqual(after.state, before.state);
+      assert.equal(after.proofCount, 1);
+      const vaultAfter = await getAccount(connection, agreement.vault);
+      assert.equal(vaultAfter.amount, vaultBefore.amount);
+
+      const event = eventNamed(await eventsOf(signature), "proofSubmitted");
+      assert.equal(event.agreement.toBase58(), agreement.agreement.toBase58());
+      assert.equal(event.submitter.toBase58(), seller.publicKey.toBase58());
+      assert.equal(event.proofIndex, 0);
+      assert.ok("funded" in event.agreementState);
+    });
+
+    it("accepts evidence from either party and nobody else", async () => {
+      const agreement = await fundedAgreement();
+      await submitProof(agreement, { signer: seller, index: 0 });
+      await submitProof(agreement, { signer: buyer, index: 1 });
+
+      await expectAnchorError(
+        submitProof(agreement, { signer: attacker, index: 2 }),
+        "NotAParty",
+      );
+      const account = await escrow.account.agreement.fetch(agreement.agreement);
+      assert.equal(account.proofCount, 2, "a refused submission consumes no index");
+    });
+
+    it("numbers proofs densely, and refuses a client-chosen index", async () => {
+      const agreement = await fundedAgreement();
+      await submitProof(agreement, { index: 0 });
+
+      // The index comes from the agreement's counter. Passing the account for
+      // any other index is a seeds failure, so a client cannot leave gaps or
+      // overwrite an existing proof.
+      await assert.rejects(submitProof(agreement, { index: 5 }));
+      await assert.rejects(submitProof(agreement, { index: 0 }));
+
+      await submitProof(agreement, { index: 1 });
+      const second = await escrow.account.proof.fetch(
+        proofAddress(escrow.programId, agreement.agreement, 1),
+      );
+      assert.equal(second.proofIndex, 1);
+    });
+
+    it("refuses evidence outside the agreement's live window", async () => {
+      const open = await initialize();
+      await expectAnchorError(submitProof(open), "BadState");
+
+      const completed = await completedAgreement();
+      await submitProof(completed);
+
+      await settle(completed);
+      await expectAnchorError(submitProof(completed, { index: 1 }), "BadState");
+    });
+
+    it("refuses a commitment to nothing", async () => {
+      const agreement = await fundedAgreement();
+      await expectAnchorError(
+        submitProof(agreement, { contentHash: Array<number>(32).fill(0) }),
+        "InvalidContentHash",
+      );
+    });
+
+    it("keeps one agreement's evidence unusable by another", async () => {
+      const mine = await fundedAgreement();
+      const theirs = await fundedAgreement();
+      await submitProof(mine, { index: 0 });
+
+      // Invariant 11, structurally: index 0 under one agreement is a different
+      // address from index 0 under another, so there is no proof to substitute.
+      assert.notEqual(
+        proofAddress(escrow.programId, mine.agreement, 0).toBase58(),
+        proofAddress(escrow.programId, theirs.agreement, 0).toBase58(),
+      );
+      await assert.rejects(
+        escrow.methods
+          .submitProof(hash32(12), hash32(0))
+          .accounts({
+            submitter: seller.publicKey,
+            agreement: theirs.agreement,
+            proof: proofAddress(escrow.programId, mine.agreement, 0),
+            systemProgram: SystemProgram.programId,
+          })
+          .signers([seller])
+          .rpc(),
+      );
     });
   });
 

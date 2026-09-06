@@ -32,8 +32,14 @@ pub struct Agreement {
     pub funded_at: i64,
     pub completed_at: i64,
     pub settled_at: i64,
-    /// Reserved account space for compatible schema evolution.
-    pub reserved: [u8; 64],
+    /// Number of proofs anchored to this agreement. Also the index the next
+    /// one gets, which is what keeps proof indices dense and ordered instead
+    /// of client-chosen and sparse.
+    pub proof_count: u32,
+    /// Reserved account space for compatible schema evolution. Phase 3 spent
+    /// four of the original sixty-four bytes on `proof_count`; the account size
+    /// is unchanged.
+    pub reserved: [u8; 60],
 }
 
 impl Agreement {
@@ -93,6 +99,30 @@ impl Agreement {
         Ok(())
     }
 
+    /// Evidence may be anchored while the agreement is live. Submission is not
+    /// a state transition: it adds a fact, and no custody or lifecycle
+    /// consequence follows from it on its own.
+    pub fn require_proof_submittable(&self, signer: &Pubkey) -> Result<()> {
+        require!(self.is_party(signer), EscrowError::NotAParty);
+        require!(
+            matches!(
+                self.state,
+                AgreementState::Funded | AgreementState::Completed
+            ),
+            EscrowError::BadState
+        );
+        Ok(())
+    }
+
+    pub fn record_proof(&mut self) -> Result<u32> {
+        let index = self.proof_count;
+        self.proof_count = self
+            .proof_count
+            .checked_add(1)
+            .ok_or(EscrowError::Overflow)?;
+        Ok(index)
+    }
+
     pub fn record_settled(&mut self, now: i64) -> AgreementState {
         let previous = self.state;
         self.state = AgreementState::Settled;
@@ -126,7 +156,8 @@ mod tests {
             funded_at: 0,
             completed_at: 0,
             settled_at: 0,
-            reserved: [0; 64],
+            proof_count: 0,
+            reserved: [0; 60],
         }
     }
 
@@ -237,6 +268,38 @@ mod tests {
         agreement.record_funded(20);
         agreement.record_completed(30);
         assert!(agreement.require_settleable(&attacker).is_err());
+    }
+
+    #[test]
+    fn evidence_can_be_anchored_only_while_the_agreement_is_live() {
+        let (buyer, seller, attacker) = parties();
+        let mut agreement = open(buyer, seller);
+
+        // Nothing has been escrowed yet, so there is nothing to deliver against.
+        assert!(agreement.require_proof_submittable(&seller).is_err());
+
+        agreement.record_funded(20);
+        assert!(agreement.require_proof_submittable(&seller).is_ok());
+        assert!(agreement.require_proof_submittable(&buyer).is_ok());
+        assert!(agreement.require_proof_submittable(&attacker).is_err());
+
+        agreement.record_completed(30);
+        assert!(agreement.require_proof_submittable(&seller).is_ok());
+
+        // Settlement closes the record. Evidence cannot be added to a finished
+        // agreement after the money has moved.
+        agreement.record_settled(40);
+        assert!(agreement.require_proof_submittable(&seller).is_err());
+    }
+
+    #[test]
+    fn proof_indices_are_dense_and_assigned_by_the_agreement() {
+        let (buyer, seller, _) = parties();
+        let mut agreement = open(buyer, seller);
+        assert_eq!(agreement.record_proof().unwrap(), 0);
+        assert_eq!(agreement.record_proof().unwrap(), 1);
+        assert_eq!(agreement.record_proof().unwrap(), 2);
+        assert_eq!(agreement.proof_count, 3);
     }
 
     #[test]

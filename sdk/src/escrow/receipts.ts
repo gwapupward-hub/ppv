@@ -32,7 +32,22 @@ export const ESCROW_RECEIPT_ACTIONS = {
   AgreementFunded: "AGREEMENT_FUNDED",
   WorkCompleted: "WORK_COMPLETED",
   SettlementExecuted: "SETTLEMENT_EXECUTED",
+  ProofSubmitted: "PROOF_SUBMITTED",
 } as const;
+
+/**
+ * Not every protocol fact moves the state machine. A transition is a step in
+ * the lifecycle; an annotation is something that happened *during* a step —
+ * evidence anchored, a decision recorded — and carries no custody or state
+ * consequence of its own.
+ *
+ * Keeping the two apart is what lets reconstruction chain a history: an
+ * annotation whose `previousState` equalled its `newState` would look like a
+ * transition that went nowhere, and a chain-walk cannot tell those apart.
+ */
+export type EscrowReceiptKind = "transition" | "annotation";
+
+const ANNOTATION_ACTIONS = new Set<string>(["PROOF_SUBMITTED"]);
 
 export type EscrowReceiptAction =
   (typeof ESCROW_RECEIPT_ACTIONS)[keyof typeof ESCROW_RECEIPT_ACTIONS];
@@ -56,6 +71,7 @@ export type PpvEscrowReceiptV1 = {
   receiptId: string;
   programId: string;
   action: EscrowReceiptAction;
+  kind: EscrowReceiptKind;
   agreement: string;
   agreementId: bigint;
   buyer: string;
@@ -67,6 +83,7 @@ export type PpvEscrowReceiptV1 = {
   amount: bigint | null;
   destination: string | null;
   proof: string | null;
+  proofIndex: number | null;
   previousState: AgreementState | null;
   newState: AgreementState;
   occurredAt: string;
@@ -122,6 +139,7 @@ export function escrowReceiptFromEvent(envelope: EscrowEventEnvelope): PpvEscrow
   const action = ESCROW_RECEIPT_ACTIONS[event.name];
   const common = {
     schemaVersion: ESCROW_RECEIPT_SCHEMA_VERSION,
+    kind: (ANNOTATION_ACTIONS.has(action) ? "annotation" : "transition") as EscrowReceiptKind,
     receiptId: escrowReceiptId(
       envelope.programId,
       envelope.transactionSignature,
@@ -151,6 +169,7 @@ export function escrowReceiptFromEvent(envelope: EscrowEventEnvelope): PpvEscrow
         amount: null,
         destination: null,
         proof: null,
+        proofIndex: null,
         previousState: null,
         newState: event.newState,
       };
@@ -168,6 +187,7 @@ export function escrowReceiptFromEvent(envelope: EscrowEventEnvelope): PpvEscrow
         amount: event.amount,
         destination: event.vault,
         proof: null,
+        proofIndex: null,
         previousState: event.previousState,
         newState: event.newState,
       };
@@ -182,6 +202,7 @@ export function escrowReceiptFromEvent(envelope: EscrowEventEnvelope): PpvEscrow
         amount: null,
         destination: null,
         proof: null,
+        proofIndex: null,
         previousState: event.previousState,
         newState: event.newState,
       };
@@ -196,8 +217,26 @@ export function escrowReceiptFromEvent(envelope: EscrowEventEnvelope): PpvEscrow
         amount: event.amount,
         destination: event.destination,
         proof: event.proof,
+        proofIndex: null,
         previousState: event.previousState,
         newState: event.newState,
+      };
+    case "ProofSubmitted":
+      return {
+        ...common,
+        agreementId: 0n,
+        buyer: event.creator,
+        seller: event.counterparty,
+        actor: event.submitter,
+        mint: null,
+        amount: null,
+        destination: null,
+        proof: event.proof,
+        proofIndex: event.proofIndex,
+        // An annotation starts and ends in the same state, because it did not
+        // move the agreement at all.
+        previousState: event.agreementState,
+        newState: event.agreementState,
       };
   }
 }
@@ -214,7 +253,21 @@ export type AgreementLifecycle = {
   settlementDestination: string | null;
   /** Slot of the most recent transition, for cursor bookkeeping. */
   lastSlot: number;
+  /** Evidence anchored to this agreement, in the order it was submitted. */
+  proofs: readonly ProofRecord[];
+  /** Transitions in chain order, with annotations placed where they landed. */
   receipts: readonly PpvEscrowReceiptV1[];
+};
+
+export type ProofRecord = {
+  proof: string;
+  proofIndex: number;
+  submitter: string;
+  /** The state the agreement was in when this evidence was anchored. */
+  agreementState: AgreementState;
+  receiptId: string;
+  occurredAt: string;
+  slot: number;
 };
 
 /**
@@ -246,6 +299,11 @@ export function reconstructAgreementLifecycle(
     }
     byId.set(receipt.receiptId, receipt);
   }
+
+  // Only transitions form the chain. Annotations record something that
+  // happened during a state, and are placed back into the history afterwards.
+  const annotations = [...byId.values()].filter((receipt) => receipt.kind === "annotation");
+  for (const annotation of annotations) byId.delete(annotation.receiptId);
 
   const agreement = [...byId.values()][0]?.agreement as string;
   for (const receipt of byId.values()) {
@@ -300,6 +358,38 @@ export function reconstructAgreementLifecycle(
     );
   }
 
+  // An annotation belongs to the last transition that had already happened
+  // when it was recorded. Ties resolve by chain coordinate and then by receipt
+  // id, so placement is total and identical on every replay.
+  const sortedAnnotations = [...annotations].sort(
+    (a, b) =>
+      a.slot - b.slot ||
+      a.instructionIndex - b.instructionIndex ||
+      (a.innerInstructionIndex ?? -1) - (b.innerInstructionIndex ?? -1) ||
+      a.receiptId.localeCompare(b.receiptId),
+  );
+  const attached = new Map<number, PpvEscrowReceiptV1[]>();
+  for (const annotation of sortedAnnotations) {
+    let home = -1;
+    ordered.forEach((transition, index) => {
+      if (transition.slot <= annotation.slot) home = index;
+    });
+    if (home < 0) {
+      throw new ReceiptError(
+        `${annotation.action} committed in slot ${annotation.slot}, before this agreement existed`,
+      );
+    }
+    const bucket = attached.get(home);
+    if (bucket) bucket.push(annotation);
+    else attached.set(home, [annotation]);
+  }
+
+  const withAnnotations: PpvEscrowReceiptV1[] = [];
+  ordered.forEach((transition, index) => {
+    withAnnotations.push(transition);
+    for (const annotation of attached.get(index) ?? []) withAnnotations.push(annotation);
+  });
+
   const funded = ordered.find((receipt) => receipt.action === "AGREEMENT_FUNDED");
   const settled = ordered.find((receipt) => receipt.action === "SETTLEMENT_EXECUTED");
   if (settled && funded && settled.amount !== funded.amount) {
@@ -320,6 +410,17 @@ export function reconstructAgreementLifecycle(
     settledAmount: settled?.amount ?? null,
     settlementDestination: settled?.destination ?? null,
     lastSlot: previous.slot,
-    receipts: ordered,
+    proofs: sortedAnnotations
+      .filter((receipt) => receipt.action === "PROOF_SUBMITTED")
+      .map((receipt) => ({
+        proof: receipt.proof as string,
+        proofIndex: receipt.proofIndex as number,
+        submitter: receipt.actor,
+        agreementState: receipt.newState,
+        receiptId: receipt.receiptId,
+        occurredAt: receipt.occurredAt,
+        slot: receipt.slot,
+      })),
+    receipts: withAnnotations,
   };
 }

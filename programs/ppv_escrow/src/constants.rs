@@ -10,3 +10,7 @@ pub const VAULT_AUTHORITY_SEED: &[u8] = b"vault";
 
 /// Namespace of the per-agreement token vault.
 pub const VAULT_TOKEN_SEED: &[u8] = b"vault_token";
+
+/// Namespace of an agreement-bound proof. The agreement is in the seeds, so a
+/// proof anchored to one agreement can never be presented for another.
+pub const PROOF_SEED: &[u8] = b"proof";

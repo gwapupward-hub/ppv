@@ -12,6 +12,7 @@ import {
 import {
   FIXTURE_ADDRESSES,
   LIFECYCLE_FIXTURE,
+  PROOF_FIXTURE,
   addressFromByte,
   signatureFromByte,
 } from "./helpers/escrow-events.js";
@@ -188,4 +189,104 @@ test("the same event in a different transaction is a different receipt", () => {
     transactionSignature: signatureFromByte(200),
   });
   assert.notEqual(first.receiptId, second.receiptId);
+});
+
+test("evidence is recorded as an annotation, not as a transition", () => {
+  const receipt = escrowReceiptFromEvent({
+    event: PROOF_FIXTURE,
+    programId: PROGRAM_ID,
+    transactionSignature: signatureFromByte(90),
+    slot: 1_001,
+    instructionIndex: 0,
+    innerInstructionIndex: 0,
+    blockTime: PROOF_FIXTURE.timestamp,
+  });
+
+  assert.equal(receipt.kind, "annotation");
+  assert.equal(receipt.action, "PROOF_SUBMITTED");
+  assert.equal(receipt.amount, null, "anchoring evidence moves nothing");
+  assert.equal(receipt.proof, FIXTURE_ADDRESSES.PROOF);
+  assert.equal(receipt.proofIndex, 0);
+  // Start and end in the same state: the agreement did not move.
+  assert.equal(receipt.previousState, "Funded");
+  assert.equal(receipt.newState, "Funded");
+});
+
+test("a proof lands in the history where it happened, without breaking the chain", () => {
+  const receipts = lifecycleReceipts();
+  const proof = escrowReceiptFromEvent({
+    event: PROOF_FIXTURE,
+    programId: PROGRAM_ID,
+    transactionSignature: signatureFromByte(90),
+    // After funding (slot 1001), before completion (slot 1002).
+    slot: 1_001,
+    instructionIndex: 0,
+    innerInstructionIndex: 0,
+    blockTime: PROOF_FIXTURE.timestamp,
+  });
+
+  const lifecycle = reconstructAgreementLifecycle([...receipts, proof]);
+  assert.equal(lifecycle.state, "Settled", "an annotation cannot change the outcome");
+  assert.deepEqual(
+    lifecycle.receipts.map((entry) => entry.action),
+    [
+      "AGREEMENT_CREATED",
+      "AGREEMENT_FUNDED",
+      "PROOF_SUBMITTED",
+      "WORK_COMPLETED",
+      "SETTLEMENT_EXECUTED",
+    ],
+  );
+  assert.equal(lifecycle.proofs.length, 1);
+  assert.equal(lifecycle.proofs[0]?.proofIndex, 0);
+  assert.equal(lifecycle.proofs[0]?.submitter, FIXTURE_ADDRESSES.SELLER);
+  assert.equal(lifecycle.proofs[0]?.agreementState, "Funded");
+});
+
+test("annotations are placed identically however they arrive", () => {
+  const receipts = lifecycleReceipts();
+  const proofs = [1_001, 1_003, 1_002].map((slot, index) =>
+    escrowReceiptFromEvent({
+      event: { ...PROOF_FIXTURE, proofIndex: index },
+      programId: PROGRAM_ID,
+      transactionSignature: signatureFromByte(90 + index),
+      slot,
+      instructionIndex: 0,
+      innerInstructionIndex: 0,
+      blockTime: PROOF_FIXTURE.timestamp,
+    }),
+  );
+
+  const forwards = reconstructAgreementLifecycle([...receipts, ...proofs]);
+  const backwards = reconstructAgreementLifecycle([...proofs.reverse(), ...receipts.reverse()]);
+  assert.deepEqual(backwards, forwards);
+  assert.deepEqual(
+    forwards.receipts.map((entry) => entry.action),
+    [
+      "AGREEMENT_CREATED",
+      "AGREEMENT_FUNDED",
+      "PROOF_SUBMITTED",
+      "WORK_COMPLETED",
+      "PROOF_SUBMITTED",
+      "SETTLEMENT_EXECUTED",
+      "PROOF_SUBMITTED",
+    ],
+  );
+});
+
+test("evidence cannot predate the agreement it annotates", () => {
+  const receipts = lifecycleReceipts();
+  const proof = escrowReceiptFromEvent({
+    event: PROOF_FIXTURE,
+    programId: PROGRAM_ID,
+    transactionSignature: signatureFromByte(95),
+    slot: 1,
+    instructionIndex: 0,
+    innerInstructionIndex: 0,
+    blockTime: PROOF_FIXTURE.timestamp,
+  });
+  assert.throws(
+    () => reconstructAgreementLifecycle([...receipts, proof]),
+    /before this agreement existed/,
+  );
 });
