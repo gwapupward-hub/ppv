@@ -1,0 +1,181 @@
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, chmodSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+export const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+export const READINESS = join(REPO, "scripts", "verify-devnet-readiness.sh");
+
+export const CORE_ID = "9cWE41ZDNQChvFrRoVuPQDeoVLg46ACTiZRCZaBZzfwU";
+export const COMMERCE_ID = "GmRDoFuPrBrsxnvTX751WK5rLu14JXe4sgjh6vNwHzr3";
+
+/**
+ * A real off-curve address, derived under the Squads V4 program id — the shape
+ * a vault PDA actually has. Fixture only; it is not the deployment vault.
+ */
+export const VAULT_PDA = "3cFRkTFrpmNXetfLJka5q1owRffk1tjWVo8SDLPyWB7w";
+/** Real on-curve public keys — the shape an ordinary signer wallet has. */
+export const MEMBERS = [
+  "55y7B46ZUAyeYaMFUPxHAg9UUcwrfZ2eZDFDabxinhjp",
+  "DyqdftdT3vo2SMvHaKVU2Pmb1zBfJ8wCpYYJQ7idnoAR",
+  "E9sQrkYk4evsQLgY1jFCaRHgGCDjWKjaNLUKtS7kVueH",
+];
+
+const FIXTURE_FILES = [
+  "Anchor.toml",
+  "Cargo.lock",
+  ".gitignore",
+  "programs/ppv_core/src/lib.rs",
+  "programs/ppv_commerce/src/lib.rs",
+];
+
+/**
+ * A real git repository containing the files the verifier inspects. Real git
+ * rather than a stub directory, because "is the tree clean" and "is the
+ * lockfile unchanged" are git questions and a fake would not answer them.
+ *
+ * `mutate` runs after the clean commit, so whatever it changes is uncommitted
+ * unless it commits itself.
+ */
+export function makeFixture(mutate) {
+  const root = mkdtempSync(join(tmpdir(), "ppv-readiness-"));
+  for (const file of FIXTURE_FILES) {
+    mkdirSync(join(root, dirname(file)), { recursive: true });
+    copyFileSync(join(REPO, file), join(root, file));
+  }
+  const git = (...args) => execFileSync("git", ["-C", root, ...args], { stdio: "pipe" });
+  git("init", "-q");
+  git("config", "user.email", "fixture@example.invalid");
+  git("config", "user.name", "fixture");
+  git("add", "-A");
+  git("commit", "-q", "-m", "fixture");
+
+  const helpers = {
+    root,
+    git,
+    write: (file, contents) => {
+      mkdirSync(join(root, dirname(file)), { recursive: true });
+      writeFileSync(join(root, file), contents);
+    },
+    read: (file) => readFileSync(join(root, file), "utf8"),
+    edit: (file, from, to) => {
+      const current = readFileSync(join(root, file), "utf8");
+      if (!current.includes(from)) throw new Error(`fixture: '${from}' not found in ${file}`);
+      writeFileSync(join(root, file), current.replace(from, to));
+    },
+    commitAll: () => {
+      git("add", "-A");
+      git("commit", "-q", "-m", "mutation");
+    },
+  };
+  mutate?.(helpers);
+  return helpers;
+}
+
+/**
+ * Stub CLIs on PATH so the network- and toolchain-dependent checks can be
+ * exercised without a validator or a release machine. Each stub answers only
+ * the questions the verifier asks, and fails loudly on anything else.
+ */
+export function makeStubs({
+  anchorVersion = "anchor-cli 0.30.1",
+  solanaVersion = "solana-cli 1.18.17 (src:00000000; feat:0)",
+  genesis = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+  existingPrograms = {},
+  toolchains = ["1.85.1-x86_64-unknown-linux-gnu (default)", "nightly-2024-06-15-x86_64-unknown-linux-gnu"],
+  keypairs = {},
+} = {}) {
+  const bin = mkdtempSync(join(tmpdir(), "ppv-stub-bin-"));
+  const script = (name, body) => {
+    const path = join(bin, name);
+    writeFileSync(path, `#!/usr/bin/env bash\nset -euo pipefail\n${body}\n`);
+    chmodSync(path, 0o755);
+  };
+
+  script(
+    "anchor",
+    `[[ "\${1:-}" == "--version" ]] && { echo "${anchorVersion}"; exit 0; }\necho "stub anchor: unexpected args: $*" >&2; exit 90`,
+  );
+
+  const showCases = Object.entries(existingPrograms)
+    .map(
+      ([id, authority]) =>
+        `    ${id}) echo '{"programId":"${id}","authority":"${authority}","programdataAddress":"${id}Data","lastDeploySlot":1}'; exit 0 ;;`,
+    )
+    .join("\n");
+
+  script(
+    "solana",
+    `case "\${1:-}" in
+  --version) echo "${solanaVersion}"; exit 0 ;;
+  genesis-hash) echo "${genesis}"; exit 0 ;;
+  program)
+    if [[ "\${2:-}" == "show" ]]; then
+      case "\${3:-}" in
+${showCases || "    __none__) ;;"}
+        *) echo "Unable to find the account" >&2; exit 1 ;;
+      esac
+    fi
+    ;;
+esac
+echo "stub solana: unexpected args: $*" >&2; exit 91`,
+  );
+
+  const keypairCases = Object.entries(keypairs)
+    .map(([path, pubkey]) => `    ${path}) echo "${pubkey}"; exit 0 ;;`)
+    .join("\n");
+  script(
+    "solana-keygen",
+    `if [[ "\${1:-}" == "pubkey" ]]; then
+  case "\${2:-}" in
+${keypairCases || "    __none__) ;;"}
+    *) echo "stub solana-keygen: no stub for \${2:-}" >&2; exit 92 ;;
+  esac
+fi
+echo "stub solana-keygen: unexpected args: $*" >&2; exit 92`,
+  );
+
+  script(
+    "rustup",
+    `if [[ "\${1:-}" == "toolchain" && "\${2:-}" == "list" ]]; then
+${toolchains.map((t) => `  echo "${t}"`).join("\n") || "  true"}
+  exit 0
+fi
+echo "stub rustup: unexpected args: $*" >&2; exit 93`,
+  );
+
+  return bin;
+}
+
+export function runReadiness({ repoRoot, args = [], env = {}, stubBin } = {}) {
+  const path = stubBin ? `${stubBin}:${process.env.PATH}` : process.env.PATH;
+  const result = spawnSync("bash", [READINESS, ...args], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: path,
+      PPV_REPO_ROOT: repoRoot,
+      // Cleared so a developer's own shell cannot make a negative test pass.
+      PPV_SQUADS_VAULT_PDA: "",
+      PPV_SQUADS_MEMBER_PUBKEYS: "",
+      PPV_SQUADS_THRESHOLD: "",
+      PPV_DEVNET_GENESIS_HASH: "",
+      PPV_CORE_PROGRAM_KEYPAIR_PATH: "",
+      PPV_COMMERCE_PROGRAM_KEYPAIR_PATH: "",
+      ...env,
+    },
+  });
+  return { code: result.status, output: `${result.stdout}${result.stderr}` };
+}
+
+/** A deployment-grade run whose non-target checks are all satisfied. */
+export function goodDeploymentEnv(overrides = {}) {
+  return {
+    PPV_SQUADS_VAULT_PDA: VAULT_PDA,
+    PPV_SQUADS_MEMBER_PUBKEYS: MEMBERS.join(","),
+    PPV_SQUADS_THRESHOLD: "2",
+    PPV_DEVNET_GENESIS_HASH: "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+    ...overrides,
+  };
+}
