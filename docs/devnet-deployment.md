@@ -32,6 +32,19 @@ Anchor 0.30.1's own locked dependencies predate Rust 1.80, so the CLI itself is
 built with Rust 1.79.0. That toolchain is only used to build the CLI; the
 programs are built with the host 1.85.1 toolchain and the SBF 1.75 toolchain.
 
+## Readiness gate
+
+Before anything below, run the preflight. It is fail-closed: a check it cannot
+perform is a failure, not a skip.
+
+```bash
+npm run verify:devnet-readiness
+```
+
+See [devnet-release-readiness.md](devnet-release-readiness.md) for what it
+checks, what the tests guarantee, and the manual blockers that must be complete
+first.
+
 ## Local verification before any deployment
 
 ```bash

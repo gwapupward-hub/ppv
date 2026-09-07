@@ -84,6 +84,7 @@ manifest. Never deploy these placeholder IDs.
 - [Canonicalization v1](docs/canonicalization-v1.md)
 - [Reputation events v1](docs/reputation-events-v1.md)
 - [Deployment gates](docs/deployment-gates.md)
+- [Devnet release readiness](docs/devnet-release-readiness.md)
 - [Devnet deployment runbook](docs/devnet-deployment.md)
 - [Deployment manifests](deployments/README.md)
 - [Future arbiter policy gate](docs/arbiter-policy.md)

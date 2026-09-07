@@ -7,11 +7,14 @@
   ],
   "scripts": {
     "build:sdk": "npm run build --workspace @gwap/ppv-sdk",
-    "test": "npm run typecheck && npm run test:sdk",
-    "test:sdk": "npm run test --workspace @gwap/ppv-sdk",
+    "test": "npm run typecheck && npm run test:sdk && npm run test:release",
     "test:anchor": "node --import tsx ./node_modules/mocha/bin/mocha.js --timeout 1000000 \"tests/**/*.ts\"",
+    "test:devnet:smoke": "npm run build:sdk --silent && node scripts/devnet-smoke.mjs",
     "test:f1": "./scripts/verify-f1.sh",
-    "typecheck": "tsc --noEmit -p tsconfig.json && npm run typecheck --workspace @gwap/ppv-sdk"
+    "test:release": "node --test scripts/test/*.test.mjs",
+    "test:sdk": "npm run test --workspace @gwap/ppv-sdk",
+    "typecheck": "tsc --noEmit -p tsconfig.json && npm run typecheck --workspace @gwap/ppv-sdk",
+    "verify:devnet-readiness": "./scripts/verify-devnet-readiness.sh"
   },
   "devDependencies": {
     "@coral-xyz/anchor": "0.30.1",
