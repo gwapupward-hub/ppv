@@ -12,7 +12,7 @@ pub const PROOF_SEED: &[u8] = b"proof";
 
 // Build-only placeholder. Run `anchor keys sync` with controlled program
 // keypairs before deployment and commit the resulting deployment manifest.
-declare_id!("Dkujj5vZp8kxhqM6hQTqqV3sTQ4Rx7J77No4bfwjrfXp");
+declare_id!("9cWE41ZDNQChvFrRoVuPQDeoVLg46ACTiZRCZaBZzfwU");
 
 #[program]
 pub mod ppv_core {
