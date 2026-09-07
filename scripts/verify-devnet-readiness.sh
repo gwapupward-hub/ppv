@@ -94,10 +94,15 @@ else
   # Content scan over tracked files only: an untracked scratch file is the
   # operator's business, a committed one is everybody's.
   secrets=0
+  # Assembled at runtime rather than written out, so this file does not match
+  # its own detector. The pattern the scan applies is unchanged; only its source
+  # representation is split. A scanner that flags itself teaches everyone who
+  # runs it to ignore the one result it produces.
+  key_word="PRI""VATE"
   while IFS= read -r file; do
     [[ -f "${repo_root}/${file}" ]] || continue
     case "${file}" in *.png|*.jpg|*.gif|*.pdf|*.so) continue ;; esac
-    if grep -qE 'BEGIN [A-Z ]*PRIVATE KEY|BEGIN OPENSSH PRIVATE KEY' "${repo_root}/${file}" 2>/dev/null; then
+    if grep -qE "BEGIN [A-Z ]*${key_word} KEY|BEGIN OPENSSH ${key_word} KEY" "${repo_root}/${file}" 2>/dev/null; then
       fail "possible private key material in ${file}"
       secrets=$((secrets + 1))
     fi
@@ -147,14 +152,23 @@ check_identity() {
     pass "${program}: Anchor.toml localnet and devnet both name the permanent id"
   fi
 
-  local idl="${repo_root}/target/idl/${program}.json"
-  if [[ -f "${idl}" ]]; then
-    local idl_id
-    idl_id="$(node -e "process.stdout.write(require('${idl}').address)")"
-    if [[ "${idl_id}" != "${expected}" ]]; then
-      fail "${program}: built IDL address is ${idl_id}, expected ${expected}"
-    else
-      pass "${program}: built IDL address matches"
+  # The generated IDL is a build artifact, not a tracked identity, and it is
+  # only meaningful in deployment-grade mode. The F1 harness deliberately builds
+  # with ephemeral keypairs, so an IDL left in the ignored `target/` after an F1
+  # run carries a throwaway address by design — checking it in --repo-only mode
+  # would make F1's own cleanup assertion fail on a file that is behaving
+  # correctly. What the permanent identities live in is `declare_id!` and
+  # `Anchor.toml`, and those are checked in both modes.
+  if [[ "${mode}" == "deployment-grade" ]]; then
+    local idl="${repo_root}/target/idl/${program}.json"
+    if [[ -f "${idl}" ]]; then
+      local idl_id
+      idl_id="$(node -e "process.stdout.write(require('${idl}').address)")"
+      if [[ "${idl_id}" != "${expected}" ]]; then
+        fail "${program}: built IDL address is ${idl_id}, expected ${expected} (a stale IDL from an F1 run will do this — rebuild or remove target/idl)"
+      else
+        pass "${program}: built IDL address matches"
+      fi
     fi
   fi
 }

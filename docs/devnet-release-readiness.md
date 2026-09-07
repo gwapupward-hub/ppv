@@ -39,6 +39,17 @@ toolchain, the Squads authority, and the target cluster. `--repo-only` covers
 the first two groups and says loudly that it does not authorize a deployment;
 the deploy workflow runs it early, before any key is written to disk.
 
+One boundary between the modes is deliberate and worth knowing before someone
+"fixes" it: **`--repo-only` does not check the generated `target/idl/*.json`
+address.** The F1 harness builds with ephemeral keypairs on purpose, so an IDL
+left behind after an F1 run carries a throwaway address *by design* — checking
+it in repo-only mode would make F1's own cleanup assertion fail on a file that
+is behaving correctly. The permanent identities live in `declare_id!` and
+`Anchor.toml`, and both are checked in both modes; the IDL address is checked at
+deployment grade, and again by the workflow immediately after `anchor build`,
+which is the authoritative place for it. A test pins this so the check cannot be
+restored by accident.
+
 ### The check worth knowing about
 
 A Squads vault is a program-derived address and is therefore **off** the ed25519

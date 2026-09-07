@@ -7,6 +7,7 @@ import test from "node:test";
 import {
   COMMERCE_ID,
   CORE_ID,
+  REPO,
   MEMBERS,
   VAULT_PDA,
   goodDeploymentEnv,
@@ -97,14 +98,33 @@ test("an id named for only one cluster is refused", () => {
   );
 });
 
-test("a built IDL naming a different id is refused", () => {
+test("a built IDL naming a different id is refused at deployment grade", () => {
   const fixture = makeFixture((f) => {
     f.write("target/idl/ppv_core.json", JSON.stringify({ address: WRONG_ID }));
   });
   expectFailure(
-    runReadiness({ repoRoot: fixture.root, args: ["--repo-only"] }),
+    runReadiness({
+      repoRoot: fixture.root,
+      stubBin: makeStubs(),
+      env: goodDeploymentEnv(),
+    }),
     /ppv_core: built IDL address is 11111111111111111111111111111112/,
   );
+});
+
+test("--repo-only deliberately ignores the generated IDL", () => {
+  // Not an oversight to be tidied up later. The F1 harness builds with
+  // ephemeral keypairs on purpose, so an IDL left in the ignored target/ after
+  // an F1 run carries a throwaway address by design. Checking it here would
+  // make F1's own cleanup assertion fail on a file behaving correctly. The
+  // permanent identities live in declare_id! and Anchor.toml, which are checked
+  // in both modes.
+  const fixture = makeFixture((f) => {
+    f.write("target/idl/ppv_core.json", JSON.stringify({ address: WRONG_ID }));
+  });
+  const result = runReadiness({ repoRoot: fixture.root, args: ["--repo-only"] });
+  assert.equal(result.code, 0, result.output);
+  assert.doesNotMatch(result.output, /IDL/);
 });
 
 test("a tracked keypair file is refused", () => {
@@ -362,4 +382,30 @@ test("a supplied permanent keypair must derive the committed id", () => {
     }),
     /ppv_commerce: keypair path \/keys\/absent\.json does not exist/,
   );
+});
+
+test("the secret scanner catches a real private key header", () => {
+  // The detector's source representation is split so it cannot match itself.
+  // This proves the split did not disable it: the pattern it applies is
+  // unchanged, and a real header is still caught.
+  const header = ["-----BEGIN", "RSA", "PRIVATE", "KEY-----"].join(" ");
+  const fixture = makeFixture((f) => {
+    f.write("ops/backup.txt", `${header}\nMIIEow…\n`);
+    f.commitAll();
+  });
+  expectFailure(
+    runReadiness({ repoRoot: fixture.root, args: ["--repo-only"] }),
+    /possible private key material in ops\/backup\.txt/,
+  );
+});
+
+test("the scanner does not flag itself, or anything else in this repository", () => {
+  // The regression test for the bug this suite missed: every fixture tree is a
+  // handful of copied files, so the scanner never saw its own source until the
+  // script was committed and became a tracked file. Running against the real
+  // repository is what catches a detector that reports itself — and a scanner
+  // that flags itself teaches everyone who runs it to ignore its one result.
+  const result = runReadiness({ repoRoot: REPO, args: ["--repo-only"] });
+  assert.equal(result.code, 0, result.output);
+  assert.match(result.output, /no committed private key material found/);
 });
