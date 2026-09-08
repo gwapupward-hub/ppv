@@ -1,0 +1,67 @@
+use anchor_lang::prelude::*;
+
+#[error_code]
+pub enum EscrowError {
+    #[msg("Counterparty must be a non-default wallet different from the creator")]
+    InvalidCounterparty,
+    #[msg("Escrow amount must be greater than zero")]
+    InvalidAmount,
+    #[msg("Terms hash must not be all zeroes")]
+    InvalidTermsHash,
+    #[msg("This agreement type is not implemented by the escrow kernel")]
+    UnsupportedAgreementType,
+    #[msg("Signer is not the buyer for this agreement")]
+    NotTheBuyer,
+    #[msg("Signer is not the seller for this agreement")]
+    NotTheSeller,
+    #[msg("Signer is not a party to this agreement")]
+    NotAParty,
+    #[msg("EscrowAgreement is not in a valid state for this instruction")]
+    BadState,
+    #[msg("Account does not use the agreement mint")]
+    MintMismatch,
+    #[msg("Funding source is not owned by the buyer")]
+    SourceNotOwnedByBuyer,
+    #[msg("Settlement destination is not owned by the seller")]
+    DestinationNotOwnedBySeller,
+    #[msg("Refund destination is not owned by the buyer")]
+    DestinationNotOwnedByBuyer,
+    #[msg("Custody did not move by exactly the agreement amount")]
+    CustodyMismatch,
+    #[msg("Proof content hash must not be all zeroes")]
+    InvalidContentHash,
+    #[msg("Proof does not belong to this agreement")]
+    ProofAgreementMismatch,
+    #[msg("A party cannot decide its own proof")]
+    CannotDecideOwnProof,
+    #[msg("Proof has already been approved or rejected")]
+    ProofAlreadyDecided,
+    #[msg("Settlement can only cite an approved proof")]
+    ProofNotApproved,
+    #[msg("A party cannot concede a dispute to itself")]
+    CannotConcedeToSelf,
+    #[msg("Destination is not owned by a party to this agreement")]
+    DestinationNotAParty,
+    #[msg("This instruction does not apply to this agreement type")]
+    WrongAgreementType,
+    #[msg("This agreement's counterparty has already been assigned")]
+    CounterpartyAlreadyAssigned,
+    #[msg("This agreement has no counterparty yet")]
+    CounterpartyNotAssigned,
+    #[msg("Milestone amounts must not exceed the agreement amount")]
+    MilestoneTotalMismatch,
+    #[msg("A milestone contract must be fully scheduled before it is funded")]
+    MilestonesNotFullyScheduled,
+    #[msg("Milestone does not belong to this agreement")]
+    MilestoneAgreementMismatch,
+    #[msg("Milestone is not in a valid state for this instruction")]
+    MilestoneBadState,
+    #[msg("Milestone amount must be greater than zero")]
+    InvalidMilestoneAmount,
+    #[msg("Vault address already holds data")]
+    VaultAlreadyInitialized,
+    #[msg("Arithmetic overflow")]
+    Overflow,
+    #[msg("Core proof account is not the address this agreement and index derive")]
+    CoreProofMismatch,
+}

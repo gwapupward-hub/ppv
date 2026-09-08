@@ -1,0 +1,188 @@
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import test from "node:test";
+
+import {
+  EVENT_IX_TAG,
+  PPV_ESCROW_EVENT_NAMES,
+  decodeEscrowEventData,
+  decodeEventForProgram,
+  decodePpvEventData,
+  escrowEventDiscriminatorHex,
+} from "../src/index.js";
+import { encodePpvEvent } from "./helpers/ppv-events.js";
+import {
+  CANCELLED_FIXTURE,
+  COUNTERPARTY_ASSIGNED_FIXTURE,
+  DISPUTE_FIXTURE,
+  LIFECYCLE_FIXTURE,
+  MILESTONE_FIXTURE,
+  PROOF_APPROVED_FIXTURE,
+  PROOF_FIXTURE,
+  PROOF_REJECTED_FIXTURE,
+  addressFromByte,
+  encodeEscrowEvent,
+  hexFromByte,
+} from "./helpers/escrow-events.js";
+
+test("every escrow event round-trips through the decoder", () => {
+  const all = [
+    ...LIFECYCLE_FIXTURE,
+    PROOF_FIXTURE,
+    PROOF_APPROVED_FIXTURE,
+    PROOF_REJECTED_FIXTURE,
+    ...DISPUTE_FIXTURE,
+    CANCELLED_FIXTURE,
+    ...MILESTONE_FIXTURE,
+    COUNTERPARTY_ASSIGNED_FIXTURE,
+  ];
+  for (const fixture of all) {
+    assert.deepEqual(decodeEscrowEventData(encodeEscrowEvent(fixture)), fixture);
+  }
+  assert.equal(
+    new Set(all.map((event) => event.name)).size,
+    PPV_ESCROW_EVENT_NAMES.length,
+    "the fixtures must exercise every escrow event",
+  );
+});
+
+test("a proof event names the agreement it is bound to and the state it saw", () => {
+  const decoded = decodeEscrowEventData(encodeEscrowEvent(PROOF_FIXTURE));
+  assert.equal(decoded?.name, "ProofSubmitted");
+  if (decoded?.name !== "ProofSubmitted") return;
+  assert.equal(decoded.agreement, LIFECYCLE_FIXTURE[0]!.agreement);
+  assert.equal(decoded.proofIndex, 0);
+  // Anchoring evidence does not move the agreement, so the event reports the
+  // state it was already in rather than a transition.
+  assert.equal(decoded.agreementState, "Funded");
+  assert.equal(decoded.metadataHash, "0".repeat(64), "no metadata commitment");
+});
+
+test("discriminators are the anchor derivation and nothing else", () => {
+  for (const name of PPV_ESCROW_EVENT_NAMES) {
+    const expected = createHash("sha256").update(`event:${name}`).digest().subarray(0, 8);
+    assert.equal(escrowEventDiscriminatorHex(name), expected.toString("hex"));
+  }
+});
+
+test("data that is not an escrow event decodes to null, not a guess", () => {
+  assert.equal(decodeEscrowEventData(new Uint8Array(0)), null);
+  assert.equal(decodeEscrowEventData(new Uint8Array(40).fill(7)), null);
+
+  const unknown = new Uint8Array(40);
+  unknown.set(EVENT_IX_TAG, 0);
+  unknown.set(Uint8Array.of(9, 9, 9, 9, 9, 9, 9, 9), 8);
+  assert.equal(decodeEscrowEventData(unknown), null);
+});
+
+test("malformed escrow events throw instead of decoding partially", () => {
+  const encoded = encodeEscrowEvent(LIFECYCLE_FIXTURE[1]!);
+  assert.throws(() => decodeEscrowEventData(encoded.subarray(0, encoded.length - 1)), /truncated/);
+  assert.throws(
+    () => decodeEscrowEventData(Uint8Array.from([...encoded, 0])),
+    /trailing/,
+  );
+
+  const badState = Uint8Array.from(encoded);
+  badState[encoded.length - 10] = 9; // previous_state
+  assert.throws(() => decodeEscrowEventData(badState), /unknown agreement state/);
+});
+
+test("an escrow event is not a commerce event, by name and by discriminator", () => {
+  // Anchor derives an event discriminator from the name alone. ppv_escrow used
+  // to emit `AgreementCreated` and `AgreementCancelled`, as ppv_commerce does,
+  // so the two produced byte-identical prefixes over incompatible bodies —
+  // escrow bytes reached the commerce decoder and were mis-deserialized rather
+  // than merely misattributed. The escrow names moved, since ppv_commerce holds
+  // a permanent identity and nothing here is deployed.
+  const encoded = encodeEscrowEvent(LIFECYCLE_FIXTURE[0]!);
+  assert.equal(
+    escrowEventDiscriminatorHex("AgreementOpened"),
+    createHash("sha256").update("event:AgreementOpened").digest().subarray(0, 8).toString("hex"),
+  );
+
+  // The renamed events no longer produce the prefixes ppv_commerce owns.
+  for (const [escrowName, commerceName] of [
+    ["AgreementOpened", "AgreementCreated"],
+    ["AgreementAbandoned", "AgreementCancelled"],
+  ] as const) {
+    assert.notEqual(
+      escrowEventDiscriminatorHex(escrowName),
+      createHash("sha256")
+        .update(`event:${commerceName}`)
+        .digest()
+        .subarray(0, 8)
+        .toString("hex"),
+    );
+  }
+
+  // So escrow bytes are now simply unrecognised by the shared decoder — no
+  // longer a plausible commerce event that only the layout catches.
+  assert.equal(decodePpvEventData(encoded), null);
+  assert.equal(decodeEventForProgram("ppv_commerce", encoded), null);
+
+  // Program-scoped decoding is unchanged and still required: a collision-free
+  // protocol is defence in depth, not a reason to key on the discriminator.
+  assert.deepEqual(decodeEventForProgram("ppv_escrow", encoded), {
+    program: "ppv_escrow",
+    event: LIFECYCLE_FIXTURE[0],
+  });
+});
+
+test("a commerce event decoded as escrow is refused, not reinterpreted", () => {
+  const commerceExecuted = encodePpvEvent({
+    name: "AgreementExecuted",
+    agreement: addressFromByte(5),
+    partyA: addressFromByte(1),
+    partyB: addressFromByte(2),
+    version: 3,
+    contentHash: hexFromByte(4, 32),
+    termsHash: hexFromByte(5, 32),
+    executedAt: 1_700_000_002,
+  });
+  assert.equal(decodeEscrowEventData(commerceExecuted), null);
+  assert.equal(decodeEventForProgram("ppv_escrow", commerceExecuted), null);
+  assert.throws(() => decodeEventForProgram("ppv_core", commerceExecuted), /belongs to ppv_commerce/);
+});
+
+test("amounts stay bigint so a u64 cannot round", () => {
+  const huge = { ...LIFECYCLE_FIXTURE[1]!, amount: 18_446_744_073_709_551_615n };
+  const decoded = decodeEscrowEventData(encodeEscrowEvent(huge));
+  assert.equal(decoded?.name, "AgreementFunded");
+  assert.equal(decoded?.name === "AgreementFunded" ? decoded.amount : 0n, 18_446_744_073_709_551_615n);
+});
+
+test("a settlement can carry a proof reference without a layout change", () => {
+  const settled = LIFECYCLE_FIXTURE[3]!;
+  assert.equal(settled.name, "SettlementExecuted");
+  const withProof = { ...settled, proof: "11111111111111111111111111111111" } as typeof settled;
+  assert.deepEqual(decodeEscrowEventData(encodeEscrowEvent(withProof)), withProof);
+});
+
+test("approval and rejection are one shape told apart by their discriminator", () => {
+  // A consumer should never have to reconcile two field layouts for one kind
+  // of fact, and should never have to guess which decision it is reading.
+  const approved = encodeEscrowEvent(PROOF_APPROVED_FIXTURE);
+  const rejected = encodeEscrowEvent(PROOF_REJECTED_FIXTURE);
+  assert.equal(approved.length, rejected.length);
+  assert.deepEqual(approved.subarray(16), rejected.subarray(16), "identical fields");
+  assert.notDeepEqual(approved.subarray(8, 16), rejected.subarray(8, 16), "different names");
+
+  assert.equal(decodeEscrowEventData(approved)?.name, "ProofApproved");
+  assert.equal(decodeEscrowEventData(rejected)?.name, "ProofRejected");
+});
+
+test("a resolved dispute reports its outcome without claiming a transition", () => {
+  // The settlement or refund beside it carries the transition. If this event
+  // claimed one too, a consumer would see two transitions leaving Disputed.
+  const resolved = DISPUTE_FIXTURE.find((event) => event.name === "DisputeResolved");
+  assert.ok(resolved);
+  const decoded = decodeEscrowEventData(encodeEscrowEvent(resolved));
+  assert.equal(decoded?.name, "DisputeResolved");
+  if (decoded?.name !== "DisputeResolved") return;
+  assert.equal(decoded.outcome, "BuyerRefunded");
+  assert.equal(decoded.resolvedBy, decoded.counterparty, "the seller conceded");
+  assert.equal(decoded.beneficiary, decoded.creator);
+  assert.equal(decoded.resultingState, "Refunded");
+  assert.ok(!("previousState" in decoded));
+});

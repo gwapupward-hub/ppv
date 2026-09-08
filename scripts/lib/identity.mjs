@@ -16,6 +16,18 @@ export const PERMANENT_PROGRAM_IDS = Object.freeze({
 
 export const PROGRAM_NAMES = Object.freeze(Object.keys(PERMANENT_PROGRAM_IDS));
 
+/**
+ * Workspace programs that deliberately have no permanent id yet.
+ *
+ * `ppv_escrow` is the only program that holds value, so it ships no further
+ * than a local validator until the custody gate in `docs/deployment-gates.md`
+ * is met and its keypair is generated in the same ceremony as the others. It is
+ * named here rather than omitted so that adding a fourth program fails the
+ * identity-table test until someone decides which list it belongs in — silence
+ * is how a program ends up deployed with an id nothing checks.
+ */
+export const UNRELEASED_PROGRAMS = Object.freeze(["ppv_escrow"]);
+
 /** The BPF upgradeable loader. A program owned by anything else is not one. */
 export const UPGRADEABLE_LOADER_ID = "BPFLoaderUpgradeab1e11111111111111111111111";
 

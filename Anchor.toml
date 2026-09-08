@@ -9,7 +9,12 @@ skip-lint = false
 [programs.localnet]
 ppv_core = "9cWE41ZDNQChvFrRoVuPQDeoVLg46ACTiZRCZaBZzfwU"
 ppv_commerce = "GmRDoFuPrBrsxnvTX751WK5rLu14JXe4sgjh6vNwHzr3"
+ppv_escrow = "7BECot7zFqH2oCxTu9uLmmwvzQSBtxWro47jMa2MqUdR"
 
+# ppv_escrow is deliberately absent from [programs.devnet] and from the devnet
+# deploy workflow. It is the only program that holds value, so it ships no
+# further than a local validator until the custody gate in
+# docs/deployment-gates.md is met.
 [programs.devnet]
 ppv_core = "9cWE41ZDNQChvFrRoVuPQDeoVLg46ACTiZRCZaBZzfwU"
 ppv_commerce = "GmRDoFuPrBrsxnvTX751WK5rLu14JXe4sgjh6vNwHzr3"

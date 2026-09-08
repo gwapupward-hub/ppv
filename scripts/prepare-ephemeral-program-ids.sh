@@ -5,7 +5,7 @@ set -euo pipefail
 # clean build without putting deployable signing material in Git or CI logs.
 mkdir -p target/deploy
 
-for program in ppv_core ppv_commerce; do
+for program in ppv_core ppv_commerce ppv_escrow; do
   keypair="target/deploy/${program}-keypair.json"
   if [[ ! -f "${keypair}" ]]; then
     solana-keygen new \

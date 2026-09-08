@@ -43,6 +43,14 @@ export const REPUTATION_EVENT_TYPES = [
   "dispute.opened",
   "dispute.resolved",
   "settlement.completed",
+  // Added by Phase 10, when the escrow kernel gained facts with no existing
+  // home. Appended rather than substituted: every type above still means what
+  // it meant, and a consumer that ignores a type it does not know keeps working.
+  "work.completed",
+  "milestone.settled",
+  "agreement.refunded",
+  "proof.approved",
+  "proof.rejected",
 ] as const;
 
 export type ReputationEventType = (typeof REPUTATION_EVENT_TYPES)[number];

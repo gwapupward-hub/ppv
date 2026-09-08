@@ -1,29 +1,45 @@
 # PPV Foundation
 
-Private proofs and exact-version agreements for GWAP OS, implemented as two
-separately deployable Solana programs.
+Private proofs, exact-version agreements, and a token escrow kernel for GWAP OS,
+implemented as three separately deployable Solana programs.
 
-## Foundation scope
-
-This branch intentionally contains only the smallest non-custodial protocol
-surface:
+## Scope
 
 - `ppv_core`: wallet-authorized proof timestamps and permanent revocation
-  markers.
+  markers. Non-custodial.
 - `ppv_commerce`: bilateral agreement creation, revision, signing, execution,
-  and cancellation.
+  and cancellation. Non-custodial.
+- `ppv_escrow`: the custody kernel — `initialize_agreement`, `fund`,
+  `mark_completed`, `settle` over `Open → Funded → Completed → Settled`, with a
+  vault and vault authority derived per agreement; `submit_proof`,
+  `approve_proof` and `reject_proof` for agreement-bound evidence; and `cancel`,
+  `open_dispute`, `resolve_dispute` and `refund` for the ways an agreement ends
+  other than payment; and milestone contracts, which escrow one budget and
+  release it in tranches; and bounties, which escrow before the winner is known.
+  **Local validator only.**
 - `@gwap/ppv-sdk`: frozen canonicalization v1 and SHA-256 helpers shared by
-  every client, plus the versioned reputation contracts (`ReputationEventV1`,
-  `PpvReceiptV1`, seal states, credential eligibility) and the decoder for the
-  programs' `emit_cpi!` events. PPV records facts; GwapScore interprets them.
+  every client; the versioned reputation contracts (`ReputationEventV1`,
+  `PpvReceiptV1`, seal states, credential eligibility); decoders for the
+  programs' `emit_cpi!` events; and dependency-free PDA derivation, account
+  decoding, and deterministic receipt reconstruction for the escrow kernel; and
+  the binding that checks a funded escrow against the negotiated contract it
+  cites. PPV records facts; GwapScore interprets them.
+- `@gwap/ppv-indexer`: rebuilds an agreement's whole lifecycle from a public RPC
+  endpoint and the SDK — no GWAP database and no privileged access. Run it with
+  `npm run replay`.
 
-Not included: invoices, token transfers, escrow, milestones, disputes,
-arbitration, protocol fees, document encryption, GNS authority, mainnet
-deployment, or any instruction that holds user funds.
+Not included: third-party arbitration, protocol fees,
+document encryption, GNS authority, or any mainnet deployment. Disputes are
+resolved by concession only — the party who would lose signs away its own claim
+— because an arbiter is a trusted third party and the protocol has not yet
+decided who may be one.
 
-That exclusion is a security boundary, not an unfinished checkbox. Custody
-returns only after its signed-terms binding, legal policy, invariant tests,
-fuzzing, and external audit gates are complete.
+`ppv_escrow` is the only program that holds value, and it is deliberately absent
+from `[programs.devnet]` and from the devnet deploy workflow. That exclusion is
+a security boundary, not an unfinished checkbox: custody deploys only after the
+custody gate in [docs/deployment-gates.md](docs/deployment-gates.md) — signed
+terms binding, legal policy, invariant tests, fuzzing, and external audit — is
+complete.
 
 ## Security properties
 
@@ -40,6 +56,15 @@ fuzzing, and external audit gates are complete.
    erase it.
 7. No GNS name is treated as an authority. Wallets sign; names remain an
    optional presentation-layer upgrade.
+8. Every escrow instruction checks both who is signing and whether the action is
+   legal in the current state. Either check alone is insufficient.
+9. Each escrow agreement has its own vault authority. There is no global
+   authority whose compromise would reach more than one agreement's funds.
+10. Custody state is never read as protocol state. A vault balance does not fund
+    an agreement; an authorized `fund()` that moved exactly the agreed amount
+    does.
+11. Protocol state is written only after the token transfer succeeds, and every
+    emitted event describes a transition that actually committed.
 
 ## Important product claim
 
@@ -53,11 +78,18 @@ Prerequisites: Rust 1.85.1, Anchor 0.30.1, Solana CLI 1.18.17, and Node 22+.
 
 ```bash
 npm ci
-npm test                                          # typecheck + SDK tests
+npm test                                          # typecheck + SDK and indexer tests
 cargo fmt --all -- --check
 cargo test --workspace --locked
 cargo clippy --workspace --all-targets --locked
 npm run test:f1                                   # the complete F1 gate
+```
+
+Two read-only tools work against any cluster, and need only a program id:
+
+```bash
+npm run derive:addresses -- --program <ID> --creator <WALLET> --id 42
+npm run replay -- --rpc <RPC_URL> --program <ID> --creator <WALLET> --id 42
 ```
 
 `npm run test:f1` is the gate: it pins the toolchains, generates ephemeral
@@ -79,7 +111,19 @@ manifest. Never deploy these placeholder IDs.
 
 ## Documentation
 
+- [Build status and what is blocked](docs/phase-status.md)
 - [Architecture](docs/architecture.md)
+- [State machines](docs/state-machines.md)
+- [Invariants](docs/invariants.md)
+- [Address derivation](docs/pdas.md)
+- [Protocol events](docs/events.md)
+- [Receipts](docs/receipts.md)
+- [Indexing](docs/indexing.md)
+- [Contracts and terms](docs/contracts.md)
+- [Invoices and bounties](docs/compositions.md)
+- [Integration contract](docs/ecosystem.md)
+- [Credentials](docs/credentials.md)
+- [Escrow security model and attack matrix](docs/security-model.md)
 - [Threat model](docs/threat-model.md)
 - [Canonicalization v1](docs/canonicalization-v1.md)
 - [Reputation events v1](docs/reputation-events-v1.md)

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { REPO } from "./helpers.mjs";
-import { PERMANENT_PROGRAM_IDS, PROGRAM_NAMES } from "../lib/identity.mjs";
+import { PERMANENT_PROGRAM_IDS, PROGRAM_NAMES, UNRELEASED_PROGRAMS } from "../lib/identity.mjs";
 
 /**
  * The F1 harness is the only thing permitted to substitute a program id in a
@@ -33,8 +33,38 @@ function programsWithIdentities() {
 }
 
 test("the permanent identity table matches the workspace exactly", () => {
-  // A program missing from the table is a program no tool here checks.
-  assert.deepEqual(programsWithIdentities().sort(), [...PROGRAM_NAMES].sort());
+  // A program in neither list is a program no tool here checks. Adding one to
+  // the workspace must fail here until it is classified: permanent id, or
+  // explicitly not released yet.
+  assert.deepEqual(
+    programsWithIdentities().sort(),
+    [...PROGRAM_NAMES, ...UNRELEASED_PROGRAMS].sort(),
+  );
+  for (const program of UNRELEASED_PROGRAMS) {
+    assert.equal(
+      PERMANENT_PROGRAM_IDS[program],
+      undefined,
+      `${program} cannot be both unreleased and hold a permanent id`,
+    );
+  }
+});
+
+test("an unreleased program is not listed for any deployable cluster", () => {
+  // `[programs.localnet]` is where F1 runs it. Appearing under a real cluster
+  // is what would put it in front of `anchor deploy`.
+  const anchorToml = readFileSync(join(REPO, "Anchor.toml"), "utf8");
+  const clusters = anchorToml.split(/^\[programs\.(\w+)\]$/m);
+  for (let index = 1; index < clusters.length; index += 2) {
+    const cluster = clusters[index];
+    if (cluster === "localnet") continue;
+    for (const program of UNRELEASED_PROGRAMS) {
+      assert.doesNotMatch(
+        clusters[index + 1],
+        new RegExp(`^${program}\\b`, "m"),
+        `${program} has no permanent id and must not be listed under ${cluster}`,
+      );
+    }
+  }
 });
 
 test("every program's identity file is restored by the F1 harness", () => {

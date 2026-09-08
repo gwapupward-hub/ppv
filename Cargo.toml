@@ -4,6 +4,24 @@ resolver = "2"
 
 [workspace.dependencies]
 anchor-lang = { version = "=0.30.1", features = ["event-cpi"] }
+# `token` only. Two reasons, both load-bearing:
+#
+#   * The kernel custodies classic SPL Token mints. Every custody account is
+#     typed `Program<Token>` / `Account<TokenAccount>`, so a Token-2022 mint is
+#     rejected rather than half-supported. Token-2022 waits until its
+#     transfer-fee and transfer-hook extensions have their own accounting rules;
+#     a fee-on-transfer mint silently breaks "the vault received exactly the
+#     agreed amount".
+#   * `spl-token-2022 v3` pulls `solana-zk-token-sdk`, which pins
+#     `solana-program =1.18.26`. This workspace pins `solana-program` to the
+#     1.18.17 the programs are built and deployed with, and the two cannot both
+#     hold. That is why the vault is created by an explicit CPI in
+#     `initialize_agreement` instead of Anchor's `init` + `token::` constraints,
+#     whose codegen names `anchor_spl::token_2022` unconditionally.
+#
+# `associated_token` stays off: every PPV vault is a program-derived token
+# account this program creates itself.
+anchor-spl = { version = "=0.30.1", default-features = false, features = ["token"] }
 
 [profile.release]
 overflow-checks = true

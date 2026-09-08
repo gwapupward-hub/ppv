@@ -1,0 +1,241 @@
+import { createHash } from "node:crypto";
+
+import { decodeBase58, encodeBase58 } from "../reputation/base58.js";
+import { isOnCurve } from "./curve.js";
+
+/**
+ * Deterministic PPV addresses.
+ *
+ * The program id is part of every derivation, which is why a PPV program id is
+ * protocol architecture and not a disposable deployment artifact: changing it
+ * changes the address of every agreement, vault authority, and vault that has
+ * ever existed.
+ */
+
+export const AGREEMENT_SEED = new TextEncoder().encode("agreement");
+export const VAULT_AUTHORITY_SEED = new TextEncoder().encode("vault");
+export const VAULT_TOKEN_SEED = new TextEncoder().encode("vault_token");
+export const PROOF_SEED = new TextEncoder().encode("proof");
+export const MILESTONE_SEED = new TextEncoder().encode("milestone");
+
+/**
+ * `ppv_core`'s proof namespace. The same word as {@link PROOF_SEED}, under a
+ * different program id, for a different account: ppv_core holds the
+ * commitment, ppv_escrow holds one agreement's decision about it.
+ */
+export const CORE_PROOF_SEED = new TextEncoder().encode("proof");
+export const CORE_PROOF_ID_DOMAIN = new TextEncoder().encode("ppv:escrow:core-proof:v1");
+
+const PDA_MARKER = new TextEncoder().encode("ProgramDerivedAddress");
+const MAX_SEED_LENGTH = 32;
+const MAX_SEEDS = 16;
+
+export class PdaError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PdaError";
+  }
+}
+
+export type Address = string;
+
+function addressBytes(address: Address): Uint8Array {
+  const bytes = decodeBase58(address);
+  if (bytes.length !== 32) throw new PdaError(`not a 32-byte address: ${address}`);
+  return bytes;
+}
+
+function concat(chunks: readonly Uint8Array[]): Uint8Array {
+  const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return out;
+}
+
+/**
+ * The raw derivation, with the bump already chosen. Throws when the result is
+ * on the curve, exactly as the runtime's `create_program_address` does.
+ */
+export function createProgramAddress(seeds: readonly Uint8Array[], programId: Address): Address {
+  if (seeds.length > MAX_SEEDS) throw new PdaError("too many seeds");
+  for (const seed of seeds) {
+    if (seed.length > MAX_SEED_LENGTH) throw new PdaError("seed longer than 32 bytes");
+  }
+
+  const digest = createHash("sha256")
+    .update(concat([...seeds, addressBytes(programId), PDA_MARKER]))
+    .digest();
+  const bytes = new Uint8Array(digest);
+  if (isOnCurve(bytes)) throw new PdaError("derived address is on the ed25519 curve");
+  return encodeBase58(bytes);
+}
+
+/** The canonical (highest) bump, matching `Pubkey::find_program_address`. */
+export function findProgramAddress(
+  seeds: readonly Uint8Array[],
+  programId: Address,
+): { address: Address; bump: number } {
+  for (let bump = 255; bump >= 0; bump -= 1) {
+    try {
+      const address = createProgramAddress([...seeds, Uint8Array.of(bump)], programId);
+      return { address, bump };
+    } catch (error) {
+      if (error instanceof PdaError && error.message.includes("on the ed25519 curve")) continue;
+      throw error;
+    }
+  }
+  throw new PdaError("no off-curve bump exists for these seeds");
+}
+
+/** `agreement_id` is a u64 encoded little-endian, as the program seeds it. */
+export function agreementIdSeed(agreementId: bigint | number): Uint8Array {
+  const value = BigInt(agreementId);
+  if (value < 0n || value > 0xffff_ffff_ffff_ffffn) throw new PdaError("agreement id out of u64 range");
+  const out = new Uint8Array(8);
+  new DataView(out.buffer).setBigUint64(0, value, true);
+  return out;
+}
+
+export function deriveAgreement(
+  programId: Address,
+  creator: Address,
+  agreementId: bigint | number,
+): { address: Address; bump: number } {
+  return findProgramAddress(
+    [AGREEMENT_SEED, addressBytes(creator), agreementIdSeed(agreementId)],
+    programId,
+  );
+}
+
+/**
+ * Every agreement gets its own vault authority. There is deliberately no
+ * global authority to derive, so there is no single derivation whose compromise
+ * would reach more than one agreement's funds.
+ */
+export function deriveVaultAuthority(
+  programId: Address,
+  agreement: Address,
+): { address: Address; bump: number } {
+  return findProgramAddress([VAULT_AUTHORITY_SEED, addressBytes(agreement)], programId);
+}
+
+export function deriveVault(programId: Address, agreement: Address): { address: Address; bump: number } {
+  return findProgramAddress([VAULT_TOKEN_SEED, addressBytes(agreement)], programId);
+}
+
+/**
+ * A u32 index assigned by the agreement, encoded little-endian. Proofs and
+ * milestones are both numbered this way by their agreement's own counter.
+ */
+export function proofIndexSeed(proofIndex: number): Uint8Array {
+  if (!Number.isInteger(proofIndex) || proofIndex < 0 || proofIndex > 0xffff_ffff) {
+    throw new PdaError("index out of u32 range");
+  }
+  const out = new Uint8Array(4);
+  new DataView(out.buffer).setUint32(0, proofIndex, true);
+  return out;
+}
+
+/**
+ * Evidence is addressed under the agreement it belongs to. That is the whole
+ * of Invariant 11: a proof anchored to one agreement has no address under
+ * another, so it cannot be presented for one.
+ */
+export function deriveProof(
+  programId: Address,
+  agreement: Address,
+  proofIndex: number,
+): { address: Address; bump: number } {
+  return findProgramAddress(
+    [PROOF_SEED, addressBytes(agreement), proofIndexSeed(proofIndex)],
+    programId,
+  );
+}
+
+/**
+ * The domain-separated id `ppv_escrow` asks `ppv_core` to mint for one
+ * agreement's proof. Mirrors `core_proof_id` in
+ * `programs/ppv_escrow/src/state/proof.rs`.
+ *
+ * `ppv_core` normally lets an authority choose its own 16-byte proof id.
+ * Evidence submitted through an agreement does not get that choice: the id
+ * follows from the agreement and the index, so the core record's address is a
+ * pure function of facts already on chain and an indexer can verify the link
+ * rather than believing it.
+ */
+export function coreProofId(agreement: Address, proofIndex: number): Uint8Array {
+  const digest = createHash("sha256")
+    .update(CORE_PROOF_ID_DOMAIN)
+    .update(addressBytes(agreement))
+    .update(proofIndexSeed(proofIndex))
+    .digest();
+  return new Uint8Array(digest.subarray(0, 16));
+}
+
+/**
+ * Where `ppv_core` holds the commitment for one agreement's proof.
+ *
+ * Derived under the **ppv_core** program id, not ppv_escrow's: the record is
+ * ppv_core's account, and ppv_core is the only program that can create it.
+ * `ppv_core` keys proofs by authority as well as id, so the submitter is part
+ * of the derivation and two parties submitting under the same agreement and
+ * index occupy two distinct records.
+ */
+export function deriveCoreProof(
+  coreProgramId: Address,
+  submitter: Address,
+  agreement: Address,
+  proofIndex: number,
+): { address: Address; bump: number } {
+  return findProgramAddress(
+    [CORE_PROOF_SEED, addressBytes(submitter), coreProofId(agreement, proofIndex)],
+    coreProgramId,
+  );
+}
+
+/**
+ * As with proofs, the agreement is in the seeds, so one agreement's milestones
+ * have no address under another (Invariant 12).
+ */
+export function deriveMilestone(
+  programId: Address,
+  agreement: Address,
+  milestoneIndex: number,
+): { address: Address; bump: number } {
+  return findProgramAddress(
+    [MILESTONE_SEED, addressBytes(agreement), proofIndexSeed(milestoneIndex)],
+    programId,
+  );
+}
+
+export type AgreementAddresses = {
+  agreement: Address;
+  agreementBump: number;
+  vaultAuthority: Address;
+  vaultAuthorityBump: number;
+  vault: Address;
+  vaultBump: number;
+};
+
+/** Every address one agreement occupies, derived from public inputs alone. */
+export function deriveAgreementAddresses(
+  programId: Address,
+  creator: Address,
+  agreementId: bigint | number,
+): AgreementAddresses {
+  const agreement = deriveAgreement(programId, creator, agreementId);
+  const vaultAuthority = deriveVaultAuthority(programId, agreement.address);
+  const vault = deriveVault(programId, agreement.address);
+  return {
+    agreement: agreement.address,
+    agreementBump: agreement.bump,
+    vaultAuthority: vaultAuthority.address,
+    vaultAuthorityBump: vaultAuthority.bump,
+    vault: vault.address,
+    vaultBump: vault.bump,
+  };
+}
