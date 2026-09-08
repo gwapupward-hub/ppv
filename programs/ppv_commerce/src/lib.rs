@@ -11,9 +11,21 @@ use state::*;
 pub const AGREEMENT_SEED: &[u8] = b"agreement";
 pub const MAX_AGREEMENT_TTL_SECS: i64 = 365 * 24 * 60 * 60;
 
-// Build-only placeholder. Run `anchor keys sync` with controlled program
-// keypairs before deployment and commit the resulting deployment manifest.
-declare_id!("4Y83YzUZnJ5LF9M1PcKHtsYcQ1LRxedwDi93PVf5H1FJ");
+// PERMANENT PROTOCOL IDENTITY — do not change this address.
+//
+// This is not a build placeholder. It is the deterministic namespace every
+// ppv_commerce account derives from, and it must correspond to the backed-up
+// permanent program keypair held for ppv_commerce. Replacing it does not migrate
+// anything: it creates a distinct protocol universe in which every existing
+// address resolves to nothing.
+//
+// Do NOT run `anchor keys sync` against generated or arbitrary keys in this
+// checkout. The only tool permitted to substitute an id here is the F1 harness
+// (`scripts/verify-f1.sh`), which generates throwaway keypairs under the
+// ignored `target/deploy/`, syncs them for a local-validator run, and restores
+// this file on every exit path. `scripts/verify-devnet-readiness.sh` asserts
+// that the restoration was complete.
+declare_id!("GmRDoFuPrBrsxnvTX751WK5rLu14JXe4sgjh6vNwHzr3");
 
 #[program]
 pub mod ppv_commerce {

@@ -7,8 +7,8 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-ppv_core = "Dkujj5vZp8kxhqM6hQTqqV3sTQ4Rx7J77No4bfwjrfXp"
-ppv_commerce = "4Y83YzUZnJ5LF9M1PcKHtsYcQ1LRxedwDi93PVf5H1FJ"
+ppv_core = "9cWE41ZDNQChvFrRoVuPQDeoVLg46ACTiZRCZaBZzfwU"
+ppv_commerce = "GmRDoFuPrBrsxnvTX751WK5rLu14JXe4sgjh6vNwHzr3"
 ppv_escrow = "7BECot7zFqH2oCxTu9uLmmwvzQSBtxWro47jMa2MqUdR"
 
 # ppv_escrow is deliberately absent from [programs.devnet] and from the devnet
@@ -16,8 +16,8 @@ ppv_escrow = "7BECot7zFqH2oCxTu9uLmmwvzQSBtxWro47jMa2MqUdR"
 # further than a local validator until the custody gate in
 # docs/deployment-gates.md is met.
 [programs.devnet]
-ppv_core = "Dkujj5vZp8kxhqM6hQTqqV3sTQ4Rx7J77No4bfwjrfXp"
-ppv_commerce = "4Y83YzUZnJ5LF9M1PcKHtsYcQ1LRxedwDi93PVf5H1FJ"
+ppv_core = "9cWE41ZDNQChvFrRoVuPQDeoVLg46ACTiZRCZaBZzfwU"
+ppv_commerce = "GmRDoFuPrBrsxnvTX751WK5rLu14JXe4sgjh6vNwHzr3"
 
 [registry]
 url = "https://api.apr.dev"

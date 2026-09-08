@@ -41,6 +41,13 @@ case "${program}" in
   *) echo "PPV_PROGRAM must be ppv_core or ppv_commerce" >&2; exit 1 ;;
 esac
 
+# Evidence must never claim a weaker authority than policy allows. A threshold
+# of one is a single key that can replace the program.
+if ! [[ "${threshold}" =~ ^[0-9]+$ ]] || (( threshold < 2 )); then
+  echo "PPV_UPGRADE_AUTHORITY_THRESHOLD is '${threshold}'; policy requires at least 2." >&2
+  exit 1
+fi
+
 # Refuse anything that looks like signing material rather than an address.
 for value in "${signature}" "${members}" "${threshold}"; do
   if [[ "${value}" == *"["* ]] || [[ -f "${value}" ]]; then
@@ -61,6 +68,17 @@ for required in "${idl}" "${binary}"; do
 done
 
 program_id="$(node -e "process.stdout.write(require('./${idl}').address)")"
+
+# The built artifact must name the permanent identity, or the manifest would
+# record a deployment of something else under this program's name.
+declare -A PERMANENT_IDS=(
+  [ppv_core]="9cWE41ZDNQChvFrRoVuPQDeoVLg46ACTiZRCZaBZzfwU"
+  [ppv_commerce]="GmRDoFuPrBrsxnvTX751WK5rLu14JXe4sgjh6vNwHzr3"
+)
+if [[ "${program_id}" != "${PERMANENT_IDS[${program}]}" ]]; then
+  echo "Built ${program} IDL names ${program_id}, permanent id is ${PERMANENT_IDS[${program}]}." >&2
+  exit 1
+fi
 
 # `solana program show` is the authority for what is actually on chain.
 show="$(solana program show "${program_id}" --url "${rpc_url}" --output json)"
@@ -117,6 +135,10 @@ manifest.deployments.push({
   // alone. Recorded rather than assumed: gitCommit plus binaryHash still pin
   // exactly what was deployed for anyone with the pinned toolchain.
   verifiable: env.VERIFIABLE === "true",
+  // The address recorded inside the IDL itself, so evidence pins the interface
+  // as well as the binary. (No apostrophes in this block: it is inside a
+  // single-quoted node -e script.)
+  idlAddress: env.PROGRAM_ID,
   idlHash: `sha256:${env.IDL_HASH}`,
   binaryHash: `sha256:${env.BINARY_HASH}`,
 });

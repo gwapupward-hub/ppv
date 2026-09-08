@@ -14,6 +14,15 @@ set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
+# The permanent identities, duplicated from scripts/lib/identity.mjs so a
+# manifest that names a different address for a program is caught here rather
+# than believed.
+declare -A PERMANENT_IDS=(
+  [ppv_core]="9cWE41ZDNQChvFrRoVuPQDeoVLg46ACTiZRCZaBZzfwU"
+  [ppv_commerce]="GmRDoFuPrBrsxnvTX751WK5rLu14JXe4sgjh6vNwHzr3"
+)
+UPGRADEABLE_LOADER="BPFLoaderUpgradeab1e11111111111111111111111"
+
 cluster="${PPV_CLUSTER:-devnet}"
 manifest="deployments/${cluster}.json"
 primary_rpc="${PPV_RPC_URL:-https://api.${cluster}.solana.com}"
@@ -58,6 +67,25 @@ check_one() {
 
   local ok=0
   [[ "${executable}" == "true" ]] || { echo "  ${label}: FAIL — not an executable upgradeable program"; ok=1; }
+
+  # Ownership is checked directly rather than inferred: an account can be
+  # executable under a different loader and is then not this program at all.
+  local account owner account_executable
+  if account="$(solana account "${program_id}" --url "${rpc}" --output json 2>/dev/null)"; then
+    owner="$(node -e "process.stdout.write(JSON.parse(process.argv[1]).account.owner)" "${account}")"
+    account_executable="$(node -e "process.stdout.write(String(JSON.parse(process.argv[1]).account.executable))" "${account}")"
+    [[ "${owner}" == "${UPGRADEABLE_LOADER}" ]] || {
+      echo "  ${label}: FAIL — owned by ${owner}, not the BPF upgradeable loader"
+      ok=1
+    }
+    [[ "${account_executable}" == "true" ]] || {
+      echo "  ${label}: FAIL — account is not executable"
+      ok=1
+    }
+  else
+    echo "  ${label}: FAIL — could not read the program account"
+    ok=1
+  fi
   [[ "${data}" == "${expected_data}" ]] || { echo "  ${label}: FAIL — programData ${data}, manifest ${expected_data}"; ok=1; }
   if [[ "${authority}" != "${expected_authority}" ]]; then
     # An upgrade authority that does not match the manifest is a security
@@ -72,6 +100,19 @@ check_one() {
 while read -r program program_id program_data authority; do
   [[ -n "${program}" ]] || continue
   echo "${program} (${program_id})"
+
+  # Manifest consistency first: this needs no chain, and a manifest that names
+  # the wrong address would otherwise be reported as "no program account there",
+  # which reads like a deployment problem instead of a bad record.
+  expected_permanent="${PERMANENT_IDS[${program}]:-}"
+  if [[ -z "${expected_permanent}" ]]; then
+    echo "  manifest: FAIL — ${program} is not a known PPV program"
+    failures=1
+  elif [[ "${program_id}" != "${expected_permanent}" ]]; then
+    echo "  manifest: FAIL — manifest records ${program} at ${program_id}, permanent id is ${expected_permanent}"
+    failures=1
+  fi
+
   check_one "${primary_rpc}" "primary RPC" "${program}" "${program_id}" "${program_data}" "${authority}" || failures=1
   if [[ -n "${second_rpc}" ]]; then
     check_one "${second_rpc}" "second RPC" "${program}" "${program_id}" "${program_data}" "${authority}" || failures=1

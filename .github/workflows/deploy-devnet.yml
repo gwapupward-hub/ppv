@@ -70,6 +70,13 @@ jobs:
 
       - run: npm ci
 
+      - name: Repository and identity preflight
+        run: |
+          # Repo and identity checks only: the toolchain, Squads and cluster
+          # checks are made by the steps below, against this run's own
+          # environment rather than a machine's ambient configuration.
+          ./scripts/verify-devnet-readiness.sh --repo-only
+
       - name: Confirm the CLI is targeting devnet
         run: |
           solana config set --url https://api.devnet.solana.com
@@ -226,6 +233,40 @@ jobs:
           fi
           echo "signature=${signature}" >> "${GITHUB_OUTPUT}"
 
+      - name: Validate the configured final upgrade authority
+        env:
+          UPGRADE_AUTHORITY: ${{ vars.PPV_SQUADS_VAULT_PDA }}
+          AUTHORITY_MEMBERS: ${{ vars.PPV_SQUADS_MEMBER_PUBKEYS }}
+          AUTHORITY_THRESHOLD: ${{ vars.PPV_SQUADS_THRESHOLD }}
+        run: |
+          # Checked before the handoff rather than after, so a misconfigured
+          # authority never becomes the thing that owns the program.
+          if [[ -z "${UPGRADE_AUTHORITY}" ]]; then
+            echo "PPV_SQUADS_VAULT_PDA must be set as a devnet environment variable." >&2
+            exit 1
+          fi
+          if [[ -z "${AUTHORITY_MEMBERS}" || -z "${AUTHORITY_THRESHOLD}" ]]; then
+            echo "PPV_SQUADS_MEMBER_PUBKEYS and PPV_SQUADS_THRESHOLD must be set." >&2
+            exit 1
+          fi
+          if ! [[ "${AUTHORITY_THRESHOLD}" =~ ^[0-9]+$ ]] || (( AUTHORITY_THRESHOLD < 2 )); then
+            echo "PPV_SQUADS_THRESHOLD is '${AUTHORITY_THRESHOLD}'; policy requires at least 2." >&2
+            echo "A threshold of one means a single compromised key can upgrade the program." >&2
+            exit 1
+          fi
+          # A Squads vault is a program-derived address and is therefore off the
+          # ed25519 curve. An on-curve address is somebody's wallet.
+          on_curve="$(node --input-type=module -e "
+            import { isProgramDerived } from './scripts/lib/pubkey.mjs';
+            process.stdout.write(String(!isProgramDerived(process.argv[1])));
+          " -- "${UPGRADE_AUTHORITY}")"
+          if [[ "${on_curve}" != "false" ]]; then
+            echo "PPV_SQUADS_VAULT_PDA is not a program-derived address." >&2
+            echo "Refusing to hand the upgrade authority to a signer wallet." >&2
+            exit 1
+          fi
+          echo "final upgrade authority: ${UPGRADE_AUTHORITY} (off-curve, threshold ${AUTHORITY_THRESHOLD})"
+
       - name: Transfer upgrade authority to Squads
         env:
           UPGRADE_AUTHORITY: ${{ vars.PPV_SQUADS_VAULT_PDA }}
@@ -254,6 +295,10 @@ jobs:
         run: |
           if [[ -z "${AUTHORITY_MEMBERS}" || -z "${AUTHORITY_THRESHOLD}" ]]; then
             echo "PPV_SQUADS_MEMBER_PUBKEYS and PPV_SQUADS_THRESHOLD must be set." >&2
+            exit 1
+          fi
+          if ! [[ "${AUTHORITY_THRESHOLD}" =~ ^[0-9]+$ ]] || (( AUTHORITY_THRESHOLD < 2 )); then
+            echo "Refusing to record a deployment with threshold '${AUTHORITY_THRESHOLD}'." >&2
             exit 1
           fi
           program="${{ inputs.program }}"

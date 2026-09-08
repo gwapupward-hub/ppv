@@ -10,9 +10,21 @@ use state::*;
 
 pub const PROOF_SEED: &[u8] = b"proof";
 
-// Build-only placeholder. Run `anchor keys sync` with controlled program
-// keypairs before deployment and commit the resulting deployment manifest.
-declare_id!("Dkujj5vZp8kxhqM6hQTqqV3sTQ4Rx7J77No4bfwjrfXp");
+// PERMANENT PROTOCOL IDENTITY — do not change this address.
+//
+// This is not a build placeholder. It is the deterministic namespace every
+// ppv_core account derives from, and it must correspond to the backed-up
+// permanent program keypair held for ppv_core. Replacing it does not migrate
+// anything: it creates a distinct protocol universe in which every existing
+// address resolves to nothing.
+//
+// Do NOT run `anchor keys sync` against generated or arbitrary keys in this
+// checkout. The only tool permitted to substitute an id here is the F1 harness
+// (`scripts/verify-f1.sh`), which generates throwaway keypairs under the
+// ignored `target/deploy/`, syncs them for a local-validator run, and restores
+// this file on every exit path. `scripts/verify-devnet-readiness.sh` asserts
+// that the restoration was complete.
+declare_id!("9cWE41ZDNQChvFrRoVuPQDeoVLg46ACTiZRCZaBZzfwU");
 
 #[program]
 pub mod ppv_core {

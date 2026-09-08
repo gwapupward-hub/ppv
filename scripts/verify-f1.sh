@@ -42,6 +42,7 @@ done
 validator_pid=""
 
 cleanup() {
+  status=$?
   if [[ -n "${validator_pid}" ]]; then
     kill "${validator_pid}" 2>/dev/null || true
     wait "${validator_pid}" 2>/dev/null || true
@@ -50,6 +51,20 @@ cleanup() {
     cp "${workdir}/ids/${source}" "${source}"
   done
   rm -rf "${workdir}"
+
+  # Prove the restoration rather than assuming it. This harness is the only
+  # thing permitted to substitute a program id in a working checkout, so it is
+  # also the thing that has to demonstrate it put the permanent ones back — a
+  # leftover ephemeral id committed by mistake would point the whole protocol
+  # at an address nobody holds the keypair for.
+  if ! PPV_REPO_ROOT="$(pwd)" ./scripts/verify-devnet-readiness.sh --repo-only >/dev/null 2>&1; then
+    echo >&2
+    echo "F1 did not restore the permanent program identities cleanly." >&2
+    echo "Run ./scripts/verify-devnet-readiness.sh --repo-only to see what differs," >&2
+    echo "and do not commit this checkout until it passes." >&2
+    exit 1
+  fi
+  exit "${status}"
 }
 trap cleanup EXIT
 
@@ -127,3 +142,4 @@ anchor test --skip-build --skip-local-validator
 
 sha256sum target/idl/ppv_core.json target/idl/ppv_commerce.json target/idl/ppv_escrow.json
 echo "F1 local-validator verification passed"
+echo "Permanent identity restoration is asserted by the cleanup trap below."
