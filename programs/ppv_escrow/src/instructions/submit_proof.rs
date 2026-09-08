@@ -1,4 +1,10 @@
 use anchor_lang::prelude::*;
+// Imported by short name, not written inline as `ppv_core::program::PpvCore`.
+// Anchor's IDL account-resolution codegen takes the *last* path segment of a
+// `Program<'info, T>` and emits a bare `T::id()`, so a fully-qualified path
+// compiles everywhere except the IDL build — which is the one build this
+// program cannot skip. See anchor-syn 0.30.1 `idl/accounts.rs::get_address`.
+use ppv_core::program::PpvCore;
 
 use crate::constants::{AGREEMENT_SEED, PROOF_SEED};
 use crate::errors::EscrowError;
@@ -74,7 +80,7 @@ pub struct SubmitProof<'info> {
     /// The CPI target, pinned by type. This is the line that makes the boundary
     /// safe: without it, "the proof registry" would be whatever program the
     /// client passed.
-    pub ppv_core_program: Program<'info, ppv_core::program::PpvCore>,
+    pub ppv_core_program: Program<'info, PpvCore>,
     pub system_program: Program<'info, System>,
 }
 

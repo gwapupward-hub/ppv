@@ -20,7 +20,8 @@
     "test:release": "node --test scripts/test/*.test.mjs",
     "test:sdk": "npm run test --workspace @gwap/ppv-sdk",
     "typecheck": "tsc --noEmit -p tsconfig.json && npm run typecheck --workspace @gwap/ppv-sdk && npm run build:sdk && npm run typecheck --workspace @gwap/ppv-indexer && npm run build:indexer && tsc --noEmit -p scripts/tsconfig.json",
-    "verify:devnet-readiness": "./scripts/verify-devnet-readiness.sh"
+    "verify:devnet-readiness": "./scripts/verify-devnet-readiness.sh",
+    "verify:idl-build": "./scripts/verify-idl-build.sh"
   },
   "devDependencies": {
     "@coral-xyz/anchor": "0.30.1",
