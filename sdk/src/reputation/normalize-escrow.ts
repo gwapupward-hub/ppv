@@ -48,7 +48,7 @@ type Mapped = {
  */
 function mapEscrowEvent(event: PpvEscrowEvent): Mapped | null {
   switch (event.name) {
-    case "AgreementCreated":
+    case "AgreementOpened":
       return {
         eventType: "agreement.created",
         actorWallet: event.creator,
@@ -110,7 +110,7 @@ function mapEscrowEvent(event: PpvEscrowEvent): Mapped | null {
         ppvProofId: null,
         proofHash: null,
       };
-    case "AgreementCancelled":
+    case "AgreementAbandoned":
       return {
         eventType: "agreement.cancelled",
         actorWallet: event.cancelledBy,

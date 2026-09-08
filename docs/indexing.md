@@ -64,10 +64,12 @@ the program emitted it. This is also what separates a genuine event from an
 unrelated instruction whose data happens to begin with the same eight bytes.
 
 A fourth rule comes from the SDK: an event is identified by the pair
-(program id, discriminator). `ppv_commerce` and `ppv_escrow` both emit an
-`AgreementCreated`, and their discriminators are identical because Anchor
-derives them from the name. The extractor decodes only instructions that
-targeted the program it was configured with.
+(program id, discriminator), and only the program id is authoritative. Anchor
+derives a discriminator from the event name alone, so no two PPV programs are
+allowed to share a name — a rule `scripts/test/discriminators.test.mjs`
+enforces. The extractor still decodes only instructions that targeted the
+program it was configured with: the name rule keeps a mistake there from
+producing something plausible.
 
 ## Versioned transactions
 

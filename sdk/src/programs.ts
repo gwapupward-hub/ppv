@@ -9,11 +9,17 @@ import { decodeEscrowEventData, type PpvEscrowEvent } from "./escrow/events.js";
  * Program-scoped event decoding.
  *
  * An Anchor event discriminator is derived from the event name alone, so the
- * same name in two programs produces the same eight bytes: `ppv_commerce`
+ * same name in two programs produces the same eight bytes. `ppv_commerce`
  * announces an agreement was negotiated and `ppv_escrow` announces one was
- * created with custody, and both call it `AgreementCreated`. Event identity is
- * therefore the pair (program id, discriminator), and every integrator should
- * decode through this function rather than guessing from the bytes.
+ * opened with custody; both used to call it `AgreementCreated`, and the escrow
+ * side was renamed to `AgreementOpened` so they no longer do.
+ *
+ * That rename does not make the discriminator sufficient. Event identity is the
+ * pair (program id, discriminator) — the name is chosen by whoever writes the
+ * program, the program id is not — so every integrator should decode through
+ * this function rather than guessing from the bytes. What a collision-free
+ * namespace buys is that a mistake here yields nothing rather than a
+ * plausible-looking event of the wrong kind.
  *
  * The emitting program is not something an indexer has to infer: an Anchor
  * event CPI is an inner instruction whose program id *is* the emitter.

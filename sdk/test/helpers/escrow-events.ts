@@ -7,7 +7,7 @@ import {
   encodeBase58,
   type AgreementState,
   type AgreementType,
-  type EscrowAgreementCreatedEvent,
+  type EscrowAgreementOpenedEvent,
   type EscrowCounterpartyAssignedEvent,
   type EscrowDisputeOpenedEvent,
   type EscrowDisputeResolvedEvent,
@@ -88,7 +88,7 @@ function discriminator(name: string): Buffer {
 export function encodeEscrowEvent(event: PpvEscrowEvent): Uint8Array {
   let body: Buffer = Buffer.alloc(0);
   switch (event.name) {
-    case "AgreementCreated":
+    case "AgreementOpened":
       body = Buffer.concat([
         pubkey(event.agreement),
         u64(event.agreementId),
@@ -171,7 +171,7 @@ export function encodeEscrowEvent(event: PpvEscrowEvent): Uint8Array {
         i64(event.timestamp),
       ]);
       break;
-    case "AgreementCancelled":
+    case "AgreementAbandoned":
       body = Buffer.concat([
         pubkey(event.agreement),
         pubkey(event.creator),
@@ -289,7 +289,7 @@ const SELLER_ATA = addressFromByte(6);
 export const LIFECYCLE_FIXTURE: readonly PpvEscrowEvent[] = [
   {
     program: "ppv_escrow",
-    name: "AgreementCreated",
+    name: "AgreementOpened",
     agreement: AGREEMENT,
     agreementId: 42n,
     creator: BUYER,
@@ -437,7 +437,7 @@ export const DISPUTE_FIXTURE: readonly PpvEscrowEvent[] = [
 
 export const CANCELLED_FIXTURE: PpvEscrowEvent = {
   program: "ppv_escrow",
-  name: "AgreementCancelled",
+  name: "AgreementAbandoned",
   agreement: AGREEMENT,
   creator: BUYER,
   counterparty: SELLER,
@@ -547,9 +547,9 @@ export const MILESTONE_FIXTURE: readonly PpvEscrowEvent[] = [
 ];
 
 /** A bounty naming its winner after the money was already escrowed. */
-export const CREATED_FIXTURE: EscrowAgreementCreatedEvent = (() => {
+export const OPENED_FIXTURE: EscrowAgreementOpenedEvent = (() => {
   const event = LIFECYCLE_FIXTURE[0];
-  if (event?.name !== "AgreementCreated") throw new Error("fixture order changed");
+  if (event?.name !== "AgreementOpened") throw new Error("fixture order changed");
   return event;
 })();
 

@@ -7,8 +7,8 @@ use anchor_spl::token::{self, InitializeAccount3, Mint, Token};
 
 use crate::constants::{AGREEMENT_SEED, VAULT_AUTHORITY_SEED, VAULT_TOKEN_SEED};
 use crate::errors::EscrowError;
-use crate::events::AgreementCreated;
-use crate::state::{Agreement, AgreementState, AgreementType, AGREEMENT_SCHEMA_VERSION};
+use crate::events::AgreementOpened;
+use crate::state::{AgreementState, AgreementType, EscrowAgreement, AGREEMENT_SCHEMA_VERSION};
 
 #[event_cpi]
 #[derive(Accounts)]
@@ -20,11 +20,11 @@ pub struct InitializeAgreement<'info> {
     #[account(
         init,
         payer = creator,
-        space = 8 + Agreement::INIT_SPACE,
+        space = 8 + EscrowAgreement::INIT_SPACE,
         seeds = [AGREEMENT_SEED, creator.key().as_ref(), &agreement_id.to_le_bytes()],
         bump
     )]
-    pub agreement: Account<'info, Agreement>,
+    pub agreement: Account<'info, EscrowAgreement>,
     /// CHECK: PDA with no data. It exists only to sign vault transfers, and it
     /// is re-derived from the agreement address on every custody instruction.
     #[account(
@@ -113,7 +113,7 @@ pub fn handle_initialize_agreement(
     agreement.settled_total = 0;
     agreement.reserved = [0; 40];
 
-    emit_cpi!(AgreementCreated {
+    emit_cpi!(AgreementOpened {
         agreement: agreement_key,
         agreement_id,
         creator,

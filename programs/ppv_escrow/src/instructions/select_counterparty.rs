@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 
 use crate::constants::AGREEMENT_SEED;
 use crate::events::CounterpartyAssigned;
-use crate::state::Agreement;
+use crate::state::EscrowAgreement;
 
 /// Naming the wallet a bounty will pay.
 ///
@@ -29,7 +29,7 @@ pub struct SelectCounterparty<'info> {
         ],
         bump = agreement.bump,
     )]
-    pub agreement: Account<'info, Agreement>,
+    pub agreement: Account<'info, EscrowAgreement>,
 }
 
 pub fn handle_select_counterparty(

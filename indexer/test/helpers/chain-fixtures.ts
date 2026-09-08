@@ -1,6 +1,6 @@
 import {
   encodeBase58,
-  type EscrowAgreementCreatedEvent,
+  type EscrowAgreementOpenedEvent,
   type PpvEscrowEvent,
 } from "@gwap/ppv-sdk";
 
@@ -18,12 +18,12 @@ export {
 import { LIFECYCLE_FIXTURE, addressFromByte, encodeEscrowEvent } from "../../../sdk/test/helpers/escrow-events.js";
 
 /**
- * The creation event, narrowed out of the lifecycle union so a fixture can vary
+ * The opening event, narrowed out of the lifecycle union so a fixture can vary
  * the fields only that event has.
  */
-export const CREATED_EVENT: EscrowAgreementCreatedEvent = (() => {
+export const OPENED_EVENT: EscrowAgreementOpenedEvent = (() => {
   const event = LIFECYCLE_FIXTURE[0];
-  if (event?.name !== "AgreementCreated") throw new Error("fixture order changed");
+  if (event?.name !== "AgreementOpened") throw new Error("fixture order changed");
   return event;
 })();
 

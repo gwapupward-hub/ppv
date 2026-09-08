@@ -34,7 +34,7 @@ mod tests {
             + 4 * 2               // milestone count + settled count
             + 8 * 2               // milestone total + settled total
             + 40; // reserved
-        assert_eq!(Agreement::INIT_SPACE, expected);
+        assert_eq!(EscrowAgreement::INIT_SPACE, expected);
         // Phases 3 and 4 fit inside the original reserved block, so the account
         // stayed at 278 bytes. Phase 5 needed more than it had left and grew
         // the account to 354, restoring the headroom; Phase 6's milestone

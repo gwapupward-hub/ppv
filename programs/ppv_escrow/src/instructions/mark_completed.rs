@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 
 use crate::constants::AGREEMENT_SEED;
 use crate::events::WorkCompleted;
-use crate::state::Agreement;
+use crate::state::EscrowAgreement;
 
 /// Completion moves no money. Keeping it separate from settlement is what
 /// leaves room for approvals, proofs, dispute windows, and milestone
@@ -20,7 +20,7 @@ pub struct MarkCompleted<'info> {
         ],
         bump = agreement.bump,
     )]
-    pub agreement: Account<'info, Agreement>,
+    pub agreement: Account<'info, EscrowAgreement>,
 }
 
 pub fn handle_mark_completed(ctx: Context<MarkCompleted>) -> Result<()> {

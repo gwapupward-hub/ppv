@@ -18,12 +18,22 @@ carries the emitting program id in the inner instruction itself.
 
 ## Event identity is (program id, discriminator)
 
-Anchor derives an event discriminator from the event *name* alone. `ppv_commerce`
-and `ppv_escrow` both emit an `AgreementCreated` — a negotiated document versus a
-funded custody agreement — and the two discriminators are byte-identical.
+Anchor derives an event discriminator from the event *name* alone, with no
+program id in the input. Two programs that pick the same name therefore produce
+byte-identical prefixes over incompatible bodies, and a decoder keying on the
+prefix does not merely misattribute the event — it mis-deserializes it.
 
-An indexer must therefore select its decoder by the program the inner
-instruction targeted. The SDK exposes exactly that:
+`ppv_escrow` used to emit `AgreementCreated` and `AgreementCancelled`, as
+`ppv_commerce` does. It now emits `AgreementOpened` and `AgreementAbandoned`:
+`ppv_commerce` carries a permanent identity and is frozen for its first
+deployment, so the escrow kernel — which is not deployed anywhere — is the side
+that moved. `scripts/test/discriminators.test.mjs` fails if any two programs
+pick the same event or account name again.
+
+That is defence in depth. An indexer must still select its decoder by the
+program the inner instruction targeted, because identity remains the pair
+(program id, discriminator) and only the program id is authoritative. The SDK
+exposes exactly that:
 
 ```ts
 import { decodeEventForProgram } from "@gwap/ppv-sdk";
@@ -42,14 +52,14 @@ transition committed.
 
 | Event | Emitted by | Transition |
 | --- | --- | --- |
-| `AgreementCreated` | `initialize_agreement` | → `Open` |
+| `AgreementOpened` | `initialize_agreement` | → `Open` |
 | `AgreementFunded` | `fund` | `Open` → `Funded` |
 | `WorkCompleted` | `mark_completed` | `Funded` → `Completed` |
 | `SettlementExecuted` | `settle` | `Completed` → `Settled` |
 | `ProofSubmitted` | `submit_proof` | none — reports the state it saw |
 | `ProofApproved` | `approve_proof` | none — reports the state it saw |
 | `ProofRejected` | `reject_proof` | none — reports the state it saw |
-| `AgreementCancelled` | `cancel` | `Open` → `Cancelled` |
+| `AgreementAbandoned` | `cancel` | `Open` → `Cancelled` |
 | `DisputeOpened` | `open_dispute` | `Funded`/`Completed` → `Disputed` |
 | `DisputeResolved` | `resolve_dispute` | none — the custody event beside it carries the transition |
 | `RefundExecuted` | `refund`, `resolve_dispute` | → `Refunded` |
@@ -156,7 +166,7 @@ gets a new event name and the old one keeps its layout until consumers migrate.
 
 There are deliberately no `InvoiceCreated` or `InvoicePaid` events: an invoice
 is a document carried by an ordinary escrow, and its creation and payment are
-already `AgreementCreated` and `SettlementExecuted`. Nor is there a
+already `AgreementOpened` and `SettlementExecuted`. Nor is there a
 `MilestoneFunded`: the budget is escrowed once for the
 whole contract, so no tranche is ever funded on its own. Each is added to the
 SDK decoder and the reputation contracts in the same change as the instruction,

@@ -88,24 +88,45 @@ test("malformed escrow events throw instead of decoding partially", () => {
   assert.throws(() => decodeEscrowEventData(badState), /unknown agreement state/);
 });
 
-test("an escrow event is never mistaken for a commerce event of the same name", () => {
-  // Anchor derives an event discriminator from the name alone, so
-  // ppv_commerce's AgreementCreated and ppv_escrow's share one. Event identity
-  // is the pair (program id, discriminator): the emitting program picks the
-  // decoder, and the shared decoder must never return a plausible-looking
-  // commerce event from escrow bytes.
+test("an escrow event is not a commerce event, by name and by discriminator", () => {
+  // Anchor derives an event discriminator from the name alone. ppv_escrow used
+  // to emit `AgreementCreated` and `AgreementCancelled`, as ppv_commerce does,
+  // so the two produced byte-identical prefixes over incompatible bodies —
+  // escrow bytes reached the commerce decoder and were mis-deserialized rather
+  // than merely misattributed. The escrow names moved, since ppv_commerce holds
+  // a permanent identity and nothing here is deployed.
   const encoded = encodeEscrowEvent(LIFECYCLE_FIXTURE[0]!);
   assert.equal(
-    escrowEventDiscriminatorHex("AgreementCreated"),
-    createHash("sha256").update("event:AgreementCreated").digest().subarray(0, 8).toString("hex"),
+    escrowEventDiscriminatorHex("AgreementOpened"),
+    createHash("sha256").update("event:AgreementOpened").digest().subarray(0, 8).toString("hex"),
   );
-  assert.throws(() => decodePpvEventData(encoded));
 
+  // The renamed events no longer produce the prefixes ppv_commerce owns.
+  for (const [escrowName, commerceName] of [
+    ["AgreementOpened", "AgreementCreated"],
+    ["AgreementAbandoned", "AgreementCancelled"],
+  ] as const) {
+    assert.notEqual(
+      escrowEventDiscriminatorHex(escrowName),
+      createHash("sha256")
+        .update(`event:${commerceName}`)
+        .digest()
+        .subarray(0, 8)
+        .toString("hex"),
+    );
+  }
+
+  // So escrow bytes are now simply unrecognised by the shared decoder — no
+  // longer a plausible commerce event that only the layout catches.
+  assert.equal(decodePpvEventData(encoded), null);
+  assert.equal(decodeEventForProgram("ppv_commerce", encoded), null);
+
+  // Program-scoped decoding is unchanged and still required: a collision-free
+  // protocol is defence in depth, not a reason to key on the discriminator.
   assert.deepEqual(decodeEventForProgram("ppv_escrow", encoded), {
     program: "ppv_escrow",
     event: LIFECYCLE_FIXTURE[0],
   });
-  assert.throws(() => decodeEventForProgram("ppv_commerce", encoded));
 });
 
 test("a commerce event decoded as escrow is refused, not reinterpreted", () => {

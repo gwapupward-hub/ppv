@@ -6,7 +6,7 @@ import { escrowReceiptFromEvent, type EscrowEventEnvelope } from "@gwap/ppv-sdk"
 import { ReceiptStore } from "../src/projections.js";
 import { extractEscrowEvents } from "../src/events.js";
 import {
-  CREATED_EVENT,
+  OPENED_EVENT,
   EVENT_AUTHORITY,
   FIXTURE_ADDRESSES,
   LIFECYCLE_FIXTURE,
@@ -76,7 +76,7 @@ test("one store holds many agreements and projects each separately", () => {
       transactionFor({
         signature: signatureFor(60),
         slot: 200,
-        events: [{ ...CREATED_EVENT, agreement: other, agreementId: 43n }],
+        events: [{ ...OPENED_EVENT, agreement: other, agreementId: 43n }],
       }),
       options,
     ),

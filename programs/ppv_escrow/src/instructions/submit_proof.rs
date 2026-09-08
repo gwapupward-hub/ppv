@@ -3,7 +3,7 @@ use anchor_lang::prelude::*;
 use crate::constants::{AGREEMENT_SEED, PROOF_SEED};
 use crate::errors::EscrowError;
 use crate::events::ProofSubmitted;
-use crate::state::{core_proof_id, Agreement, Proof, ProofStatus, PROOF_SCHEMA_VERSION};
+use crate::state::{core_proof_id, EscrowAgreement, Proof, ProofStatus, PROOF_SCHEMA_VERSION};
 
 /// Anchoring evidence, across the one program boundary PPV has.
 ///
@@ -39,7 +39,7 @@ pub struct SubmitProof<'info> {
         ],
         bump = agreement.bump,
     )]
-    pub agreement: Account<'info, Agreement>,
+    pub agreement: Account<'info, EscrowAgreement>,
     /// The index comes from the agreement's own counter rather than from the
     /// caller, so proof indices are dense and ordered, and two clients racing
     /// to submit cannot silently overwrite or skip one: the loser's

@@ -1,4 +1,4 @@
-import type { AgreementAccount } from "../escrow/accounts.js";
+import type { EscrowAgreementAccount } from "../escrow/accounts.js";
 import type { CommerceAgreementAccount } from "./accounts.js";
 
 /**
@@ -28,7 +28,7 @@ export type TermsBinding = {
 };
 
 export type TermsBindingInput = {
-  escrow: Pick<AgreementAccount, "creator" | "counterparty" | "termsHash">;
+  escrow: Pick<EscrowAgreementAccount, "creator" | "counterparty" | "termsHash">;
   contract: CommerceAgreementAccount;
 };
 

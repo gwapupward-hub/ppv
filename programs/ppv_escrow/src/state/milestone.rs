@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 
 use crate::errors::EscrowError;
-use crate::state::agreement::Agreement;
+use crate::state::agreement::EscrowAgreement;
 use crate::state::enums::MilestoneState;
 
 pub const MILESTONE_SCHEMA_VERSION: u8 = 1;
@@ -48,7 +48,7 @@ impl Milestone {
     /// moves no money.
     pub fn require_submittable(
         &self,
-        agreement: &Agreement,
+        agreement: &EscrowAgreement,
         agreement_key: &Pubkey,
         signer: &Pubkey,
     ) -> Result<()> {
@@ -66,7 +66,7 @@ impl Milestone {
     /// is about a fixed set of bytes and is final.
     pub fn require_decidable(
         &self,
-        agreement: &Agreement,
+        agreement: &EscrowAgreement,
         agreement_key: &Pubkey,
         signer: &Pubkey,
     ) -> Result<()> {
@@ -83,7 +83,7 @@ impl Milestone {
     /// may settle an agreement: the destination is the seller's regardless.
     pub fn require_settleable(
         &self,
-        agreement: &Agreement,
+        agreement: &EscrowAgreement,
         agreement_key: &Pubkey,
         signer: &Pubkey,
     ) -> Result<()> {
@@ -131,8 +131,8 @@ mod tests {
     use super::*;
     use crate::state::{AgreementState, AgreementType, AGREEMENT_SCHEMA_VERSION};
 
-    fn contract(buyer: Pubkey, seller: Pubkey, state: AgreementState) -> Agreement {
-        Agreement {
+    fn contract(buyer: Pubkey, seller: Pubkey, state: AgreementState) -> EscrowAgreement {
+        EscrowAgreement {
             schema_version: AGREEMENT_SCHEMA_VERSION,
             bump: 254,
             vault_authority_bump: 253,

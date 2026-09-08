@@ -8,7 +8,7 @@ use crate::events::{
     SettlementExecuted,
 };
 use crate::instructions::custody::pay_out_of_vault;
-use crate::state::{Agreement, Milestone, Proof, MILESTONE_SCHEMA_VERSION};
+use crate::state::{EscrowAgreement, Milestone, Proof, MILESTONE_SCHEMA_VERSION};
 
 #[event_cpi]
 #[derive(Accounts)]
@@ -24,7 +24,7 @@ pub struct CreateMilestone<'info> {
         ],
         bump = agreement.bump,
     )]
-    pub agreement: Account<'info, Agreement>,
+    pub agreement: Account<'info, EscrowAgreement>,
     /// As with proofs, the index comes from the agreement's own counter, so the
     /// schedule is dense and ordered and no client can leave a gap.
     #[account(
@@ -108,7 +108,7 @@ pub struct UpdateMilestone<'info> {
         ],
         bump = agreement.bump,
     )]
-    pub agreement: Account<'info, Agreement>,
+    pub agreement: Account<'info, EscrowAgreement>,
     #[account(
         mut,
         seeds = [
@@ -229,7 +229,7 @@ pub struct SettleMilestone<'info> {
         has_one = mint @ EscrowError::MintMismatch,
         has_one = vault @ EscrowError::CustodyMismatch,
     )]
-    pub agreement: Account<'info, Agreement>,
+    pub agreement: Account<'info, EscrowAgreement>,
     #[account(
         mut,
         seeds = [

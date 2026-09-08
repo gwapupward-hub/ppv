@@ -61,12 +61,12 @@ event for it would put weight on something that carries none.
 
 | Protocol event | Reputation event | Outcome |
 | --- | --- | --- |
-| `AgreementCreated` | `agreement.created` | recorded |
+| `AgreementOpened` | `agreement.created` | recorded |
 | `AgreementFunded` | `escrow.funded` | recorded |
 | `WorkCompleted` | `work.completed` | completed |
 | `SettlementExecuted` | `settlement.completed` | completed |
 | `RefundExecuted` | `agreement.refunded` | resolved_for_counterparty |
-| `AgreementCancelled` | `agreement.cancelled` | cancelled |
+| `AgreementAbandoned` | `agreement.cancelled` | cancelled |
 | `DisputeOpened` | `dispute.opened` | opened |
 | `DisputeResolved` | `dispute.resolved` | resolved_for_counterparty |
 | `ProofSubmitted` | `proof.created` | recorded |

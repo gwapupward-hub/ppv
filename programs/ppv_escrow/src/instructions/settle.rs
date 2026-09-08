@@ -5,7 +5,7 @@ use crate::constants::{AGREEMENT_SEED, VAULT_AUTHORITY_SEED, VAULT_TOKEN_SEED};
 use crate::errors::EscrowError;
 use crate::events::SettlementExecuted;
 use crate::instructions::custody::pay_out_of_vault;
-use crate::state::{Agreement, Proof};
+use crate::state::{EscrowAgreement, Proof};
 
 #[event_cpi]
 #[derive(Accounts)]
@@ -22,7 +22,7 @@ pub struct Settle<'info> {
         has_one = mint @ EscrowError::MintMismatch,
         has_one = vault @ EscrowError::CustodyMismatch,
     )]
-    pub agreement: Account<'info, Agreement>,
+    pub agreement: Account<'info, EscrowAgreement>,
     pub mint: Account<'info, Mint>,
     #[account(
         mut,

@@ -3,7 +3,7 @@ use anchor_lang::solana_program::hash::hashv;
 
 use crate::constants::CORE_PROOF_ID_DOMAIN;
 use crate::errors::EscrowError;
-use crate::state::agreement::Agreement;
+use crate::state::agreement::EscrowAgreement;
 
 pub const PROOF_SCHEMA_VERSION: u8 = 1;
 
@@ -102,7 +102,7 @@ impl Proof {
     /// authorization alone would not catch: both parties are authorized here.
     pub fn require_decidable(
         &self,
-        agreement: &Agreement,
+        agreement: &EscrowAgreement,
         agreement_key: &Pubkey,
         signer: &Pubkey,
     ) -> Result<()> {
@@ -139,8 +139,8 @@ mod tests {
     use super::*;
     use crate::state::{AgreementState, AgreementType, AGREEMENT_SCHEMA_VERSION};
 
-    fn agreement(buyer: Pubkey, seller: Pubkey, state: AgreementState) -> Agreement {
-        Agreement {
+    fn agreement(buyer: Pubkey, seller: Pubkey, state: AgreementState) -> EscrowAgreement {
+        EscrowAgreement {
             schema_version: AGREEMENT_SCHEMA_VERSION,
             bump: 254,
             vault_authority_bump: 253,

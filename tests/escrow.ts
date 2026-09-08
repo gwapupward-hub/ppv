@@ -342,7 +342,7 @@ describe("PPV escrow kernel", () => {
   describe("initialization", () => {
     it("creates a namespaced agreement and its own empty vault", async () => {
       const created = await initialize();
-      const account = await escrow.account.agreement.fetch(created.agreement);
+      const account = await escrow.account.escrowAgreement.fetch(created.agreement);
 
       assert.equal(account.creator.toBase58(), buyer.publicKey.toBase58());
       assert.equal(account.counterparty.toBase58(), seller.publicKey.toBase58());
@@ -383,7 +383,7 @@ describe("PPV escrow kernel", () => {
 
       assert.notEqual(mine.agreement.toBase58(), theirs.agreement.toBase58());
       assert.notEqual(mine.vault.toBase58(), theirs.vault.toBase58());
-      const account = await escrow.account.agreement.fetch(theirs.agreement);
+      const account = await escrow.account.escrowAgreement.fetch(theirs.agreement);
       assert.equal(account.creator.toBase58(), attacker.publicKey.toBase58());
     });
 
@@ -429,7 +429,7 @@ describe("PPV escrow kernel", () => {
       assert.equal(vault.amount, AMOUNT);
       assert.equal(before.amount - after.amount, AMOUNT);
 
-      const account = await escrow.account.agreement.fetch(agreement.agreement);
+      const account = await escrow.account.escrowAgreement.fetch(agreement.agreement);
       assert.ok("funded" in account.state);
       assert.ok(account.fundedAt.toNumber() > 0);
 
@@ -445,7 +445,7 @@ describe("PPV escrow kernel", () => {
       await expectAnchorError(fund(agreement, { signer: seller }), "NotTheBuyer");
       await expectAnchorError(fund(agreement, { signer: attacker }), "NotTheBuyer");
 
-      const account = await escrow.account.agreement.fetch(agreement.agreement);
+      const account = await escrow.account.escrowAgreement.fetch(agreement.agreement);
       assert.ok("open" in account.state);
     });
 
@@ -471,7 +471,7 @@ describe("PPV escrow kernel", () => {
         "SourceNotOwnedByBuyer",
       );
 
-      const account = await escrow.account.agreement.fetch(agreement.agreement);
+      const account = await escrow.account.escrowAgreement.fetch(agreement.agreement);
       assert.ok("open" in account.state, "no failed attempt advanced the state");
     });
 
@@ -483,7 +483,7 @@ describe("PPV escrow kernel", () => {
 
       const donated = await getAccount(connection, agreement.vault);
       assert.equal(donated.amount, AMOUNT);
-      const account = await escrow.account.agreement.fetch(agreement.agreement);
+      const account = await escrow.account.escrowAgreement.fetch(agreement.agreement);
       assert.ok("open" in account.state);
 
       // And a real funding still moves exactly the agreed amount on top of it.
@@ -502,7 +502,7 @@ describe("PPV escrow kernel", () => {
 
       const after = await getAccount(connection, agreement.vault);
       assert.equal(after.amount, before.amount, "completion is not settlement");
-      const account = await escrow.account.agreement.fetch(agreement.agreement);
+      const account = await escrow.account.escrowAgreement.fetch(agreement.agreement);
       assert.ok("completed" in account.state);
 
       const event = eventNamed(await eventsOf(signature), "workCompleted");
@@ -538,7 +538,7 @@ describe("PPV escrow kernel", () => {
       assert.equal(vault.amount, 0n);
       assert.equal(after.amount - before.amount, AMOUNT);
 
-      const account = await escrow.account.agreement.fetch(agreement.agreement);
+      const account = await escrow.account.escrowAgreement.fetch(agreement.agreement);
       assert.ok("settled" in account.state);
 
       const event = eventNamed(await eventsOf(signature), "settlementExecuted");
@@ -707,7 +707,7 @@ describe("PPV escrow kernel", () => {
 
     it("anchors evidence to the agreement without moving it", async () => {
       const agreement = await fundedAgreement();
-      const before = await escrow.account.agreement.fetch(agreement.agreement);
+      const before = await escrow.account.escrowAgreement.fetch(agreement.agreement);
       const vaultBefore = await getAccount(connection, agreement.vault);
 
       const signature = await submitProof(agreement);
@@ -739,7 +739,7 @@ describe("PPV escrow kernel", () => {
       assert.ok("active" in record.status);
 
       // A proof is a fact about the agreement, not a step in it.
-      const after = await escrow.account.agreement.fetch(agreement.agreement);
+      const after = await escrow.account.escrowAgreement.fetch(agreement.agreement);
       assert.deepEqual(after.state, before.state);
       assert.equal(after.proofCount, 1);
       const vaultAfter = await getAccount(connection, agreement.vault);
@@ -761,7 +761,7 @@ describe("PPV escrow kernel", () => {
         submitProof(agreement, { signer: attacker, index: 2 }),
         "NotAParty",
       );
-      const account = await escrow.account.agreement.fetch(agreement.agreement);
+      const account = await escrow.account.escrowAgreement.fetch(agreement.agreement);
       assert.equal(account.proofCount, 2, "a refused submission consumes no index");
     });
 
@@ -879,7 +879,7 @@ describe("PPV escrow kernel", () => {
 
     it("leaves no proof behind when the ppv_core call fails", async () => {
       const agreement = await fundedAgreement();
-      const before = await escrow.account.agreement.fetch(agreement.agreement);
+      const before = await escrow.account.escrowAgreement.fetch(agreement.agreement);
 
       // The submitter front-runs their own submission by taking the exact
       // address ppv_core would use. ppv_core's `init` then fails, and with it
@@ -909,7 +909,7 @@ describe("PPV escrow kernel", () => {
 
       await assert.rejects(submitProof(agreement));
 
-      const after = await escrow.account.agreement.fetch(agreement.agreement);
+      const after = await escrow.account.escrowAgreement.fetch(agreement.agreement);
       assert.equal(after.proofCount, before.proofCount, "the counter rolled back");
       assert.equal(
         await connection.getAccountInfo(
@@ -970,7 +970,7 @@ describe("PPV escrow kernel", () => {
 
       const vaultAfter = await getAccount(connection, agreement.vault);
       assert.equal(vaultAfter.amount, vaultBefore.amount, "approval is not payment");
-      const account = await escrow.account.agreement.fetch(agreement.agreement);
+      const account = await escrow.account.escrowAgreement.fetch(agreement.agreement);
       assert.ok("funded" in account.state, "approval is not a transition");
 
       const event = eventNamed(await eventsOf(signature), "proofApproved");
@@ -1037,7 +1037,7 @@ describe("PPV escrow kernel", () => {
       const proof = proofAddress(escrow.programId, agreement.agreement, 0);
       const signature = await settle(agreement, { settlementProof: proof });
 
-      const account = await escrow.account.agreement.fetch(agreement.agreement);
+      const account = await escrow.account.escrowAgreement.fetch(agreement.agreement);
       assert.ok("settled" in account.state);
       assert.equal(account.settlementProof.toBase58(), proof.toBase58());
 
@@ -1084,7 +1084,7 @@ describe("PPV escrow kernel", () => {
       // custody.
       const agreement = await completedAgreement();
       await settle(agreement);
-      const account = await escrow.account.agreement.fetch(agreement.agreement);
+      const account = await escrow.account.escrowAgreement.fetch(agreement.agreement);
       assert.equal(account.settlementProof.toBase58(), PublicKey.default.toBase58());
     });
   });
@@ -1154,7 +1154,7 @@ describe("PPV escrow kernel", () => {
       const agreement = await initialize();
       const signature = await cancel(agreement);
 
-      const account = await escrow.account.agreement.fetch(agreement.agreement);
+      const account = await escrow.account.escrowAgreement.fetch(agreement.agreement);
       assert.ok("cancelled" in account.state);
       const vault = await getAccount(connection, agreement.vault);
       assert.equal(vault.amount, 0n);
@@ -1180,7 +1180,7 @@ describe("PPV escrow kernel", () => {
       const agreement = await completedAgreement();
       const signature = await openDispute(agreement, seller);
 
-      const account = await escrow.account.agreement.fetch(agreement.agreement);
+      const account = await escrow.account.escrowAgreement.fetch(agreement.agreement);
       assert.ok("disputed" in account.state);
       assert.equal(account.disputeOpenedBy.toBase58(), seller.publicKey.toBase58());
 
@@ -1237,7 +1237,7 @@ describe("PPV escrow kernel", () => {
 
       const after = await getAccount(connection, sellerTokens);
       assert.equal(after.amount - before.amount, AMOUNT);
-      const account = await escrow.account.agreement.fetch(agreement.agreement);
+      const account = await escrow.account.escrowAgreement.fetch(agreement.agreement);
       assert.ok("settled" in account.state);
 
       const events = await eventsOf(signature);
@@ -1261,7 +1261,7 @@ describe("PPV escrow kernel", () => {
 
       const after = await getAccount(connection, buyerTokens);
       assert.equal(after.amount - before.amount, AMOUNT);
-      const account = await escrow.account.agreement.fetch(agreement.agreement);
+      const account = await escrow.account.escrowAgreement.fetch(agreement.agreement);
       assert.ok("refunded" in account.state);
 
       const events = await eventsOf(signature);
@@ -1316,7 +1316,7 @@ describe("PPV escrow kernel", () => {
 
       const after = await getAccount(connection, buyerTokens);
       assert.equal(after.amount - before.amount, AMOUNT);
-      const account = await escrow.account.agreement.fetch(agreement.agreement);
+      const account = await escrow.account.escrowAgreement.fetch(agreement.agreement);
       assert.ok("refunded" in account.state);
 
       const event = eventNamed(await eventsOf(signature), "refundExecuted");
@@ -1441,7 +1441,7 @@ describe("PPV escrow kernel", () => {
       assert.equal(milestone.amount.toString(), FIRST.toString());
       assert.ok("pending" in milestone.state);
 
-      const account = await escrow.account.agreement.fetch(agreement.agreement);
+      const account = await escrow.account.escrowAgreement.fetch(agreement.agreement);
       assert.equal(account.milestoneCount, 1);
       assert.equal(account.milestoneTotal.toString(), FIRST.toString());
       assert.ok("open" in account.state, "scheduling is not funding");
@@ -1499,7 +1499,7 @@ describe("PPV escrow kernel", () => {
       const vault = await getAccount(connection, agreement.vault);
       assert.equal(vault.amount, SECOND, "the unearned tranche stays escrowed");
 
-      const account = await escrow.account.agreement.fetch(agreement.agreement);
+      const account = await escrow.account.escrowAgreement.fetch(agreement.agreement);
       assert.ok("funded" in account.state, "one tranche does not finish the agreement");
       assert.equal(account.settledTotal.toString(), FIRST.toString());
       assert.equal(account.milestonesSettled, 1);
@@ -1523,7 +1523,7 @@ describe("PPV escrow kernel", () => {
         await settleMilestone(agreement, index);
       }
 
-      const account = await escrow.account.agreement.fetch(agreement.agreement);
+      const account = await escrow.account.escrowAgreement.fetch(agreement.agreement);
       assert.ok("settled" in account.state);
       assert.equal(account.settledTotal.toString(), AMOUNT.toString());
       const vault = await getAccount(connection, agreement.vault);
@@ -1669,13 +1669,13 @@ describe("PPV escrow kernel", () => {
       });
       await fund(bounty);
 
-      const funded = await escrow.account.agreement.fetch(bounty.agreement);
+      const funded = await escrow.account.escrowAgreement.fetch(bounty.agreement);
       assert.equal(funded.counterparty.toBase58(), PublicKey.default.toBase58());
       const vault = await getAccount(connection, bounty.vault);
       assert.equal(vault.amount, AMOUNT);
 
       const signature = await selectCounterparty(bounty, seller.publicKey);
-      const named = await escrow.account.agreement.fetch(bounty.agreement);
+      const named = await escrow.account.escrowAgreement.fetch(bounty.agreement);
       assert.equal(named.counterparty.toBase58(), seller.publicKey.toBase58());
       assert.ok("funded" in named.state, "naming a payee is not a step in the lifecycle");
 
@@ -1731,7 +1731,7 @@ describe("PPV escrow kernel", () => {
         selectCounterparty(bounty, attacker.publicKey),
         "CounterpartyAlreadyAssigned",
       );
-      const account = await escrow.account.agreement.fetch(bounty.agreement);
+      const account = await escrow.account.escrowAgreement.fetch(bounty.agreement);
       assert.equal(account.counterparty.toBase58(), seller.publicKey.toBase58());
     });
 
@@ -1846,7 +1846,7 @@ describe("PPV escrow kernel", () => {
       const settleSignature = await settle(agreement);
 
       const steps: Array<[string, string]> = [
-        [agreement.signature, "AgreementCreated"],
+        [agreement.signature, "AgreementOpened"],
         [fundSignature, "AgreementFunded"],
         [completeSignature, "WorkCompleted"],
         [settleSignature, "SettlementExecuted"],

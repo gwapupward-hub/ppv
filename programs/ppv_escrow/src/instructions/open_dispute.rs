@@ -3,7 +3,7 @@ use anchor_lang::prelude::*;
 use crate::constants::AGREEMENT_SEED;
 use crate::errors::EscrowError;
 use crate::events::DisputeOpened;
-use crate::state::Agreement;
+use crate::state::EscrowAgreement;
 
 /// Halting the normal path.
 ///
@@ -23,7 +23,7 @@ pub struct OpenDispute<'info> {
         ],
         bump = agreement.bump,
     )]
-    pub agreement: Account<'info, Agreement>,
+    pub agreement: Account<'info, EscrowAgreement>,
 }
 
 pub fn handle_open_dispute(ctx: Context<OpenDispute>, reason_hash: [u8; 32]) -> Result<()> {

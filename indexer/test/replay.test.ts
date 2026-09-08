@@ -43,7 +43,7 @@ test("an agreement's whole lifecycle is rebuilt from chain data alone", async ()
   assert.equal(result.lifecycle.lastSlot, 103);
   assert.deepEqual(
     result.lifecycle.receipts.map((receipt) => receipt.action),
-    ["AGREEMENT_CREATED", "AGREEMENT_FUNDED", "WORK_COMPLETED", "SETTLEMENT_EXECUTED"],
+    ["AGREEMENT_OPENED", "AGREEMENT_FUNDED", "WORK_COMPLETED", "SETTLEMENT_EXECUTED"],
   );
   assert.equal(result.transactionsScanned, 4);
   assert.equal(result.failedTransactionsSkipped, 0);

@@ -4,7 +4,7 @@ import test from "node:test";
 
 import {
   COMMERCE_AGREEMENT_DISCRIMINATOR,
-  AGREEMENT_ACCOUNT_DISCRIMINATOR,
+  ESCROW_AGREEMENT_ACCOUNT_DISCRIMINATOR,
   decodeCommerceAgreementAccount,
   decodeBase58,
   verifyTermsBinding,
@@ -106,17 +106,30 @@ test("a commerce agreement round-trips, signatures and all", () => {
   assert.deepEqual(decodeCommerceAgreementAccount(encodeCommerceAgreement(unsigned)), unsigned);
 });
 
-test("both programs call their account Agreement, so the discriminators collide", () => {
-  // The same collision the events have, for the same reason: Anchor derives it
-  // from the name. Account identity is (owning program, discriminator), and the
-  // caller has to know which program's account it fetched.
-  assert.deepEqual(
+test("the two agreement accounts no longer share a discriminator", () => {
+  // They did, because both were called `Agreement` and Anchor derives the
+  // discriminator from the name alone. Escrow's is `EscrowAgreement` now; the
+  // commerce name is fixed by its permanent identity and could not move.
+  assert.notDeepEqual(
     Buffer.from(COMMERCE_AGREEMENT_DISCRIMINATOR),
-    Buffer.from(AGREEMENT_ACCOUNT_DISCRIMINATOR),
+    Buffer.from(ESCROW_AGREEMENT_ACCOUNT_DISCRIMINATOR),
   );
   assert.deepEqual(
     Buffer.from(COMMERCE_AGREEMENT_DISCRIMINATOR),
     createHash("sha256").update("account:Agreement").digest().subarray(0, 8),
+  );
+  assert.deepEqual(
+    Buffer.from(ESCROW_AGREEMENT_ACCOUNT_DISCRIMINATOR),
+    createHash("sha256").update("account:EscrowAgreement").digest().subarray(0, 8),
+  );
+
+  // An escrow agreement is now refused by prefix rather than by length, so a
+  // caller that fetched the wrong program's account learns it immediately
+  // instead of at the end of a decode.
+  const escrowBytes = new Uint8Array(ESCROW_AGREEMENT_ACCOUNT_DISCRIMINATOR);
+  assert.throws(
+    () => decodeCommerceAgreementAccount(escrowBytes),
+    /not a ppv_commerce Agreement account/,
   );
 });
 

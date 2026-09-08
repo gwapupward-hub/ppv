@@ -12,7 +12,7 @@ import {
 import {
   CANCELLED_FIXTURE,
   COUNTERPARTY_ASSIGNED_FIXTURE,
-  CREATED_FIXTURE,
+  OPENED_FIXTURE,
   DISPUTE_FIXTURE,
   FIXTURE_ADDRESSES,
   LIFECYCLE_FIXTURE,
@@ -58,7 +58,7 @@ test("a receipt is a pure function of the transaction that produced it", () => {
 test("a receipt names the agreement, the parties, and the exact transition", () => {
   const [created, funded, completed, settled] = lifecycleReceipts();
 
-  assert.equal(created?.action, "AGREEMENT_CREATED");
+  assert.equal(created?.action, "AGREEMENT_OPENED");
   assert.equal(created?.agreement, FIXTURE_ADDRESSES.AGREEMENT);
   assert.equal(created?.agreementId, 42n);
   assert.equal(created?.previousState, null);
@@ -133,7 +133,7 @@ test("order comes from the state chain, not from the order of arrival", () => {
   const lifecycle = reconstructAgreementLifecycle([...receipts].reverse());
   assert.deepEqual(
     lifecycle.receipts.map((receipt) => receipt.action),
-    ["AGREEMENT_CREATED", "AGREEMENT_FUNDED", "WORK_COMPLETED", "SETTLEMENT_EXECUTED"],
+    ["AGREEMENT_OPENED", "AGREEMENT_FUNDED", "WORK_COMPLETED", "SETTLEMENT_EXECUTED"],
   );
   assert.equal(lifecycle.lastSlot, 1_003);
 });
@@ -239,7 +239,7 @@ test("a proof lands in the history where it happened, without breaking the chain
   assert.deepEqual(
     lifecycle.receipts.map((entry) => entry.action),
     [
-      "AGREEMENT_CREATED",
+      "AGREEMENT_OPENED",
       "AGREEMENT_FUNDED",
       "PROOF_SUBMITTED",
       "WORK_COMPLETED",
@@ -272,7 +272,7 @@ test("annotations are placed identically however they arrive", () => {
   assert.deepEqual(
     forwards.receipts.map((entry) => entry.action),
     [
-      "AGREEMENT_CREATED",
+      "AGREEMENT_OPENED",
       "AGREEMENT_FUNDED",
       "PROOF_SUBMITTED",
       "WORK_COMPLETED",
@@ -439,7 +439,7 @@ test("a conceded dispute rebuilds as a refund, with the concession recorded", ()
   assert.equal(lifecycle.settlementDestination, FIXTURE_ADDRESSES.BUYER_ATA);
   assert.deepEqual(
     lifecycle.receipts.map((entry) => entry.action),
-    ["AGREEMENT_CREATED", "AGREEMENT_FUNDED", "DISPUTE_OPENED", "REFUND_EXECUTED", "DISPUTE_RESOLVED"],
+    ["AGREEMENT_OPENED", "AGREEMENT_FUNDED", "DISPUTE_OPENED", "REFUND_EXECUTED", "DISPUTE_RESOLVED"],
   );
 });
 
@@ -575,7 +575,7 @@ test("a milestone step for a tranche that was never created is refused", () => {
 test("a bounty's history reports the payee it ended with", () => {
   // A bounty is created without one so applicants can see the money exists
   // before doing the work; the sponsor names the winner afterwards.
-  const anonymous = { ...CREATED_FIXTURE, counterparty: addressFromByte(0) };
+  const anonymous = { ...OPENED_FIXTURE, counterparty: addressFromByte(0) };
   const receipts = [
     escrowReceiptFromEvent(envelope(anonymous, 0)),
     escrowReceiptFromEvent(envelope(LIFECYCLE_FIXTURE[1]!, 1)),

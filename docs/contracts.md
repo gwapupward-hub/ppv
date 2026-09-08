@@ -31,7 +31,7 @@ canonical terms document
         │ SHA-256 (canonicalization v1)
         ▼
    terms_hash ──────────────┬──────────────> ppv_commerce.Agreement.terms_hash
-                            └──────────────> ppv_escrow.Agreement.terms_hash
+                            └──────────────> ppv_escrow.EscrowAgreement.terms_hash
 ```
 
 The escrow program's guarantee is narrow and strong: `terms_hash` is fixed at
@@ -69,7 +69,7 @@ upgrade authority in the path of every settlement.
 The commitment does the work instead. A wrong `terms_hash` cannot be fixed after
 the fact, and a client that checks the binding before funding knows exactly what
 it is funding. The one thing the on-chain record cannot do is *find* the contract
-for you: an indexer builds that map from `AgreementCreated` and
+for you: an indexer builds that map from `AgreementOpened` and
 `AgreementRevised` events, which name the hash of every version.
 
 ## Revisions

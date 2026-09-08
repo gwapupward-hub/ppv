@@ -174,10 +174,15 @@ committed, so an indexer can attribute an event without reading the account. The
 discriminators are pinned in each crate's unit tests and in
 `sdk/test/reputation-chain-events.test.ts` and `sdk/test/escrow-events.test.ts`.
 
-An Anchor event discriminator is derived from the event name alone, so
-`ppv_commerce` and `ppv_escrow` share one for `AgreementCreated`. Event identity
-is the pair (program id, discriminator); consumers decode through
-`decodeEventForProgram`. See [events.md](events.md).
+An Anchor discriminator is derived from the name alone, with no program id in
+the input, so two programs that pick the same name emit byte-identical prefixes
+over incompatible bodies. No two PPV programs share one:
+`scripts/test/discriminators.test.mjs` reads every program in the workspace and
+fails on any pair, for events and accounts alike.
+
+Identity is still the pair (program id, discriminator); consumers decode through
+`decodeEventForProgram`. A collision-free namespace is defence in depth, not a
+licence to key on the prefix. See [events.md](events.md).
 
 Events are facts (`AgreementExecuted`, `ProofRevoked`), never judgements.
 Reputation interpretation lives in GwapScore, downstream of the normalized

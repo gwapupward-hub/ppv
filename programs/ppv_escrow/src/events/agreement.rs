@@ -8,7 +8,7 @@ use crate::state::{AgreementState, AgreementType};
 // judgements: PPV records what happened, GwapScore decides what it means.
 
 #[event]
-pub struct AgreementCreated {
+pub struct AgreementOpened {
     pub agreement: Pubkey,
     pub agreement_id: u64,
     pub creator: Pubkey,
@@ -49,7 +49,7 @@ pub struct WorkCompleted {
 /// An agreement abandoned before it was ever funded. There is no custody event
 /// beside it because there was no custody.
 #[event]
-pub struct AgreementCancelled {
+pub struct AgreementAbandoned {
     pub agreement: Pubkey,
     pub creator: Pubkey,
     pub counterparty: Pubkey,

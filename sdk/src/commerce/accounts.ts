@@ -56,10 +56,16 @@ function readSignature(reader: BorshReader): CommerceSignature | null {
 }
 
 /**
- * `ppv_commerce` and `ppv_escrow` both call their account `Agreement`, so both
- * discriminators are identical — the same collision the events have, for the
- * same reason. Account identity is the pair (owning program, discriminator),
- * and the caller has to know which program's account it fetched.
+ * `ppv_commerce`'s account is `Agreement`; `ppv_escrow`'s is `EscrowAgreement`.
+ * They used to share a name, and therefore a discriminator, because Anchor
+ * derives one from the name alone — so escrow bytes reached this decoder and
+ * were rejected only by their length. The escrow side renamed, since
+ * `ppv_commerce` holds a permanent identity and nothing in escrow is deployed.
+ *
+ * Account identity is still the pair (owning program, discriminator): a
+ * discriminator says what an account claims to be, and only its owner says
+ * whose it is. `scripts/test/discriminators.test.mjs` fails if any two programs
+ * pick the same name again.
  */
 export function decodeCommerceAgreementAccount(data: Uint8Array): CommerceAgreementAccount {
   if (!bytesEqual(data.subarray(0, 8), COMMERCE_AGREEMENT_DISCRIMINATOR)) {

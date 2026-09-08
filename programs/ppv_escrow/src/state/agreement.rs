@@ -9,7 +9,7 @@ pub const AGREEMENT_SCHEMA_VERSION: u8 = 1;
 /// authority, its own vault. Nothing here is shared between agreements.
 #[account]
 #[derive(InitSpace)]
-pub struct Agreement {
+pub struct EscrowAgreement {
     pub schema_version: u8,
     pub bump: u8,
     pub vault_authority_bump: u8,
@@ -60,7 +60,7 @@ pub struct Agreement {
     pub reserved: [u8; 40],
 }
 
-impl Agreement {
+impl EscrowAgreement {
     pub fn buyer(&self) -> Pubkey {
         self.creator
     }
@@ -385,8 +385,8 @@ mod tests {
 
     const TERMS: [u8; 32] = [9; 32];
 
-    fn open(buyer: Pubkey, seller: Pubkey) -> Agreement {
-        Agreement {
+    fn open(buyer: Pubkey, seller: Pubkey) -> EscrowAgreement {
+        EscrowAgreement {
             schema_version: AGREEMENT_SCHEMA_VERSION,
             bump: 254,
             vault_authority_bump: 253,

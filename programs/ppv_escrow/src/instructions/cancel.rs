@@ -1,8 +1,8 @@
 use anchor_lang::prelude::*;
 
 use crate::constants::AGREEMENT_SEED;
-use crate::events::AgreementCancelled;
-use crate::state::Agreement;
+use crate::events::AgreementAbandoned;
+use crate::state::EscrowAgreement;
 
 /// Abandoning an agreement nobody funded.
 ///
@@ -24,7 +24,7 @@ pub struct Cancel<'info> {
         ],
         bump = agreement.bump,
     )]
-    pub agreement: Account<'info, Agreement>,
+    pub agreement: Account<'info, EscrowAgreement>,
 }
 
 pub fn handle_cancel(ctx: Context<Cancel>) -> Result<()> {
@@ -35,7 +35,7 @@ pub fn handle_cancel(ctx: Context<Cancel>) -> Result<()> {
     let agreement = &mut ctx.accounts.agreement;
     let previous_state = agreement.record_cancelled(now);
 
-    emit_cpi!(AgreementCancelled {
+    emit_cpi!(AgreementAbandoned {
         agreement: agreement.key(),
         creator: agreement.creator,
         counterparty: agreement.counterparty,

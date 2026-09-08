@@ -17,22 +17,28 @@ import type {
  *   [8 bytes event-instruction tag][8 bytes event discriminator][borsh fields]
  *
  * Event identity is the pair (program id, discriminator), never the
- * discriminator alone. `ppv_commerce` also emits an `AgreementCreated` — a
- * different fact with a different layout — and the two share a discriminator
- * because Anchor derives it from the name. That is why this decoder is a
- * separate entry point rather than more cases in the shared one: an indexer
- * must select the decoder by the program id the inner instruction targeted.
+ * discriminator alone. No PPV program shares an event name with another — the
+ * escrow kernel's `AgreementCreated` and `AgreementCancelled` were renamed to
+ * `AgreementOpened` and `AgreementAbandoned` for exactly that reason, since
+ * Anchor derives the discriminator from the name and `ppv_commerce` had those
+ * two first. `scripts/test/discriminators.test.mjs` fails if a new one appears.
+ *
+ * That is defence in depth, not a licence to key on the discriminator alone.
+ * This decoder stays a separate entry point rather than more cases in the
+ * shared one: an indexer must still select the decoder by the program id the
+ * inner instruction targeted, because event identity is the pair (program id,
+ * discriminator) and only the program id is authoritative.
  */
 
 export const PPV_ESCROW_EVENT_NAMES = [
-  "AgreementCreated",
+  "AgreementOpened",
   "AgreementFunded",
   "WorkCompleted",
   "SettlementExecuted",
   "ProofSubmitted",
   "ProofApproved",
   "ProofRejected",
-  "AgreementCancelled",
+  "AgreementAbandoned",
   "DisputeOpened",
   "DisputeResolved",
   "RefundExecuted",
@@ -47,8 +53,8 @@ export type PpvEscrowEventName = (typeof PPV_ESCROW_EVENT_NAMES)[number];
 
 type Base = { program: "ppv_escrow"; agreement: string; timestamp: number };
 
-export type EscrowAgreementCreatedEvent = Base & {
-  name: "AgreementCreated";
+export type EscrowAgreementOpenedEvent = Base & {
+  name: "AgreementOpened";
   agreementId: bigint;
   creator: string;
   counterparty: string;
@@ -133,8 +139,8 @@ type ProofDecision = Base & {
 export type EscrowProofApprovedEvent = ProofDecision & { name: "ProofApproved" };
 export type EscrowProofRejectedEvent = ProofDecision & { name: "ProofRejected" };
 
-export type EscrowAgreementCancelledEvent = Base & {
-  name: "AgreementCancelled";
+export type EscrowAgreementAbandonedEvent = Base & {
+  name: "AgreementAbandoned";
   creator: string;
   counterparty: string;
   cancelledBy: string;
@@ -222,14 +228,14 @@ export type EscrowCounterpartyAssignedEvent = Base & {
 };
 
 export type PpvEscrowEvent =
-  | EscrowAgreementCreatedEvent
+  | EscrowAgreementOpenedEvent
   | EscrowAgreementFundedEvent
   | EscrowWorkCompletedEvent
   | EscrowSettlementExecutedEvent
   | EscrowProofSubmittedEvent
   | EscrowProofApprovedEvent
   | EscrowProofRejectedEvent
-  | EscrowAgreementCancelledEvent
+  | EscrowAgreementAbandonedEvent
   | EscrowDisputeOpenedEvent
   | EscrowDisputeResolvedEvent
   | EscrowRefundExecutedEvent
@@ -277,10 +283,10 @@ export function decodeEscrowEventData(data: Uint8Array): PpvEscrowEvent | null {
   const reader = new BorshReader(data.subarray(16));
   let event: PpvEscrowEvent;
   switch (match.name) {
-    case "AgreementCreated":
+    case "AgreementOpened":
       event = {
         program: "ppv_escrow",
-        name: "AgreementCreated",
+        name: "AgreementOpened",
         agreement: reader.pubkey(),
         agreementId: reader.u64(),
         creator: reader.pubkey(),
@@ -372,10 +378,10 @@ export function decodeEscrowEventData(data: Uint8Array): PpvEscrowEvent | null {
         timestamp: reader.i64(),
       };
       break;
-    case "AgreementCancelled":
+    case "AgreementAbandoned":
       event = {
         program: "ppv_escrow",
-        name: "AgreementCancelled",
+        name: "AgreementAbandoned",
         agreement: reader.pubkey(),
         creator: reader.pubkey(),
         counterparty: reader.pubkey(),

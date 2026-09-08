@@ -28,14 +28,14 @@ const ID_HEX_LENGTH = 40;
 export const ESCROW_RECEIPT_SCHEMA_VERSION = 1;
 
 export const ESCROW_RECEIPT_ACTIONS = {
-  AgreementCreated: "AGREEMENT_CREATED",
+  AgreementOpened: "AGREEMENT_OPENED",
   AgreementFunded: "AGREEMENT_FUNDED",
   WorkCompleted: "WORK_COMPLETED",
   SettlementExecuted: "SETTLEMENT_EXECUTED",
   ProofSubmitted: "PROOF_SUBMITTED",
   ProofApproved: "PROOF_APPROVED",
   ProofRejected: "PROOF_REJECTED",
-  AgreementCancelled: "AGREEMENT_CANCELLED",
+  AgreementAbandoned: "AGREEMENT_ABANDONED",
   DisputeOpened: "DISPUTE_OPENED",
   DisputeResolved: "DISPUTE_RESOLVED",
   RefundExecuted: "REFUND_EXECUTED",
@@ -180,7 +180,7 @@ function buildReceipt(envelope: EscrowEventEnvelope): Omit<PpvEscrowReceiptV1, "
   };
 
   switch (event.name) {
-    case "AgreementCreated":
+    case "AgreementOpened":
       return {
         ...common,
         agreementId: event.agreementId,
@@ -323,7 +323,7 @@ function buildReceipt(envelope: EscrowEventEnvelope): Omit<PpvEscrowReceiptV1, "
         previousState: event.agreementState,
         newState: event.agreementState,
       };
-    case "AgreementCancelled":
+    case "AgreementAbandoned":
       return {
         ...common,
         agreementId: 0n,

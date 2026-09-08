@@ -4,7 +4,7 @@ use anchor_spl::token::{self, Mint, Token, TokenAccount, TransferChecked};
 use crate::constants::{AGREEMENT_SEED, VAULT_TOKEN_SEED};
 use crate::errors::EscrowError;
 use crate::events::AgreementFunded;
-use crate::state::Agreement;
+use crate::state::EscrowAgreement;
 
 #[event_cpi]
 #[derive(Accounts)]
@@ -21,7 +21,7 @@ pub struct Fund<'info> {
         has_one = mint @ EscrowError::MintMismatch,
         has_one = vault @ EscrowError::CustodyMismatch,
     )]
-    pub agreement: Account<'info, Agreement>,
+    pub agreement: Account<'info, EscrowAgreement>,
     pub mint: Account<'info, Mint>,
     /// The canonical vault. Re-deriving it from the agreement address makes a
     /// substituted vault a seeds failure rather than a balance surprise.

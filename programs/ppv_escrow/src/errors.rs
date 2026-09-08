@@ -16,7 +16,7 @@ pub enum EscrowError {
     NotTheSeller,
     #[msg("Signer is not a party to this agreement")]
     NotAParty,
-    #[msg("Agreement is not in a valid state for this instruction")]
+    #[msg("EscrowAgreement is not in a valid state for this instruction")]
     BadState,
     #[msg("Account does not use the agreement mint")]
     MintMismatch,

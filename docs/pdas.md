@@ -29,7 +29,7 @@ deployment artifact regenerated per environment.
 
 | Account | Seeds | Notes |
 | --- | --- | --- |
-| Agreement | `["agreement", creator, agreement_id_le_u64]` | Creator in the seeds: the same number under a different creator is a different agreement. |
+| EscrowAgreement | `["agreement", creator, agreement_id_le_u64]` | Creator in the seeds: the same number under a different creator is a different agreement. |
 | Vault authority | `["vault", agreement]` | One authority per agreement. No global authority exists to compromise. |
 | Vault (token account) | `["vault_token", agreement]` | Owned by the vault authority, fixed to the agreement's mint at creation. |
 | Proof (decision) | `["proof", agreement, proof_index_le_u32]` | The index is the agreement's own counter, not a client's choice. Holds no content hash — see the ppv_core record below. |

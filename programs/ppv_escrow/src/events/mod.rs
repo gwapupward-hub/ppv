@@ -27,10 +27,7 @@ mod tests {
 
     #[test]
     fn event_discriminators_are_pinned() {
-        assert_eq!(
-            AgreementCreated::DISCRIMINATOR,
-            expected("AgreementCreated")
-        );
+        assert_eq!(AgreementOpened::DISCRIMINATOR, expected("AgreementOpened"));
         assert_eq!(AgreementFunded::DISCRIMINATOR, expected("AgreementFunded"));
         assert_eq!(WorkCompleted::DISCRIMINATOR, expected("WorkCompleted"));
         assert_eq!(
@@ -41,8 +38,8 @@ mod tests {
         assert_eq!(ProofApproved::DISCRIMINATOR, expected("ProofApproved"));
         assert_eq!(ProofRejected::DISCRIMINATOR, expected("ProofRejected"));
         assert_eq!(
-            AgreementCancelled::DISCRIMINATOR,
-            expected("AgreementCancelled")
+            AgreementAbandoned::DISCRIMINATOR,
+            expected("AgreementAbandoned")
         );
         assert_eq!(DisputeOpened::DISCRIMINATOR, expected("DisputeOpened"));
         assert_eq!(DisputeResolved::DISCRIMINATOR, expected("DisputeResolved"));
@@ -69,16 +66,27 @@ mod tests {
         );
     }
 
-    // `ppv_commerce` emits an `AgreementCreated` too, and Anchor derives the
-    // discriminator from the name alone, so the two are byte-identical. This
-    // pins that fact rather than leaving it to be discovered by an indexer:
-    // event identity is (program id, discriminator), and the SDK decodes
-    // through `decodeEventForProgram`.
+    // Anchor derives an event discriminator from the name alone, so two PPV
+    // programs sharing an event name emit byte-identical prefixes over
+    // incompatible bodies — a decoder keying on the prefix does not merely
+    // misattribute the event, it mis-deserializes it.
+    //
+    // `ppv_commerce` emitted `AgreementCreated` and `AgreementCancelled`, and
+    // so did this program. `ppv_commerce` carries a permanent identity and is
+    // frozen for its first deployment, so the escrow kernel is the side that
+    // moved: nothing is deployed here, and the rename costs nothing.
+    //
+    // Program-scoped decoding is still how an indexer must read events, and
+    // `decodeEventForProgram` still enforces it — a collision-free protocol is
+    // a defence in depth, not a reason to key on the discriminator alone.
+    // `scripts/test/discriminators.test.mjs` checks all three programs at once;
+    // these two assertions pin the specific names that were wrong.
     #[test]
-    fn agreement_created_shares_a_discriminator_with_commerce() {
-        assert_eq!(
-            AgreementCreated::DISCRIMINATOR,
-            expected("AgreementCreated")
+    fn the_renamed_events_no_longer_collide_with_ppv_commerce() {
+        assert_ne!(AgreementOpened::DISCRIMINATOR, expected("AgreementCreated"));
+        assert_ne!(
+            AgreementAbandoned::DISCRIMINATOR,
+            expected("AgreementCancelled")
         );
     }
 
@@ -187,7 +195,7 @@ mod tests {
 
     #[test]
     fn creation_layout_is_pinned() {
-        let event = AgreementCreated {
+        let event = AgreementOpened {
             agreement: Pubkey::new_from_array([5; 32]),
             agreement_id: 42,
             creator: Pubkey::new_from_array([1; 32]),

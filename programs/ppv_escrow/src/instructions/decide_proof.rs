@@ -2,7 +2,7 @@ use anchor_lang::prelude::*;
 
 use crate::constants::{AGREEMENT_SEED, PROOF_SEED};
 use crate::events::{ProofApproved, ProofRejected};
-use crate::state::{Agreement, Proof, ProofStatus};
+use crate::state::{EscrowAgreement, Proof, ProofStatus};
 
 /// Approval and rejection are the same authorization and the same state gate,
 /// differing only in the decision recorded. They share one accounts struct so
@@ -19,7 +19,7 @@ pub struct DecideProof<'info> {
         ],
         bump = agreement.bump,
     )]
-    pub agreement: Account<'info, Agreement>,
+    pub agreement: Account<'info, EscrowAgreement>,
     #[account(
         mut,
         seeds = [

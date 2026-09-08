@@ -7,8 +7,8 @@ import type {
   ProofStatus,
 } from "./states.js";
 
-/** Mirrors `Agreement` in `programs/ppv_escrow/src/state/agreement.rs`. */
-export type AgreementAccount = {
+/** Mirrors `EscrowAgreement` in `programs/ppv_escrow/src/state/agreement.rs`. */
+export type EscrowAgreementAccount = {
   schemaVersion: number;
   bump: number;
   vaultAuthorityBump: number;
@@ -42,18 +42,18 @@ export type AgreementAccount = {
   settledTotal: bigint;
 };
 
-export const AGREEMENT_ACCOUNT_DISCRIMINATOR = anchorDiscriminator("account", "Agreement");
+export const ESCROW_AGREEMENT_ACCOUNT_DISCRIMINATOR = anchorDiscriminator("account", "EscrowAgreement");
 
 /** 8 discriminator + 4 bumps + 2 keys + u64 + type + 2 keys + u64 + hash + state + 4 times + proof count + reserved. */
-export const AGREEMENT_ACCOUNT_SIZE =
+export const ESCROW_AGREEMENT_ACCOUNT_SIZE =
   8 + 4 + 32 * 2 + 8 + 1 + 32 * 2 + 8 + 32 + 1 + 8 * 4 + 4 + 32 + 32 + 8 + 4 * 2 + 8 * 2 + 40;
 
-export function decodeAgreementAccount(data: Uint8Array): AgreementAccount {
-  if (!bytesEqual(data.subarray(0, 8), AGREEMENT_ACCOUNT_DISCRIMINATOR)) {
-    throw new RangeError("not a ppv_escrow Agreement account");
+export function decodeEscrowAgreementAccount(data: Uint8Array): EscrowAgreementAccount {
+  if (!bytesEqual(data.subarray(0, 8), ESCROW_AGREEMENT_ACCOUNT_DISCRIMINATOR)) {
+    throw new RangeError("not a ppv_escrow EscrowAgreement account");
   }
   const reader = new BorshReader(data.subarray(8));
-  const account: AgreementAccount = {
+  const account: EscrowAgreementAccount = {
     schemaVersion: reader.u8(),
     bump: reader.u8(),
     vaultAuthorityBump: reader.u8(),
