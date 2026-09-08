@@ -84,6 +84,22 @@ populate it, so adding proofs moved no byte for existing consumers.
 their discriminator, so a consumer never reconciles two layouts for one kind of
 fact, and never has to guess which decision it is reading.
 
+### Proof events span two programs
+
+`submit_proof` mints the commitment in `ppv_core`, so one submission emits two
+events in one transaction: `ppv_core::ProofCreated` and
+`ppv_escrow::ProofSubmitted`. Both name the same `ppv_core` record —
+`ProofCreated.proof` and `ProofSubmitted.core_proof` — and that address is the
+join. Decode each by its emitting program id, as ever.
+
+`ProofSubmitted` repeats `content_hash` and `metadata_hash` because the
+instruction received them as arguments; an event is a projection, and repeating
+a value minted atomically alongside it saves an indexer a cross-program read.
+The decision events carry no hash: a decision is about a proof, and the hash is
+an attribute of the proof, reachable through `core_proof`. The escrow `Proof`
+account stores no hash at all — that is where a second copy would have been a
+second source of truth.
+
 ## Reading events back
 
 Decoding bytes is not the same as accepting history. An indexer must also

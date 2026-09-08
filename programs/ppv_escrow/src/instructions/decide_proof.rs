@@ -51,30 +51,30 @@ fn decide(ctx: Context<DecideProof>, status: ProofStatus) -> Result<()> {
     let proof_key = proof.key();
     let proof_index = proof.proof_index;
     let submitter = proof.submitter;
-    let content_hash = proof.content_hash;
+    let core_proof = proof.core_proof;
 
     match status {
         ProofStatus::Approved => emit_cpi!(ProofApproved {
             agreement: agreement_key,
             proof: proof_key,
+            core_proof,
             creator,
             counterparty,
             submitter,
             decided_by: decider,
             proof_index,
-            content_hash,
             agreement_state,
             timestamp: now,
         }),
         ProofStatus::Rejected => emit_cpi!(ProofRejected {
             agreement: agreement_key,
             proof: proof_key,
+            core_proof,
             creator,
             counterparty,
             submitter,
             decided_by: decider,
             proof_index,
-            content_hash,
             agreement_state,
             timestamp: now,
         }),

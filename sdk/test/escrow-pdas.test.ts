@@ -3,11 +3,15 @@ import test from "node:test";
 
 import { Keypair, PublicKey } from "@solana/web3.js";
 
+import { createHash } from "node:crypto";
+
 import {
   PdaError,
+  coreProofId,
   createProgramAddress,
   deriveAgreement,
   deriveAgreementAddresses,
+  deriveCoreProof,
   deriveProof,
   isOnCurve,
 } from "../src/index.js";
@@ -131,4 +135,70 @@ test("a proof address is bound to its agreement and index", () => {
 
   assert.throws(() => deriveProof(program.toBase58(), agreement.toBase58(), -1), PdaError);
   assert.throws(() => deriveProof(program.toBase58(), agreement.toBase58(), 2 ** 32), PdaError);
+});
+
+test("the core proof id mirrors the program's derivation", () => {
+  const agreement = Keypair.generate().publicKey;
+  const reference = createHash("sha256")
+    .update(Buffer.from("ppv:escrow:core-proof:v1"))
+    .update(agreement.toBuffer())
+    .update(Buffer.from([3, 0, 0, 0]))
+    .digest()
+    .subarray(0, 16);
+
+  assert.deepEqual(Buffer.from(coreProofId(agreement.toBase58(), 3)), reference);
+  assert.equal(coreProofId(agreement.toBase58(), 3).length, 16, "ppv_core proof ids are 16 bytes");
+
+  // Domain-separated, so an id minted through an agreement can never collide
+  // with one a wallet chose for itself over the same inputs.
+  const undomained = createHash("sha256")
+    .update(agreement.toBuffer())
+    .update(Buffer.from([3, 0, 0, 0]))
+    .digest()
+    .subarray(0, 16);
+  assert.notDeepEqual(Buffer.from(coreProofId(agreement.toBase58(), 3)), undomained);
+});
+
+test("a core proof address is a ppv_core PDA keyed by submitter, agreement and index", () => {
+  const corePid = Keypair.generate().publicKey;
+  const escrowPid = Keypair.generate().publicKey;
+  const submitter = Keypair.generate().publicKey;
+  const agreement = Keypair.generate().publicKey;
+
+  const [reference, referenceBump] = PublicKey.findProgramAddressSync(
+    [Buffer.from("proof"), submitter.toBytes(), Buffer.from(coreProofId(agreement.toBase58(), 0))],
+    corePid,
+  );
+  const derived = deriveCoreProof(
+    corePid.toBase58(),
+    submitter.toBase58(),
+    agreement.toBase58(),
+    0,
+  );
+  assert.equal(derived.address, reference.toBase58());
+  assert.equal(derived.bump, referenceBump);
+
+  // Derived under ppv_core, never under ppv_escrow: the commitment is
+  // ppv_core's account and only ppv_core can create it.
+  assert.notEqual(
+    deriveCoreProof(escrowPid.toBase58(), submitter.toBase58(), agreement.toBase58(), 0).address,
+    derived.address,
+  );
+
+  // ppv_core keys proofs by authority too, so two parties submitting under the
+  // same agreement and index occupy two distinct records.
+  const other = Keypair.generate().publicKey;
+  assert.notEqual(
+    deriveCoreProof(corePid.toBase58(), other.toBase58(), agreement.toBase58(), 0).address,
+    derived.address,
+  );
+  assert.notEqual(
+    deriveCoreProof(corePid.toBase58(), submitter.toBase58(), agreement.toBase58(), 1).address,
+    derived.address,
+  );
+
+  assert.throws(
+    () => deriveCoreProof(corePid.toBase58(), submitter.toBase58(), agreement.toBase58(), -1),
+    PdaError,
+  );
 });

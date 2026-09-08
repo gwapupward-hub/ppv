@@ -157,7 +157,11 @@ function mapEscrowEvent(event: PpvEscrowEvent): Mapped | null {
         amount: null,
         mint: null,
         milestoneIndex: null,
-        ppvProofId: event.proof,
+        // The ppv_core record, not ppv_escrow's decision account. A receipt's
+        // `ppvProofId` is resolved against ppv_core semantics — it is checked
+        // for revocation, and only ppv_core proofs can be revoked — so the
+        // escrow-side address was never the right thing to put here.
+        ppvProofId: event.coreProof,
         proofHash: event.contentHash,
       };
     case "ProofApproved":
@@ -170,8 +174,11 @@ function mapEscrowEvent(event: PpvEscrowEvent): Mapped | null {
         amount: null,
         mint: null,
         milestoneIndex: null,
-        ppvProofId: event.proof,
-        proofHash: event.contentHash,
+        ppvProofId: event.coreProof,
+        // A decision event carries no hash; it is an attribute of the proof,
+        // available on the ppv_core record at `ppvProofId` and on the
+        // `proof.created` receipt for the same id.
+        proofHash: null,
       };
     case "MilestoneCreated":
       return {

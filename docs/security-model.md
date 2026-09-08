@@ -18,6 +18,10 @@ records the questions asked of each one and the attacks the suite actually runs.
 | Can a terminal state reopen? | No. No instruction accepts `Settled`. |
 | Can event history disagree with state? | No. Events are emitted after the state write, in the same transaction. |
 | Can an indexer be tricked into a fake receipt? | No. Receipts derive only from committed events and chain coordinates. |
+| Can a caller choose which program `submit_proof` calls? | No. `Program<'info, PpvCore>` is an address check on `ppv_core::ID`, so the CPI target is not an account the client supplies. |
+| Can a caller choose where the commitment is written? | No. The `proof_id` is derived from the agreement and index, and the address is re-derived and asserted before the CPI. |
+| Can `ppv_escrow` sign for evidence it did not submit? | No. It signs for no PDA in the CPI. The submitter's own signature crosses the boundary, so `ppv_core` records the wallet that committed. |
+| Can escrow state outlive a failed `ppv_core` call? | No. The proof account and the incremented counter are written before the CPI, and unwind with it. |
 
 ## Ordering rule
 
@@ -100,6 +104,11 @@ cases in `programs/ppv_escrow/src/state/agreement.rs`.
 | Start a non-bounty agreement with no payee | FAIL | ✓ |
 | Observe an event from a failed settlement | FAIL | ✓ |
 | Take a donated surplus along with settlement | FAIL | ✓ |
+| Anchor evidence to a funded agreement | PASS | ✓ |
+| Point `submit_proof` at another agreement's core proof address | FAIL | ✓ |
+| Point `submit_proof` at an attacker-controlled account as the core proof | FAIL | ✓ |
+| Route the proof CPI to any program but `ppv_core` | FAIL | ✓ |
+| Leave an escrow proof behind when `ppv_core` rejects the call | FAIL | ✓ |
 
 ## Deliberate vulnerability testing
 

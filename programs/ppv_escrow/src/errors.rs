@@ -62,4 +62,6 @@ pub enum EscrowError {
     VaultAlreadyInitialized,
     #[msg("Arithmetic overflow")]
     Overflow,
+    #[msg("Core proof account is not the address this agreement and index derive")]
+    CoreProofMismatch,
 }

@@ -96,6 +96,12 @@ export type EscrowSettlementExecutedEvent = Base & {
 export type EscrowProofSubmittedEvent = Base & {
   name: "ProofSubmitted";
   proof: string;
+  /**
+   * The `ppv_core` ProofRecord minted by the same instruction. That account,
+   * not this event and not ppv_escrow's Proof account, is where the commitment
+   * lives and where a revocation would be recorded.
+   */
+  coreProof: string;
   creator: string;
   counterparty: string;
   submitter: string;
@@ -106,15 +112,21 @@ export type EscrowProofSubmittedEvent = Base & {
   agreementState: AgreementState;
 };
 
-/** Approval and rejection carry identical fields; only the name differs. */
+/**
+ * Approval and rejection carry identical fields; only the name differs.
+ *
+ * No `contentHash`: a decision is about a proof, and the hash is an attribute
+ * of the proof. Read it from the `ppv_core` record at `coreProof`, or from the
+ * `ProofSubmitted` event that created it.
+ */
 type ProofDecision = Base & {
   proof: string;
+  coreProof: string;
   creator: string;
   counterparty: string;
   submitter: string;
   decidedBy: string;
   proofIndex: number;
-  contentHash: string;
   agreementState: AgreementState;
 };
 
@@ -332,6 +344,7 @@ export function decodeEscrowEventData(data: Uint8Array): PpvEscrowEvent | null {
         name: "ProofSubmitted",
         agreement: reader.pubkey(),
         proof: reader.pubkey(),
+        coreProof: reader.pubkey(),
         creator: reader.pubkey(),
         counterparty: reader.pubkey(),
         submitter: reader.pubkey(),
@@ -349,12 +362,12 @@ export function decodeEscrowEventData(data: Uint8Array): PpvEscrowEvent | null {
         name: match.name,
         agreement: reader.pubkey(),
         proof: reader.pubkey(),
+        coreProof: reader.pubkey(),
         creator: reader.pubkey(),
         counterparty: reader.pubkey(),
         submitter: reader.pubkey(),
         decidedBy: reader.pubkey(),
         proofIndex: reader.u32(),
-        contentHash: reader.hex(32),
         agreementState: reader.state(),
         timestamp: reader.i64(),
       };

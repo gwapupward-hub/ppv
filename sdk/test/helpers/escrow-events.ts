@@ -145,6 +145,7 @@ export function encodeEscrowEvent(event: PpvEscrowEvent): Uint8Array {
       body = Buffer.concat([
         pubkey(event.agreement),
         pubkey(event.proof),
+        pubkey(event.coreProof),
         pubkey(event.creator),
         pubkey(event.counterparty),
         pubkey(event.submitter),
@@ -160,12 +161,12 @@ export function encodeEscrowEvent(event: PpvEscrowEvent): Uint8Array {
       body = Buffer.concat([
         pubkey(event.agreement),
         pubkey(event.proof),
+        pubkey(event.coreProof),
         pubkey(event.creator),
         pubkey(event.counterparty),
         pubkey(event.submitter),
         pubkey(event.decidedBy),
         u32(event.proofIndex),
-        Buffer.from(event.contentHash, "hex"),
         state(event.agreementState),
         i64(event.timestamp),
       ]);
@@ -342,6 +343,8 @@ export const LIFECYCLE_FIXTURE: readonly PpvEscrowEvent[] = [
 ];
 
 const PROOF = addressFromByte(8);
+/** The ppv_core record the same instruction mints. */
+const CORE_PROOF = addressFromByte(9);
 
 /** One proof anchored while the agreement was Funded, for the annotation tests. */
 export const PROOF_FIXTURE: EscrowProofSubmittedEvent = {
@@ -349,6 +352,7 @@ export const PROOF_FIXTURE: EscrowProofSubmittedEvent = {
   name: "ProofSubmitted",
   agreement: AGREEMENT,
   proof: PROOF,
+  coreProof: CORE_PROOF,
   creator: BUYER,
   counterparty: SELLER,
   submitter: SELLER,
@@ -365,12 +369,12 @@ export const PROOF_APPROVED_FIXTURE: EscrowProofApprovedEvent = {
   name: "ProofApproved",
   agreement: AGREEMENT,
   proof: PROOF,
+  coreProof: CORE_PROOF,
   creator: BUYER,
   counterparty: SELLER,
   submitter: SELLER,
   decidedBy: BUYER,
   proofIndex: 0,
-  contentHash: hexFromByte(12, 32),
   agreementState: "Funded",
   timestamp: 1_700_000_180,
 };

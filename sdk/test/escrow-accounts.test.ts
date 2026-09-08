@@ -129,10 +129,9 @@ function encodeProofAccount(account: ProofAccount): Uint8Array {
       Buffer.from(PROOF_ACCOUNT_DISCRIMINATOR),
       Buffer.from([account.schemaVersion, account.bump]),
       pubkey(account.agreement),
+      pubkey(account.coreProof),
       pubkey(account.submitter),
       u32(account.proofIndex),
-      Buffer.from(account.contentHash, "hex"),
-      Buffer.from(account.metadataHash, "hex"),
       Buffer.from([0]), // ProofStatus::Submitted
       i64(account.createdAt),
       i64(account.decidedAt),
@@ -146,10 +145,9 @@ const PROOF_FIXTURE_ACCOUNT: ProofAccount = {
   schemaVersion: 1,
   bump: 250,
   agreement: addressFromByte(5),
+  coreProof: addressFromByte(9),
   submitter: addressFromByte(2),
   proofIndex: 0,
-  contentHash: hexFromByte(12, 32),
-  metadataHash: hexFromByte(0, 32),
   status: "Submitted",
   createdAt: 1_700_000_150,
   decidedAt: 0,
@@ -158,9 +156,11 @@ const PROOF_FIXTURE_ACCOUNT: ProofAccount = {
 
 test("a proof account round-trips at the size the program allocates", () => {
   const encoded = encodeProofAccount(PROOF_FIXTURE_ACCOUNT);
-  // 8 + Proof::INIT_SPACE, pinned at 215 in the Rust unit tests.
+  // 8 + Proof::INIT_SPACE, pinned at 183 in the Rust unit tests. It was 215
+  // while this account kept its own copy of the content and metadata hashes;
+  // those moved to the ppv_core record the account now points at.
   assert.equal(encoded.length, PROOF_ACCOUNT_SIZE);
-  assert.equal(PROOF_ACCOUNT_SIZE, 8 + 215);
+  assert.equal(PROOF_ACCOUNT_SIZE, 8 + 183);
   assert.deepEqual(decodeProofAccount(encoded), PROOF_FIXTURE_ACCOUNT);
 });
 

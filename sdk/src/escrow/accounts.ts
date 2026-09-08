@@ -90,11 +90,14 @@ export type ProofAccount = {
   schemaVersion: number;
   bump: number;
   agreement: string;
+  /**
+   * The `ppv_core` ProofRecord holding the commitment. ppv_escrow keeps no copy
+   * of the hashes: read this account from ppv_core for the content and context
+   * hashes, or recompute its address with `coreProofAddress`.
+   */
+  coreProof: string;
   submitter: string;
   proofIndex: number;
-  contentHash: string;
-  /** All zeroes means the submitter committed to no private metadata. */
-  metadataHash: string;
   status: ProofStatus;
   createdAt: number;
   decidedAt: number;
@@ -104,8 +107,8 @@ export type ProofAccount = {
 
 export const PROOF_ACCOUNT_DISCRIMINATOR = anchorDiscriminator("account", "Proof");
 
-/** 8 discriminator + 2 bumps + 2 keys + u32 + 2 hashes + status + 2 times + key + reserved. */
-export const PROOF_ACCOUNT_SIZE = 8 + 2 + 32 * 2 + 4 + 32 * 2 + 1 + 8 * 2 + 32 + 32;
+/** 8 discriminator + 2 bumps + 3 keys + u32 + status + 2 times + key + reserved. */
+export const PROOF_ACCOUNT_SIZE = 8 + 2 + 32 * 3 + 4 + 1 + 8 * 2 + 32 + 32;
 
 export function decodeProofAccount(data: Uint8Array): ProofAccount {
   if (!bytesEqual(data.subarray(0, 8), PROOF_ACCOUNT_DISCRIMINATOR)) {
@@ -116,10 +119,9 @@ export function decodeProofAccount(data: Uint8Array): ProofAccount {
     schemaVersion: reader.u8(),
     bump: reader.u8(),
     agreement: reader.pubkey(),
+    coreProof: reader.pubkey(),
     submitter: reader.pubkey(),
     proofIndex: reader.u32(),
-    contentHash: reader.hex(32),
-    metadataHash: reader.hex(32),
     status: reader.proofStatus(),
     createdAt: reader.i64(),
     decidedAt: reader.i64(),

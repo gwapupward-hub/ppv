@@ -48,15 +48,18 @@ mod tests {
     #[test]
     fn proof_account_space_is_pinned() {
         let expected = 2          // schema version + bump
-            + 32 * 2              // agreement + submitter
+            + 32 * 3              // agreement + core proof + submitter
             + 4                   // proof index
-            + 32 * 2              // content + metadata hash
             + 1                   // status
             + 8 * 2               // created + decided
             + 32                  // decided by
             + 32; // reserved
         assert_eq!(Proof::INIT_SPACE, expected);
-        assert_eq!(expected, 215);
+        // Was 215 while this account carried its own copy of the content and
+        // metadata hashes. Unifying on ppv_core traded those 64 bytes for one
+        // 32-byte reference, which is the point: the commitment has exactly one
+        // home, and this account holds a pointer to it rather than a duplicate.
+        assert_eq!(expected, 183);
     }
 
     #[test]

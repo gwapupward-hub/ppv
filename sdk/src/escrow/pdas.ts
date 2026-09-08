@@ -18,6 +18,14 @@ export const VAULT_TOKEN_SEED = new TextEncoder().encode("vault_token");
 export const PROOF_SEED = new TextEncoder().encode("proof");
 export const MILESTONE_SEED = new TextEncoder().encode("milestone");
 
+/**
+ * `ppv_core`'s proof namespace. The same word as {@link PROOF_SEED}, under a
+ * different program id, for a different account: ppv_core holds the
+ * commitment, ppv_escrow holds one agreement's decision about it.
+ */
+export const CORE_PROOF_SEED = new TextEncoder().encode("proof");
+export const CORE_PROOF_ID_DOMAIN = new TextEncoder().encode("ppv:escrow:core-proof:v1");
+
 const PDA_MARKER = new TextEncoder().encode("ProgramDerivedAddress");
 const MAX_SEED_LENGTH = 32;
 const MAX_SEEDS = 16;
@@ -145,6 +153,47 @@ export function deriveProof(
   return findProgramAddress(
     [PROOF_SEED, addressBytes(agreement), proofIndexSeed(proofIndex)],
     programId,
+  );
+}
+
+/**
+ * The domain-separated id `ppv_escrow` asks `ppv_core` to mint for one
+ * agreement's proof. Mirrors `core_proof_id` in
+ * `programs/ppv_escrow/src/state/proof.rs`.
+ *
+ * `ppv_core` normally lets an authority choose its own 16-byte proof id.
+ * Evidence submitted through an agreement does not get that choice: the id
+ * follows from the agreement and the index, so the core record's address is a
+ * pure function of facts already on chain and an indexer can verify the link
+ * rather than believing it.
+ */
+export function coreProofId(agreement: Address, proofIndex: number): Uint8Array {
+  const digest = createHash("sha256")
+    .update(CORE_PROOF_ID_DOMAIN)
+    .update(addressBytes(agreement))
+    .update(proofIndexSeed(proofIndex))
+    .digest();
+  return new Uint8Array(digest.subarray(0, 16));
+}
+
+/**
+ * Where `ppv_core` holds the commitment for one agreement's proof.
+ *
+ * Derived under the **ppv_core** program id, not ppv_escrow's: the record is
+ * ppv_core's account, and ppv_core is the only program that can create it.
+ * `ppv_core` keys proofs by authority as well as id, so the submitter is part
+ * of the derivation and two parties submitting under the same agreement and
+ * index occupy two distinct records.
+ */
+export function deriveCoreProof(
+  coreProgramId: Address,
+  submitter: Address,
+  agreement: Address,
+  proofIndex: number,
+): { address: Address; bump: number } {
+  return findProgramAddress(
+    [CORE_PROOF_SEED, addressBytes(submitter), coreProofId(agreement, proofIndex)],
+    coreProgramId,
   );
 }
 

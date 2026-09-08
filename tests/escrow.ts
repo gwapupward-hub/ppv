@@ -75,6 +75,45 @@ function proofAddress(programId: PublicKey, agreement: PublicKey, index: number)
   )[0];
 }
 
+const CORE_PROOF_SEED = new TextEncoder().encode("proof");
+const CORE_PROOF_ID_DOMAIN = new TextEncoder().encode("ppv:escrow:core-proof:v1");
+
+/**
+ * Mirrors `core_proof_id` in `programs/ppv_escrow/src/state/proof.rs`. Written
+ * out here rather than imported so a drift between the program and its clients
+ * fails a test instead of silently agreeing with itself.
+ */
+function coreProofId(agreement: PublicKey, index: number): Buffer {
+  const seed = Buffer.alloc(4);
+  seed.writeUInt32LE(index);
+  return createHash("sha256")
+    .update(CORE_PROOF_ID_DOMAIN)
+    .update(agreement.toBuffer())
+    .update(seed)
+    .digest()
+    .subarray(0, 16);
+}
+
+/** Derived under ppv_core's id: the record is ppv_core's account, not ours. */
+function coreProofAddress(
+  coreProgramId: PublicKey,
+  submitter: PublicKey,
+  agreement: PublicKey,
+  index: number,
+): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [CORE_PROOF_SEED, submitter.toBytes(), coreProofId(agreement, index)],
+    coreProgramId,
+  )[0];
+}
+
+function coreEventAuthority(coreProgramId: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("__event_authority")],
+    coreProgramId,
+  )[0];
+}
+
 function milestoneAddress(programId: PublicKey, agreement: PublicKey, index: number): PublicKey {
   const seed = Buffer.alloc(4);
   seed.writeUInt32LE(index);
@@ -119,6 +158,9 @@ describe("PPV escrow kernel", () => {
   // Generated IDL types are created by `anchor build`; `any` keeps this source
   // type-checkable before build while runtime calls still use the generated IDL.
   const escrow = anchor.workspace.PpvEscrow as any;
+  // ppv_escrow calls into ppv_core to mint proof commitments, so the proof
+  // tests exercise two programs. Both must be deployed for this suite to run.
+  const core = anchor.workspace.PpvCore as any;
   const connection = provider.connection;
   const payer = (provider.wallet as anchor.Wallet).payer;
 
@@ -635,7 +677,14 @@ describe("PPV escrow kernel", () => {
   describe("proofs", () => {
     function submitProof(
       agreement: Awaited<ReturnType<typeof initialize>>,
-      overrides?: { signer?: Keypair; index?: number; contentHash?: number[]; metadataHash?: number[] },
+      overrides?: {
+        signer?: Keypair;
+        index?: number;
+        contentHash?: number[];
+        metadataHash?: number[];
+        coreProof?: PublicKey;
+        coreProgram?: PublicKey;
+      },
     ) {
       const signer = overrides?.signer ?? seller;
       const index = overrides?.index ?? 0;
@@ -645,6 +694,11 @@ describe("PPV escrow kernel", () => {
           submitter: signer.publicKey,
           agreement: agreement.agreement,
           proof: proofAddress(escrow.programId, agreement.agreement, index),
+          coreProof:
+            overrides?.coreProof ??
+            coreProofAddress(core.programId, signer.publicKey, agreement.agreement, index),
+          coreEventAuthority: coreEventAuthority(core.programId),
+          ppvCoreProgram: overrides?.coreProgram ?? core.programId,
           systemProgram: SystemProgram.programId,
         })
         .signers([signer])
@@ -664,9 +718,25 @@ describe("PPV escrow kernel", () => {
       assert.equal(proof.agreement.toBase58(), agreement.agreement.toBase58());
       assert.equal(proof.submitter.toBase58(), seller.publicKey.toBase58());
       assert.equal(proof.proofIndex, 0);
-      assert.deepEqual([...proof.contentHash], hash32(12));
       assert.ok("submitted" in proof.status);
       assert.equal(proof.decidedAt.toNumber(), 0);
+
+      // The commitment itself lives in ppv_core, written by the CPI. ppv_escrow
+      // stores no hash of its own — one proof primitive, one place to revoke.
+      const expectedCoreProof = coreProofAddress(
+        core.programId,
+        seller.publicKey,
+        agreement.agreement,
+        0,
+      );
+      assert.equal(proof.coreProof.toBase58(), expectedCoreProof.toBase58());
+      const record = await core.account.proofRecord.fetch(expectedCoreProof);
+      assert.deepEqual([...record.contentHash], hash32(12));
+      // The submitter's signature crossed the CPI; ppv_escrow signed for
+      // nothing, so the authority is the wallet that actually committed and it
+      // is the wallet that can revoke.
+      assert.equal(record.authority.toBase58(), seller.publicKey.toBase58());
+      assert.ok("active" in record.status);
 
       // A proof is a fact about the agreement, not a step in it.
       const after = await escrow.account.agreement.fetch(agreement.agreement);
@@ -749,10 +819,104 @@ describe("PPV escrow kernel", () => {
             submitter: seller.publicKey,
             agreement: theirs.agreement,
             proof: proofAddress(escrow.programId, mine.agreement, 0),
+            coreProof: coreProofAddress(
+              core.programId,
+              seller.publicKey,
+              theirs.agreement,
+              0,
+            ),
+            coreEventAuthority: coreEventAuthority(core.programId),
+            ppvCoreProgram: core.programId,
             systemProgram: SystemProgram.programId,
           })
           .signers([seller])
           .rpc(),
+      );
+    });
+
+    it("refuses a core proof account at any address but the derived one", async () => {
+      const mine = await fundedAgreement();
+      const theirs = await fundedAgreement();
+
+      // The record ppv_core writes is addressed by (submitter, agreement,
+      // index) and nothing the client chooses. Substituting another
+      // agreement's derivation would file this agreement's evidence somewhere
+      // this agreement does not point.
+      await expectAnchorError(
+        submitProof(mine, {
+          coreProof: coreProofAddress(
+            core.programId,
+            seller.publicKey,
+            theirs.agreement,
+            0,
+          ),
+        }),
+        "CoreProofMismatch",
+      );
+
+      // A wallet the attacker controls is not a ppv_core PDA at all.
+      await expectAnchorError(
+        submitProof(mine, { coreProof: attacker.publicKey }),
+        "CoreProofMismatch",
+      );
+    });
+
+    it("refuses to call any program but ppv_core", async () => {
+      const agreement = await fundedAgreement();
+
+      // `Program<'info, PpvCore>` is an address check. Without it, the client
+      // would choose which executable ends up owning PPV's proof records — the
+      // arbitrary-CPI-target hole, with the submitter's signature attached.
+      await assert.rejects(
+        submitProof(agreement, { coreProgram: escrow.programId }),
+        /InvalidProgramId|ConstraintAddress|2012|3008/,
+      );
+      await assert.rejects(
+        submitProof(agreement, { coreProgram: SystemProgram.programId }),
+        /InvalidProgramId|ConstraintAddress|2012|3008/,
+      );
+    });
+
+    it("leaves no proof behind when the ppv_core call fails", async () => {
+      const agreement = await fundedAgreement();
+      const before = await escrow.account.agreement.fetch(agreement.agreement);
+
+      // The submitter front-runs their own submission by taking the exact
+      // address ppv_core would use. ppv_core's `init` then fails, and with it
+      // the whole transaction: no escrow proof, and no incremented counter.
+      // Self-inflicted only — the address is keyed by the submitter — but it is
+      // the cleanest way to make the callee fail after the caller has already
+      // written its own state.
+      await core.methods
+        .createProof(
+          [...coreProofId(agreement.agreement, 0)],
+          hash32(12),
+          hash32(0),
+          { deliverable: {} },
+        )
+        .accounts({
+          authority: seller.publicKey,
+          proof: coreProofAddress(
+            core.programId,
+            seller.publicKey,
+            agreement.agreement,
+            0,
+          ),
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([seller])
+        .rpc();
+
+      await assert.rejects(submitProof(agreement));
+
+      const after = await escrow.account.agreement.fetch(agreement.agreement);
+      assert.equal(after.proofCount, before.proofCount, "the counter rolled back");
+      assert.equal(
+        await connection.getAccountInfo(
+          proofAddress(escrow.programId, agreement.agreement, 0),
+        ),
+        null,
+        "no escrow proof survived the failed CPI",
       );
     });
   });
@@ -845,7 +1009,8 @@ describe("PPV escrow kernel", () => {
         proofAddress(escrow.programId, agreement.agreement, 0),
       );
       assert.ok("rejected" in proof.status);
-      assert.deepEqual([...proof.contentHash], hash32(12), "the evidence remains anchored");
+      const record = await core.account.proofRecord.fetch(proof.coreProof);
+      assert.deepEqual([...record.contentHash], hash32(12), "the evidence remains anchored");
 
       eventNamed(await eventsOf(signature), "proofRejected");
 
