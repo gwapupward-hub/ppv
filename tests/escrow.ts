@@ -246,6 +246,35 @@ describe("PPV escrow kernel", () => {
     return { ...derived, agreementId, signature, creator, mint: useMint };
   }
 
+  /**
+   * The account list `submit_proof` needs, in one place.
+   *
+   * ppv_escrow mints the commitment in ppv_core over a CPI, so the instruction
+   * carries three accounts beyond its own: the core proof record, ppv_core's
+   * event authority, and ppv_core itself as the typed CPI target. Three call
+   * sites built this list independently, and when the CPI landed only one of
+   * them was updated — nine tests failed on `Account \`coreProof\` not
+   * provided`. One builder, so the next account cannot be added to some of them.
+   */
+  function submitProofAccounts(
+    agreement: PublicKey,
+    submitter: PublicKey,
+    index: number,
+    overrides?: { coreProof?: PublicKey; coreProgram?: PublicKey },
+  ) {
+    return {
+      submitter,
+      agreement,
+      proof: proofAddress(escrow.programId, agreement, index),
+      coreProof:
+        overrides?.coreProof ??
+        coreProofAddress(core.programId, submitter, agreement, index),
+      coreEventAuthority: coreEventAuthority(core.programId),
+      ppvCoreProgram: overrides?.coreProgram ?? core.programId,
+      systemProgram: SystemProgram.programId,
+    };
+  }
+
   function fund(
     agreement: Awaited<ReturnType<typeof initialize>>,
     overrides?: {
@@ -359,7 +388,7 @@ describe("PPV escrow kernel", () => {
       assert.equal(vault.mint.toBase58(), mint.toBase58());
       assert.equal(vault.owner.toBase58(), created.vaultAuthority.toBase58());
 
-      const event = eventNamed(await eventsOf(created.signature), "agreementCreated");
+      const event = eventNamed(await eventsOf(created.signature), "agreementOpened");
       assert.equal(event.agreement.toBase58(), created.agreement.toBase58());
       assert.equal(event.creator.toBase58(), buyer.publicKey.toBase58());
       assert.equal(event.counterparty.toBase58(), seller.publicKey.toBase58());
@@ -442,8 +471,27 @@ describe("PPV escrow kernel", () => {
 
     it("refuses anyone but the buyer", async () => {
       const agreement = await initialize();
-      await expectAnchorError(fund(agreement, { signer: seller }), "NotTheBuyer");
-      await expectAnchorError(fund(agreement, { signer: attacker }), "NotTheBuyer");
+
+      // Two guards, and which one answers depends on whose money is offered.
+      // Funding from one's own account reaches the state machine, and
+      // `require_fundable` refuses a signer who is not the agreement's buyer.
+      await expectAnchorError(
+        fund(agreement, { signer: seller, source: sellerTokens }),
+        "NotTheBuyer",
+      );
+      await expectAnchorError(
+        fund(agreement, { signer: attacker, source: attackerTokens }),
+        "NotTheBuyer",
+      );
+
+      // Spending the buyer's account never gets that far: the accounts
+      // constraint requires the source to belong to the signer, and Anchor
+      // resolves constraints before the handler body runs. Both refusals are
+      // correct; asserting the wrong one hides which layer is doing the work.
+      await expectAnchorError(
+        fund(agreement, { signer: seller }),
+        "SourceNotOwnedByBuyer",
+      );
 
       const account = await escrow.account.escrowAgreement.fetch(agreement.agreement);
       assert.ok("open" in account.state);
@@ -621,9 +669,14 @@ describe("PPV escrow kernel", () => {
 
       // The transaction never committed, so there is no event and no receipt
       // an indexer could build from it.
-      const history = await connection.getSignaturesForAddress(agreement.agreement, {
-        limit: 20,
-      });
+      // `confirmed` explicitly: the provider's connection defaults to
+      // `processed`, and web3.js refuses this method below `confirmed` rather
+      // than returning a partial answer.
+      const history = await connection.getSignaturesForAddress(
+        agreement.agreement,
+        { limit: 20 },
+        "confirmed",
+      );
       for (const entry of history) {
         assert.equal(entry.err, null, "a failed transaction must not be recorded as history");
       }
@@ -648,7 +701,11 @@ describe("PPV escrow kernel", () => {
   describe("cross-agreement isolation", () => {
     it("keeps one agreement's custody unreachable from another", async () => {
       const mine = await completedAgreement();
-      const theirs = await initialize({ creator: attacker, counterparty: attacker.publicKey });
+      // The attacker's counterparty is irrelevant to what this proves, but it
+      // cannot be the attacker: `initialize_agreement` refuses an agreement a
+      // wallet holds with itself, so naming themselves fails before the test
+      // reaches the thing it is testing.
+      const theirs = await initialize({ creator: attacker, counterparty: seller.publicKey });
 
       // An attacker's own agreement cannot name someone else's vault, and its
       // vault authority cannot sign for someone else's vault.
@@ -690,17 +747,9 @@ describe("PPV escrow kernel", () => {
       const index = overrides?.index ?? 0;
       return escrow.methods
         .submitProof(overrides?.contentHash ?? hash32(12), overrides?.metadataHash ?? hash32(0))
-        .accounts({
-          submitter: signer.publicKey,
-          agreement: agreement.agreement,
-          proof: proofAddress(escrow.programId, agreement.agreement, index),
-          coreProof:
-            overrides?.coreProof ??
-            coreProofAddress(core.programId, signer.publicKey, agreement.agreement, index),
-          coreEventAuthority: coreEventAuthority(core.programId),
-          ppvCoreProgram: overrides?.coreProgram ?? core.programId,
-          systemProgram: SystemProgram.programId,
-        })
+        .accounts(
+          submitProofAccounts(agreement.agreement, signer.publicKey, index, overrides),
+        )
         .signers([signer])
         .rpc();
     }
@@ -929,12 +978,7 @@ describe("PPV escrow kernel", () => {
     ) {
       return escrow.methods
         .submitProof(hash32(12), hash32(0))
-        .accounts({
-          submitter: signer.publicKey,
-          agreement: agreement.agreement,
-          proof: proofAddress(escrow.programId, agreement.agreement, index),
-          systemProgram: SystemProgram.programId,
-        })
+        .accounts(submitProofAccounts(agreement.agreement, signer.publicKey, index))
         .signers([signer])
         .rpc();
     }
@@ -1159,7 +1203,7 @@ describe("PPV escrow kernel", () => {
       const vault = await getAccount(connection, agreement.vault);
       assert.equal(vault.amount, 0n);
 
-      const event = eventNamed(await eventsOf(signature), "agreementCancelled");
+      const event = eventNamed(await eventsOf(signature), "agreementAbandoned");
       assert.ok("open" in event.previousState);
       assert.ok("cancelled" in event.newState);
     });
@@ -1213,12 +1257,7 @@ describe("PPV escrow kernel", () => {
       await openDispute(agreement);
       await escrow.methods
         .submitProof(hash32(12), hash32(0))
-        .accounts({
-          submitter: seller.publicKey,
-          agreement: agreement.agreement,
-          proof: proofAddress(escrow.programId, agreement.agreement, 0),
-          systemProgram: SystemProgram.programId,
-        })
+        .accounts(submitProofAccounts(agreement.agreement, seller.publicKey, 0))
         .signers([seller])
         .rpc();
 
@@ -1699,7 +1738,11 @@ describe("PPV escrow kernel", () => {
       // Nobody can sign as the default address, and the program says so rather
       // than leaving it to be derived.
       await expectAnchorError(markCompleted(bounty), "CounterpartyNotAssigned");
-      await expectAnchorError(settle(bounty), "CounterpartyNotAssigned");
+      // `settle` never reaches that check, and does not need to: with no
+      // counterparty there is no token account the destination constraint can
+      // accept, so it refuses first. The line above already proves the state
+      // machine's own guard exists.
+      await expectAnchorError(settle(bounty), "DestinationNotOwnedBySeller");
       await expectAnchorError(
         escrow.methods
           .refund()
@@ -1884,7 +1927,11 @@ describe("PPV escrow kernel", () => {
       // indexer reading only committed transactions can never see it.
       await expectAnchorError(settle(funded), "BadState");
 
-      const history = await connection.getSignaturesForAddress(funded.agreement, { limit: 20 });
+      const history = await connection.getSignaturesForAddress(
+        funded.agreement,
+        { limit: 20 },
+        "confirmed",
+      );
       for (const entry of history) {
         assert.equal(entry.err, null);
         const tx = await rawTransaction(entry.signature);
