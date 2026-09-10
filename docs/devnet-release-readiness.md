@@ -146,9 +146,12 @@ public key derived from it.
 1. Complete the manual blockers above.
 2. On the release machine: `npm run verify:devnet-readiness` → **READY**.
 3. Obtain two distinct Squads-member signatures over the exact `ppv_core`
-   release message, run the deploy workflow, and confirm the recorded evidence.
-4. Obtain fresh two-member approval for `ppv_commerce` and repeat the workflow.
-5. `npm run test:devnet:smoke -- --identity-only`.
-6. `./scripts/verify-deployment.sh` with `PPV_VERIFY_RPC_URL` set to a second,
+   release message and run the workflow with the default `verify_only=true`.
+4. After that verification passes, set `verify_only=false` for the authorized
+   `ppv_core` deployment and confirm the recorded evidence.
+5. Obtain two-member approval for `ppv_commerce`, repeat the verification-only
+   run, then perform its separately authorized deployment.
+6. `npm run test:devnet:smoke -- --identity-only`.
+7. `./scripts/verify-deployment.sh` with `PPV_VERIFY_RPC_URL` set to a second,
    independent provider.
-7. Only then, with a funded throwaway wallet, the full smoke suite.
+8. Only then, with a funded throwaway wallet, the full smoke suite.

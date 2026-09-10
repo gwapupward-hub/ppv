@@ -84,6 +84,39 @@ test("two independent cryptographic approvals bind the verified release identity
   );
 });
 
+test("verify-only is the default and cannot reach a persistent deployment action", () => {
+  assert.match(
+    WORKFLOW,
+    /verify_only:\n\s+description: "Run all devnet release checks but stop before deployment"\n\s+required: false\n\s+default: true\n\s+type: boolean/,
+  );
+  assert.match(WORKFLOW, /- name: Stop after verification\n\s+if: \$\{\{ inputs\.verify_only \}\}/);
+  assert.match(WORKFLOW, /VERIFY-ONLY: all pre-deployment checks passed\./);
+  assert.match(WORKFLOW, /No program deployment or authority transfer was attempted\./);
+
+  const stop = stepIndex("Stop after verification");
+  const deploy = stepIndex("Deploy with the deployer as temporary authority");
+  assert.ok(
+    stepIndex("Validate the configured final upgrade authority") < stop &&
+      stop < deploy,
+    "verify-only must run every pre-deployment check before persistent work is skipped",
+  );
+
+  for (const name of [
+    "Deploy with the deployer as temporary authority",
+    "Transfer upgrade authority to Squads",
+    "Verify on chain and record the deployment",
+    "Upload public deployment evidence",
+  ]) {
+    const index = stepIndex(name);
+    const body = lines.slice(index, index + 8).join("\\n");
+    assert.match(
+      body,
+      /if: \$\{\{ !inputs\.verify_only \}\}/,
+      `${name} must be skipped in verify-only mode`,
+    );
+  }
+});
+
 test("the cluster is pinned by genesis hash before any key is fetched", () => {
   assert.match(WORKFLOW, /Genesis hash \$\{actual\} does not match the configured devnet genesis/);
   assert.ok(
