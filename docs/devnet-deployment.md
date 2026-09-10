@@ -200,8 +200,11 @@ production-candidate deployment should be verifiable, and F3's independent
 security review is the right place to require it.
 
 Never run a deployment from an ordinary push workflow. Deployment is either a
-manual operator action or a GitHub Actions job bound to a protected `devnet`
-environment with required reviewers and environment-scoped secrets.
+manual operator action or a GitHub Actions job bound to the mandatory `devnet`
+environment with environment-scoped secrets and variables. Native GitHub
+required-reviewer protection is unavailable for this repository configuration;
+two distinct configured Squads members must instead provide the cryptographic
+release approvals defined in [PPV Devnet Release Approval](devnet-release-approval.md).
 
 ## Deploying through protected CI
 
@@ -214,15 +217,12 @@ The workflow is only as protected as the environment behind it. Before using it,
 configure a `devnet` environment in repository settings:
 
 1. **Settings → Environments → New environment → `devnet`.**
-2. **Required reviewers** — at least one, and not the person who dispatches the
-   run. Without this the job is just an ordinary workflow holding credentials,
-   which is what this runbook forbids.
-3. **Environment secrets** (never repository-level, so no other workflow can
+2. **Environment secrets** (never repository-level, so no other workflow can
    read them):
    - `PPV_CORE_PROGRAM_KEYPAIR` — the permanent JSON keypair for `ppv_core`.
    - `PPV_COMMERCE_PROGRAM_KEYPAIR` — the permanent JSON keypair for `ppv_commerce`.
    - `PPV_DEPLOYER_KEYPAIR` — the funded devnet deployer.
-4. **Environment variables** (public values):
+3. **Environment variables** (public values):
    - `PPV_SQUADS_VAULT_PDA` — the Squads V4 vault PDA that becomes the upgrade
      authority.
    - `PPV_SQUADS_MEMBER_PUBKEYS` — comma-separated public member addresses for
@@ -231,6 +231,12 @@ configure a `devnet` environment in repository settings:
      deployment manifest.
    - `PPV_DEVNET_GENESIS_HASH` — devnet's genesis hash. The job refuses to
      deploy if the cluster it reaches does not match.
+4. **Independent release approval** — before every dispatch, obtain detached
+   Ed25519 signatures from two distinct configured Squads members over the exact
+   release message defined in [PPV Devnet Release Approval](devnet-release-approval.md).
+   Supply the two public keys and signatures through the manual dispatch fields.
+   The workflow rejects unknown or duplicate approvers, invalid signatures,
+   program-ID or commit mismatch, and any Vault, member-set, or threshold drift.
 
 Deploy one program per run: pick it from the dropdown and retype its name to
 confirm. The job requires the permanent keypair to match the already-committed

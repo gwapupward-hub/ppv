@@ -126,7 +126,7 @@ tooling here deliberately fails rather than proceeding without it.
 | 2-of-3 signer set confirmed | `PPV_SQUADS_THRESHOLD >= 2` |
 | Squads Vault PDA recorded | `PPV_SQUADS_VAULT_PDA` |
 | GitHub `devnet` environment created | the workflow's protection |
-| Required reviewer configured | manual approval of each deploy |
+| Two distinct Squads-member signatures for the exact program and commit | independent approval of each deploy; see [release-approval policy](devnet-release-approval.md) |
 | `PPV_CORE_PROGRAM_KEYPAIR` secret | deploying at the permanent id |
 | `PPV_COMMERCE_PROGRAM_KEYPAIR` secret | deploying at the permanent id |
 | `PPV_DEPLOYER_KEYPAIR` secret | paying for and signing the deploy |
@@ -145,9 +145,9 @@ public key derived from it.
 
 1. Complete the manual blockers above.
 2. On the release machine: `npm run verify:devnet-readiness` → **READY**.
-3. Run the deploy workflow for `ppv_core`, approve it, confirm the recorded
-   evidence.
-4. Repeat for `ppv_commerce`.
+3. Obtain two distinct Squads-member signatures over the exact `ppv_core`
+   release message, run the deploy workflow, and confirm the recorded evidence.
+4. Obtain fresh two-member approval for `ppv_commerce` and repeat the workflow.
 5. `npm run test:devnet:smoke -- --identity-only`.
 6. `./scripts/verify-deployment.sh` with `PPV_VERIFY_RPC_URL` set to a second,
    independent provider.
