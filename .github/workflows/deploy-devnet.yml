@@ -4,9 +4,11 @@ name: Deploy devnet
 # design: a deployment must never be a side effect of merging code.
 #
 # The `devnet` environment must be configured in repository settings with
-# required reviewers and environment-scoped secrets. Without that, this workflow
-# is just an ordinary job with credentials, which is exactly what the runbook
-# forbids. See docs/devnet-deployment.md.
+# environment-scoped secrets and variables. Native required-reviewer protection
+# is unavailable for this repository configuration, so this workflow requires
+# two independent Squads-member approvals as the compensating gate. Without
+# those controls, this is an ordinary job with credentials, which the runbook
+# forbids. See docs/devnet-deployment.md and docs/devnet-release-approval.md.
 on:
   workflow_dispatch:
     inputs:
@@ -17,6 +19,25 @@ on:
         options: [ppv_core, ppv_commerce]
       confirm:
         description: Type the program name again to confirm
+        required: true
+        type: string
+      approver_1:
+        description: Squads member public key for approval 1
+        required: true
+        type: string
+
+      signature_1:
+        description: Base64 Ed25519 signature for approval 1
+        required: true
+        type: string
+
+      approver_2:
+        description: Squads member public key for approval 2
+        required: true
+        type: string
+
+      signature_2:
+        description: Base64 Ed25519 signature for approval 2
         required: true
         type: string
 
@@ -155,6 +176,7 @@ jobs:
           echo "work=${work}" >> "${GITHUB_OUTPUT}"
 
       - name: Assert committed identity and build
+        id: release_identity
         run: |
           program="${{ inputs.program }}"
           mkdir -p target/deploy
@@ -184,7 +206,25 @@ jobs:
             exit 1
           fi
           git diff --exit-code -- Anchor.toml "programs/${program}/src/lib.rs"
+          echo "program_id=${keypair_id}" >> "${GITHUB_OUTPUT}"
           echo "program id: ${keypair_id}"
+
+      - name: Verify independent devnet release approvals
+        env:
+          PPV_RELEASE_PROGRAM: ${{ inputs.program }}
+          PPV_RELEASE_PROGRAM_ID: ${{ steps.release_identity.outputs.program_id }}
+          PPV_RELEASE_COMMIT: ${{ github.sha }}
+
+          PPV_RELEASE_APPROVER_1: ${{ inputs.approver_1 }}
+          PPV_RELEASE_SIGNATURE_1: ${{ inputs.signature_1 }}
+          PPV_RELEASE_APPROVER_2: ${{ inputs.approver_2 }}
+          PPV_RELEASE_SIGNATURE_2: ${{ inputs.signature_2 }}
+
+          PPV_SQUADS_VAULT_PDA: ${{ vars.PPV_SQUADS_VAULT_PDA }}
+          PPV_SQUADS_MEMBER_PUBKEYS: ${{ vars.PPV_SQUADS_MEMBER_PUBKEYS }}
+          PPV_SQUADS_THRESHOLD: ${{ vars.PPV_SQUADS_THRESHOLD }}
+        run: |
+          node scripts/verify-devnet-release-approval.mjs
 
       - name: Refuse an existing program address
         run: |

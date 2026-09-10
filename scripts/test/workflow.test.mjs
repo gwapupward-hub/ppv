@@ -64,6 +64,26 @@ test("committed identity is asserted against the permanent keypair before buildi
   assert.match(WORKFLOW, /git diff --exit-code -- Anchor\.toml "programs\/\$\{program\}\/src\/lib\.rs"/);
 });
 
+test("two independent cryptographic approvals bind the verified release identity before deployment", () => {
+  for (const input of ["approver_1", "signature_1", "approver_2", "signature_2"]) {
+    assert.match(WORKFLOW, new RegExp(`\\n\\s+${input}:\\n\\s+description: .+\\n\\s+required: true\\n\\s+type: string`));
+  }
+  assert.match(WORKFLOW, /- name: Assert committed identity and build\n\s+id: release_identity/);
+  assert.match(WORKFLOW, /echo "program_id=\$\{keypair_id\}" >> "\$\{GITHUB_OUTPUT\}"/);
+  assert.match(WORKFLOW, /PPV_RELEASE_PROGRAM_ID: \$\{\{ steps\.release_identity\.outputs\.program_id \}\}/);
+  assert.match(WORKFLOW, /PPV_RELEASE_COMMIT: \$\{\{ github\.sha \}\}/);
+  assert.match(WORKFLOW, /PPV_RELEASE_APPROVER_1: \$\{\{ inputs\.approver_1 \}\}/);
+  assert.match(WORKFLOW, /PPV_RELEASE_SIGNATURE_1: \$\{\{ inputs\.signature_1 \}\}/);
+  assert.match(WORKFLOW, /PPV_RELEASE_APPROVER_2: \$\{\{ inputs\.approver_2 \}\}/);
+  assert.match(WORKFLOW, /PPV_RELEASE_SIGNATURE_2: \$\{\{ inputs\.signature_2 \}\}/);
+  assert.match(WORKFLOW, /node scripts\/verify-devnet-release-approval\.mjs/);
+  assert.ok(
+    stepIndex("Assert committed identity and build") < stepIndex("Verify independent devnet release approvals") &&
+      stepIndex("Verify independent devnet release approvals") < stepIndex("Refuse an existing program address"),
+    "approval must bind the asserted identity before a deployable address is considered",
+  );
+});
+
 test("the cluster is pinned by genesis hash before any key is fetched", () => {
   assert.match(WORKFLOW, /Genesis hash \$\{actual\} does not match the configured devnet genesis/);
   assert.ok(
