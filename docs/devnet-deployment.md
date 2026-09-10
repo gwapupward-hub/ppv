@@ -237,6 +237,13 @@ configure a `devnet` environment in repository settings:
    Supply the two public keys and signatures through the manual dispatch fields.
    The workflow rejects unknown or duplicate approvers, invalid signatures,
    program-ID or commit mismatch, and any Vault, member-set, or threshold drift.
+5. **Verification-only dispatch** — `verify_only` defaults to `true`. In this
+   mode the job performs the complete pre-deployment chain, including the
+   protected-environment checks, permanent-identity build, approval verification,
+   unoccupied-address check, and final-authority validation, then stops before
+   any program deployment or authority transfer. Use this mode to validate the
+   release configuration. Set `verify_only` to `false` only for an authorized
+   deployment after the exact program-and-commit approvals have been obtained.
 
 Deploy one program per run: pick it from the dropdown and retype its name to
 confirm. The job requires the permanent keypair to match the already-committed

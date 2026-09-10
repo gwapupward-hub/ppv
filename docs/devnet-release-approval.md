@@ -29,6 +29,8 @@ Each detached Ed25519 signature must be supplied as **canonical standard padded 
 
 A manual workflow dispatch must provide `approver_1`, `signature_1`, `approver_2`, and `signature_2`, in addition to the selected program and typed program-name confirmation. The workflow takes `commit` from its own checked-out `github.sha` and resolves `program_id` from the committed `Anchor.toml`; neither is accepted as dispatcher-controlled input.
 
+`verify_only` defaults to `true`. That mode runs the full pre-deployment chain and then stops without deploying a program or transferring authority. Setting `verify_only` to `false` is the explicit boundary for an authorized deployment attempt; it does not weaken or bypass the two-signature verification.
+
 ## Approval requirements
 
 The workflow must fail unless all of the following are true:
