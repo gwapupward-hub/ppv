@@ -40,5 +40,8 @@
     "mocha": "10.8.2",
     "tsx": "4.19.2",
     "typescript": "5.7.3"
+  },
+  "dependencies": {
+    "@sqds/multisig": "^2.1.4"
   }
 }
