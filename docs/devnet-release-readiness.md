@@ -141,6 +141,62 @@ pull request, a chat message, a log, or a source file. Every tool here takes
 *paths* and *public keys*; the only thing ever printed from a keypair is the
 public key derived from it.
 
+## Release gate progression
+
+A devnet release moves through named gates, in order. Each one is a fact
+somebody can check, not a feeling, and none of them may be assumed from the one
+before it.
+
+```text
+AUDIT
+  -> IDENTITY_VERIFIED
+  -> TESTS_GREEN
+  -> ARTIFACTS_LOCKED
+  -> MULTISIG_VERIFIED
+  -> VERIFY_ONLY_GREEN
+  -> SECURITY_INVARIANTS_GREEN
+  -> AUTHORIZED
+  -> DEVNET_DEPLOYED
+  -> VERIFIED
+```
+
+| Gate | What proves it |
+| --- | --- |
+| `AUDIT` | Independent review of the paths being released, with critical and high findings remediated and re-reviewed. |
+| `IDENTITY_VERIFIED` | `./scripts/verify-devnet-readiness.sh --repo-only` — the permanent ids agree in `declare_id!`, both `Anchor.toml` cluster tables, and `scripts/lib/identity.mjs`. |
+| `TESTS_GREEN` | `npm test`, `cargo test --workspace --locked`, `cargo clippy --workspace --all-targets --locked`, `cargo fmt --all -- --check`, and `npm run test:f1`. |
+| `ARTIFACTS_LOCKED` | `Cargo.lock` and `package-lock.json` committed and unmodified by the build; IDLs reproducible across two builds. |
+| `MULTISIG_VERIFIED` | Deployment-grade `npm run verify:devnet-readiness` — Squads vault off-curve, threshold within policy, member set able to meet it. |
+| `VERIFY_ONLY_GREEN` | The deploy workflow run with `verify_only=true` completing the full pre-deployment chain without deploying. |
+| `SECURITY_INVARIANTS_GREEN` | `npm run test:invariants:release` — the model-based property suite holds `PPV-P1` … `PPV-P10` across the release budget. See [property-testing.md](property-testing.md). |
+| `AUTHORIZED` | Two distinct Squads-member signatures over the exact release message for this program **and this commit**, per [devnet-release-approval.md](devnet-release-approval.md). |
+| `DEVNET_DEPLOYED` | The workflow run with `verify_only=false`, and its recorded deployment evidence. |
+| `VERIFIED` | `./scripts/verify-deployment.sh` against a second, independent RPC provider, plus the identity phase of the smoke suite. |
+
+`SECURITY_INVARIANTS_GREEN` sits after `VERIFY_ONLY_GREEN` and before
+`AUTHORIZED` on purpose. It is the last thing checked about the *code* before
+anyone signs an approval bound to a commit, so the property run and the
+signatures describe the same tree.
+
+### Approvals are bound to a commit, not to a release
+
+Repository contents change. An approval signed over an earlier commit is
+**historical evidence about that commit** and nothing more; it does not carry
+forward. After any merge that touches program sources, build inputs, gates or
+this documentation:
+
+1. Rerun the full deterministic CI and F1.
+2. Run `npm run test:invariants:release`.
+3. Confirm the permanent identities are unchanged
+   (`./scripts/verify-devnet-readiness.sh --repo-only`).
+4. Obtain **fresh** release approvals bound to the new merged commit.
+5. Rerun the workflow with `verify_only=true`.
+6. Only then consider explicit deployment authorization.
+
+Reusing an old commit-bound approval is not permitted, and the workflow refuses
+it: it takes `commit` from its own checked-out `github.sha` and compares it
+against the signed message.
+
 ## Order of operations
 
 1. Complete the manual blockers above.
