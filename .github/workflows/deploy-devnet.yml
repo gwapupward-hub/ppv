@@ -273,6 +273,28 @@ jobs:
           fi
           echo "final upgrade authority: ${UPGRADE_AUTHORITY} (off-curve, threshold ${AUTHORITY_THRESHOLD})"
 
+      - name: Verify deployer funding
+        if: ${{ !inputs.verify_only }}
+        env:
+          MIN_DEPLOYER_LAMPORTS: "2000000000"
+        run: |
+          deployer="$(solana-keygen pubkey "${{ steps.keys.outputs.work }}/deployer.json")"
+          balance_lamports="$(
+            curl -fsS https://api.devnet.solana.com \
+              -X POST -H 'Content-Type: application/json' \
+              -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"getBalance\",\"params\":[\"${deployer}\",{\"commitment\":\"confirmed\"}]}" \
+              | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);if(j.error||!j.result)process.exit(1);process.stdout.write(String(j.result.value))})'
+          )"
+          if ! [[ "${balance_lamports}" =~ ^[0-9]+$ ]]; then
+            echo "Could not determine deployer balance from devnet." >&2
+            exit 1
+          fi
+          if (( balance_lamports < MIN_DEPLOYER_LAMPORTS )); then
+            echo "Deployer ${deployer} has ${balance_lamports} lamports; at least ${MIN_DEPLOYER_LAMPORTS} are required before deployment." >&2
+            exit 1
+          fi
+          node -e 'console.log(`deployer balance: ${Number(process.argv[1]) / 1e9} SOL`)' "${balance_lamports}"
+
       - name: Stop after verification
         if: ${{ inputs.verify_only }}
         run: |
@@ -286,14 +308,19 @@ jobs:
         run: |
           program="${{ inputs.program }}"
           program_id="$(solana-keygen pubkey "target/deploy/${program}-keypair.json")"
+          deploy_log="${{ steps.keys.outputs.work }}/solana-program-deploy.log"
           if ! solana program deploy \
             --url https://api.devnet.solana.com \
             --keypair "${{ steps.keys.outputs.work }}/deployer.json" \
             --program-id "target/deploy/${program}-keypair.json" \
             --upgrade-authority "${{ steps.keys.outputs.work }}/deployer.json" \
-            "target/deploy/${program}.so"; then
+            "target/deploy/${program}.so" >"${deploy_log}" 2>&1; then
+            echo "Solana program deploy failed. Raw CLI output was suppressed because Solana CLI may print temporary buffer recovery material on failure." >&2
+            echo "program id: ${program_id}" >&2
+            echo "Review public devnet state and deployer funding before retrying; do not expose or reuse any temporary buffer recovery phrase." >&2
             exit 1
           fi
+          rm -f "${deploy_log}"
 
           # `solana program deploy` prints only the program id, never the deploy
           # transaction signature — in both its text output and `--output json`
