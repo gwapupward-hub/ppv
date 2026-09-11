@@ -25,6 +25,24 @@
 Run the complete gate with `npm run test:f1`. Passing F1 proves build and state
 machine behavior only. It does not authorize deployment.
 
+## Gate F1b — security invariants
+
+- The model-based property suite holds `PPV-P1` … `PPV-P10` across randomized
+  valid and invalid instruction sequences, asserted after every attempted
+  action, on the same local-validator architecture F1 uses.
+- The suite proves its own budget: it counts the operations it actually
+  attempted and fails below the tier floor.
+- The suite proves its own reach: it fails if the run never funded, completed,
+  settled or cancelled an agreement, never attacked a terminal one, and never
+  refused a wrong-relationship account.
+- Every real counterexample has a permanent deterministic regression under
+  `tests/invariants/regression/`.
+
+Run the PR budget with `npm run test:invariants:pr` (CI runs it after F1) and
+the release budget with `npm run test:invariants:release`. Passing it proves the
+escrow state machine survived randomized attack at the stated budget. It
+authorizes nothing, and it does not move the custody gate below.
+
 ## Gate F2 — devnet design partners
 
 - Controlled program keypairs replace placeholders.
@@ -57,7 +75,13 @@ Before any cluster deployment of `ppv_escrow`:
 - Deliberate vulnerability testing performed on every guard, per
   [security-model.md](security-model.md): each guard removed in turn, the
   corresponding negative test confirmed to fail, then restored.
-- Fuzzing of the state machine and the custody accounting.
+- Fuzzing of the state machine and the custody accounting. Partially met:
+  `npm run test:invariants:release` is the `SECURITY_INVARIANTS_GREEN` gate and
+  attacks the ordinary-escrow custody path with randomized valid and invalid
+  instruction sequences, asserting `PPV-P1` … `PPV-P10` after every attempted
+  action. It covers `fund`, `mark_completed`, `settle` and `cancel` only;
+  disputes, refunds, milestones, bounties, proofs and cross-program composition
+  are still unfuzzed. See [property-testing.md](property-testing.md).
 - An upgrade authority held by a multisig separate from the non-custodial
   programs, so a compromise of one cannot reach the other.
 - Legal review of the settlement and (once implemented) dispute paths.

@@ -1,0 +1,177 @@
+import * as anchor from "@coral-xyz/anchor";
+import assert from "node:assert/strict";
+import * as fc from "fast-check";
+
+import type { GeneratedAction } from "./actions";
+import { describeAction } from "./actions";
+import { InvariantViolation } from "./assertions";
+import { buildFixture, type Fixture } from "./fixture";
+import { sequenceArbitrary } from "./generators";
+import { emptyCoverage, InvariantRunner } from "./runner";
+
+/**
+ * PPV Lesson 12 — model-based property testing of the escrow state machine.
+ *
+ * Scope is ordinary `AgreementType::Escrow` and four instructions: `fund`,
+ * `mark_completed`, `settle` and `cancel`, attacked by a buyer, a seller and an
+ * outsider. Disputes, refunds, milestones, bounties, proofs, migrations,
+ * Marketplace composition, Token-2022 extensions and fee math are **not**
+ * covered here and are not claimed to be; docs/property-testing.md carries the
+ * phased expansion plan.
+ *
+ * Budgets and seeds come from the environment so the tier is a property of the
+ * gate that invoked the suite, never a number buried in a test file:
+ *
+ *   PPV_INVARIANT_SEQUENCES        property runs per seed
+ *   PPV_INVARIANT_ACTIONS          maximum actions in one generated sequence
+ *   PPV_INVARIANT_SEEDS            comma-separated deterministic seeds
+ *   PPV_INVARIANT_SEED             one seed, for replaying a counterexample
+ *   PPV_INVARIANT_PATH             fast-check shrink path, for exact replay
+ *   PPV_INVARIANT_MIN_OPERATIONS   floor this execution must clear
+ */
+
+function envInt(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const value = Number(raw);
+  assert.ok(
+    Number.isInteger(value) && value > 0,
+    `${name} must be a positive integer, got ${JSON.stringify(raw)}`,
+  );
+  return value;
+}
+
+function seedsFromEnv(): number[] {
+  const single = (process.env.PPV_INVARIANT_SEED ?? "").trim();
+  if (single !== "") {
+    const value = Number(single);
+    assert.ok(Number.isFinite(value), `PPV_INVARIANT_SEED must be numeric, got ${single}`);
+    return [value];
+  }
+  const list = (process.env.PPV_INVARIANT_SEEDS ?? "").trim();
+  if (list === "") return [1];
+  return list
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const value = Number(entry);
+      assert.ok(Number.isFinite(value), `PPV_INVARIANT_SEEDS entry is not numeric: ${entry}`);
+      return value;
+    });
+}
+
+const SEQUENCES = envInt("PPV_INVARIANT_SEQUENCES", 100);
+const ACTIONS = envInt("PPV_INVARIANT_ACTIONS", 20);
+const SEEDS = seedsFromEnv();
+/**
+ * Sequence length is generated rather than fixed, because a counterexample has
+ * to shrink toward the shortest sequence that still breaks the property. The
+ * budget is therefore stated and asserted as total attempted operations, not
+ * assumed from the run count.
+ */
+const MIN_OPERATIONS = envInt("PPV_INVARIANT_MIN_OPERATIONS", 2_000);
+const REPLAY_PATH = process.env.PPV_INVARIANT_PATH?.trim() || undefined;
+
+describe("PPV protocol invariants (property-based)", function () {
+  // Thousands of on-chain transactions against a local validator is not a unit
+  // test. The budget is bounded and printed; the timeout follows from it.
+  this.timeout(180 * 60 * 1000);
+
+  const provider = anchor.AnchorProvider.env();
+  anchor.setProvider(provider);
+  const escrow = anchor.workspace.PpvEscrow as any;
+
+  const coverage = emptyCoverage();
+  let fixture: Fixture;
+  let runner: InvariantRunner;
+
+  before(async function () {
+    this.timeout(10 * 60 * 1000);
+    // Shrinking re-executes sequences, so a run can create several times the
+    // nominal number of agreements. Size the wallet for that, not for the
+    // happy case.
+    fixture = await buildFixture(provider, escrow, SEQUENCES * SEEDS.length * 3);
+    runner = new InvariantRunner(fixture);
+  });
+
+  for (const seed of SEEDS) {
+    it(`holds every invariant over ${SEQUENCES} sequences of <=${ACTIONS} actions (seed ${seed})`, async () => {
+      const before = coverage.attempted;
+      try {
+        await fc.assert(
+          fc.asyncProperty(sequenceArbitrary(ACTIONS), async (sequence) => {
+            await runner.runSequence(seed, sequence, coverage);
+          }),
+          {
+            seed,
+            numRuns: SEQUENCES,
+            path: REPLAY_PATH,
+            // Shrinking is the point: a twenty-action counterexample nobody can
+            // read is a bug report nobody acts on.
+            endOnFailure: false,
+            reporter: (out) => {
+              if (!out.failed) return;
+              const cause: unknown = (out as { errorInstance?: unknown }).errorInstance;
+              const detail =
+                cause instanceof InvariantViolation ? cause.message : String(out.error ?? cause);
+              const minimized = (out.counterexample?.[0] ?? []) as GeneratedAction[];
+              throw new Error(
+                [
+                  "",
+                  "PPV protocol invariant violated.",
+                  `  seed            : ${seed}`,
+                  `  shrink path     : ${out.counterexamplePath}`,
+                  `  replay          : PPV_INVARIANT_SEED=${seed} PPV_INVARIANT_PATH=${out.counterexamplePath} npm run test:invariants:seed`,
+                  `  runs executed   : ${out.numRuns}`,
+                  `  shrinks applied : ${out.numShrinks}`,
+                  `  minimized to    : ${minimized.length} action(s)`,
+                  ...minimized.map((action, index) => `    [${index}] ${describeAction(action)}`),
+                  detail,
+                ].join("\n"),
+              );
+            },
+          },
+        );
+      } finally {
+        // What this seed actually spent, printed whether it passed or failed.
+        // A property suite that silently shrinks its own coverage is worse than
+        // no property suite.
+        console.log(
+          `    seed ${seed}: ${coverage.attempted - before} operations attempted ` +
+            `(${coverage.succeeded} accepted, ${coverage.refused} refused, run total ${coverage.attempted})`,
+        );
+      }
+    });
+  }
+
+  it("spent the adversarial budget it claims and reached every state it covers", () => {
+    assert.ok(
+      coverage.attempted >= MIN_OPERATIONS,
+      `expected at least ${MIN_OPERATIONS} attempted operations, ran ${coverage.attempted}`,
+    );
+    // Coverage floors, not statistics. Each names a state the invariant set is
+    // only meaningful about if the run actually got there. A generator bias
+    // that quietly stopped producing settlements fails here rather than
+    // reporting a green gate over an unexercised state machine.
+    assert.ok(coverage.fundings > 0, "no funding ever succeeded");
+    assert.ok(coverage.completions > 0, "no completion ever succeeded");
+    assert.ok(
+      coverage.settlements > 0,
+      "no settlement ever succeeded — PPV-P3 and PPV-P4 were never exercised",
+    );
+    assert.ok(
+      coverage.cancellations > 0,
+      "no cancellation ever succeeded — PPV-P2 was only half exercised",
+    );
+    assert.ok(
+      coverage.postTerminalAttempts > 0,
+      "nothing was attempted against a terminal agreement — PPV-P2 was never exercised",
+    );
+    assert.ok(
+      coverage.refusedNonCanonical > 0,
+      "no wrong-relationship account was ever refused — PPV-P9 was never exercised",
+    );
+    console.log(`    coverage: ${JSON.stringify(coverage)}`);
+  });
+});

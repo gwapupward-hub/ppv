@@ -41,7 +41,7 @@ jobs:
     if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
     name: Anchor local validator
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -108,5 +108,12 @@ jobs:
       - run: npm ci
       - name: Build twice, compare IDLs, and run validator tests
         run: npm run test:f1
+      # The security-invariant gate runs only after deterministic correctness is
+      # established: a property harness pointed at a program whose fixed tests
+      # are already red reports noise, not findings. Budget is the PR tier —
+      # 100 sequences of up to 20 actions across three fixed seeds, with a
+      # floor of 2,000 attempted operations asserted by the suite itself.
+      - name: Security invariants (PPV-P1..P10, property-based)
+        run: npm run test:invariants:pr
       - name: Assert the build did not rewrite the lockfile
         run: git diff --exit-code -- Cargo.lock

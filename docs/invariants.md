@@ -61,6 +61,47 @@ with no test is an intention.
 | 20 | A signature binds the exact version and hashes the signer saw. |
 | 21 | Evidence accounts cannot be closed; revocation adds history rather than erasing it. |
 
+## Property-tested protocol invariants (`PPV-P1` … `PPV-P10`)
+
+The invariants above are each pinned by a fixed test. The ones below are pinned
+by a *property*: an independent reference model plays the same instruction
+sequences the chain does, and every invariant is asserted after every attempted
+action — successful or refused. The harness lives in `tests/invariants/` and is
+run by `scripts/verify-invariants.sh`; `docs/property-testing.md` describes the
+architecture, budgets, seeds and limits.
+
+Scope of this harness is ordinary `AgreementType::Escrow` and four
+instructions — `fund`, `mark_completed`, `settle`, `cancel` — attacked by a
+buyer, a seller and an outsider. Nothing here claims coverage of disputes,
+refunds, milestones, bounties, proofs, migrations, Marketplace composition,
+Token-2022 extensions or fee math.
+
+`model` is the rule in `tests/invariants/model.ts`, written from this document
+and `state-machines.md` rather than transcribed from the program. `observed` is
+what `tests/invariants/snapshots.ts` reads back from the validator. `generated`
+is the coverage `tests/invariants/generators.ts` produces.
+
+| # | Invariant | Independent model rule | Chain observation | Generator coverage | Deterministic counterpart |
+| --- | --- | --- | --- | --- | --- |
+| PPV-P1 | Custody is conserved across the controlled token population. Setup minting is the only creation of value, and the baseline is taken once it is finished. | Balances move only on a transition the model itself accepted. | Buyer, seller, attacker and outsider token accounts, this agreement's vault, the unrelated agreement's vault and the substituted "fake vault", summed at one commitment, plus the balances retired with finished sequences. | Every action, valid and invalid, including every substituted source and destination. | Invariant 10, `tests/escrow.ts` "leaves a donated surplus untouched" |
+| PPV-P2 | Terminal finality: once `Settled` or `Cancelled`, no later action causes a lifecycle transition, and every economic observable is unchanged. | `settled` and `cancelled` are absorbing; `predict` refuses every action from them. | Decoded `AgreementState` plus the full economic fingerprint, before and after. | Sequences continue for their full budget after reaching a terminal state; the suite asserts a floor of post-terminal attempts. | Invariant 2, `every_ending_is_final` |
+| PPV-P3 | One agreement, at most one canonical settlement; the seller is never paid twice. | `settlementCount` increments only on an accepted `settle`, reachable only from `completed`. | `settled_total` against `amount`, and the count of settlements the harness itself executed. | `settle` is generated repeatedly, including after settlement and after cancellation. | Invariant 1, `double_settlement_is_impossible`, `regression/settlement-state-gate.ts` |
+| PPV-P4 | A successful settlement may increase only a token account owned by the canonical seller. | `predict` accepts `settle` only with `destination = seller`. | Seller balance delta equals `amount`; buyer, attacker and outsider balances unchanged. | `destination` is drawn from seller, buyer, attacker, an unrelated wallet, and a seller-owned account of the *wrong* mint. | Invariant 5, "cannot be redirected away from the seller" |
+| PPV-P5 | Escrow assets never leave through a substituted vault or a substituted authority. | Any non-canonical `vault` or `vaultAuthority` is refused outright. | The canonical vault balance, the unrelated agreement's vault, and an attacker-owned token account presented as a vault. | `vault` ∈ {canonical, another agreement's vault, a non-PDA token account}; `vaultAuthority` ∈ {canonical, another agreement's authority}. | Invariants 9 and 11, "refuses a substituted vault, vault authority, or mint" |
+| PPV-P6 | For an ordinary escrow, `creator == initialBuyer` and `counterparty == initialSeller` after every operation. Not applicable unchanged to `Bounty`, whose counterparty is intentionally assignable exactly once. | The model's `buyer` and `seller` are fixed at construction and never written. | Decoded `creator` and `counterparty` compared with the values initialization recorded. | Asserted after every action of every sequence. | Invariant 12j (bounty's deliberate exception), `a_bounty_names_its_winner_once_and_never_again` |
+| PPV-P7 | `agreement.mint` equals the mint it was initialized with, forever. | The model's `mint` is fixed at construction. | Decoded `mint` compared with the initialized mint. | Every custody action is generated with the agreement's mint and with an unrelated mint of the same decimals. | Invariant 7, "refuses a substituted mint…" |
+| PPV-P8 | A failed action leaves every economically or semantically relevant observable byte-identical. | A refused action produces no model transition. | The raw agreement account, every token balance in the population, and the unrelated agreement's raw account, compared before and after. | Most generated actions fail; each one is an atomicity case. | Invariant 13, "emits nothing when it fails" |
+| PPV-P9 | Correctly formed accounts in the wrong relationship are refused, and the unrelated agreement is never reachable. | Any non-canonical account for the instruction is refused. | The unrelated agreement's raw account and vault balance must be identical after every action. | Agreement A with vault B, agreement A with a wrong mint, a destination owned by the attacker, buyer/seller role substitution, and an unrelated agreement PDA. | Invariants 8, 11, 12a, 12g; cross-agreement isolation in `tests/escrow.ts` |
+| PPV-P10 | The only legal successful edges are `Open → Funded`, `Open → Cancelled`, `Funded → Completed`, `Completed → Settled`. | `LEGAL_EDGES` in `model.ts` is the whole table. | Decoded state before and after; any change must correspond to an accepted action and a listed edge. | Every instruction is generated from every reachable state, by every actor. | Invariants 2 and 9a, `docs/state-machines.md` |
+
+Receipts are deliberately *not* modelled here as an on-chain account. PPV
+receipts are projections reconstructed from committed events (Invariants 15–17),
+so the property this harness carries is the protocol fact underneath them: one
+agreement admits at most one canonical settlement transition, and no history can
+represent two. Receipt and indexer coverage belongs in PPV's own replay
+architecture (`sdk/src/escrow/receipts.ts`, `scripts/replay-agreement.mts`), not
+in an invented settlement account.
+
 ## Invariants deferred with their phases
 
 
