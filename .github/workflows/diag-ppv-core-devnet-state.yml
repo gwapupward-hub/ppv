@@ -1,0 +1,51 @@
+name: Diagnose PPV Core devnet state
+
+on:
+  push:
+    branches: ["diag/ppv-core-devnet-state"]
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Query devnet program and deployer state
+        env:
+          PROGRAM_ID: 9cWE41ZDNQChvFrRoVuPQDeoVLg46ACTiZRCZaBZzfwU
+          DEPLOYER: GkatP48ywhv2Dh9RibLXXdXV4uRDEF7ZY2oKkVqmGUiu
+          RPC: https://api.devnet.solana.com
+        run: |
+          node <<'NODE'
+          const { PROGRAM_ID, DEPLOYER, RPC } = process.env;
+          async function rpc(method, params) {
+            const res = await fetch(RPC, {
+              method: 'POST',
+              headers: {'content-type':'application/json'},
+              body: JSON.stringify({jsonrpc:'2.0', id:1, method, params}),
+            });
+            const json = await res.json();
+            if (json.error) throw new Error(JSON.stringify(json.error));
+            return json.result;
+          }
+          const main = async () => {
+            const program = await rpc('getAccountInfo', [PROGRAM_ID, {encoding:'base64', commitment:'confirmed'}]);
+            const balance = await rpc('getBalance', [DEPLOYER, {commitment:'confirmed'}]);
+            const sigs = await rpc('getSignaturesForAddress', [PROGRAM_ID, {limit:5, commitment:'confirmed'}]);
+            console.log(`program_exists=${program.value !== null}`);
+            if (program.value) {
+              console.log(`program_executable=${program.value.executable}`);
+              console.log(`program_owner=${program.value.owner}`);
+              console.log(`program_lamports=${program.value.lamports}`);
+            }
+            console.log(`program_signature_count=${sigs.length}`);
+            console.log(`deployer_balance_lamports=${balance.value}`);
+            console.log(`deployer_balance_sol=${balance.value / 1_000_000_000}`);
+          };
+          main().catch(err => { console.error(err); process.exit(1); });
+          NODE
