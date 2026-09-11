@@ -1,0 +1,208 @@
+name: Diagnose devnet release
+
+# Manual, non-deploying diagnostic workflow. This workflow exists to classify
+# permanent-program identity and build failures without entering the approval,
+# deployment, or upgrade-authority paths in deploy-devnet.yml.
+on:
+  workflow_dispatch:
+    inputs:
+      program:
+        description: Program identity/build to diagnose
+        required: true
+        type: choice
+        options: [ppv_core, ppv_commerce]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: diagnose-devnet-release
+  cancel-in-progress: false
+
+jobs:
+  diagnose:
+    name: Diagnose ${{ inputs.program }} release gate
+    runs-on: ubuntu-latest
+    environment: devnet
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install pinned Rust toolchains
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.85.1 --profile minimal
+          rustup toolchain install 1.79.0 --profile minimal
+          rustup toolchain install nightly-2024-06-15 --profile minimal
+
+      - name: Install Solana CLI 1.18.17
+        run: |
+          set -euo pipefail
+          sh -c "$(curl --proto '=https' --tlsv1.2 -sSfL https://release.anza.xyz/v1.18.17/install)"
+          echo "${HOME}/.local/share/solana/install/active_release/bin" >> "${GITHUB_PATH}"
+
+      - name: Install Anchor CLI 0.30.1
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes libudev-dev pkg-config
+          cargo +1.79.0 install \
+            --git https://github.com/solana-foundation/anchor \
+            --tag v0.30.1 anchor-cli --locked --force
+
+      - name: Install repository dependencies
+        run: npm ci
+
+      - name: Repository identity preflight
+        run: |
+          set -euo pipefail
+          ./scripts/verify-devnet-readiness.sh --repo-only
+
+      - name: Materialize selected permanent keypair
+        id: keypair
+        env:
+          CORE_KEYPAIR: ${{ secrets.PPV_CORE_PROGRAM_KEYPAIR }}
+          COMMERCE_KEYPAIR: ${{ secrets.PPV_COMMERCE_PROGRAM_KEYPAIR }}
+        run: |
+          set -euo pipefail
+          program="${{ inputs.program }}"
+          case "${program}" in
+            ppv_core)
+              keypair_json="${CORE_KEYPAIR}"
+              ;;
+            ppv_commerce)
+              keypair_json="${COMMERCE_KEYPAIR}"
+              ;;
+            *)
+              echo "Unsupported program: ${program}" >&2
+              exit 1
+              ;;
+          esac
+
+          if [[ -z "${keypair_json}" ]]; then
+            echo "Permanent keypair secret for ${program} is not configured." >&2
+            exit 1
+          fi
+
+          work="$(mktemp -d)"
+          umask 077
+          printf '%s' "${keypair_json}" > "${work}/${program}-keypair.json"
+          echo "work=${work}" >> "${GITHUB_OUTPUT}"
+
+          # Public address only. Never print private key material.
+          keypair_id="$(solana-keygen pubkey "${work}/${program}-keypair.json")"
+          echo "program_id=${keypair_id}" >> "${GITHUB_OUTPUT}"
+          echo "Recovered permanent program address: ${keypair_id}"
+
+      - name: Assert Rust declare_id identity
+        env:
+          KEYPAIR_ID: ${{ steps.keypair.outputs.program_id }}
+        run: |
+          set -euo pipefail
+          program="${{ inputs.program }}"
+          declared_id="$(sed -n 's/^declare_id!("\(.*\)");$/\1/p' "programs/${program}/src/lib.rs")"
+
+          if [[ -z "${declared_id}" ]]; then
+            echo "FAIL: could not resolve declare_id! for ${program}." >&2
+            exit 1
+          fi
+          echo "declare_id!: ${declared_id}"
+          if [[ "${KEYPAIR_ID}" != "${declared_id}" ]]; then
+            echo "WRONG PERMANENT KEYPAIR: recovered address ${KEYPAIR_ID} does not match declare_id! ${declared_id}." >&2
+            exit 1
+          fi
+          echo "PASS: permanent keypair matches declare_id!."
+
+      - name: Assert Anchor.toml identity
+        env:
+          KEYPAIR_ID: ${{ steps.keypair.outputs.program_id }}
+        run: |
+          set -euo pipefail
+          program="${{ inputs.program }}"
+          mapfile -t anchor_ids < <(sed -n "s/^${program} = \"\(.*\)\"$/\1/p" Anchor.toml | sort -u)
+
+          if [[ "${#anchor_ids[@]}" -ne 1 ]]; then
+            echo "FAIL: expected exactly one committed Anchor.toml identity for ${program}; found ${#anchor_ids[@]}." >&2
+            exit 1
+          fi
+          echo "Anchor.toml: ${anchor_ids[0]}"
+          if [[ "${KEYPAIR_ID}" != "${anchor_ids[0]}" ]]; then
+            echo "WRONG PERMANENT KEYPAIR: recovered address ${KEYPAIR_ID} does not match Anchor.toml ${anchor_ids[0]}." >&2
+            exit 1
+          fi
+          echo "PASS: permanent keypair matches Anchor.toml."
+
+      - name: Stage permanent keypair for Anchor build
+        run: |
+          set -euo pipefail
+          program="${{ inputs.program }}"
+          mkdir -p target/deploy
+          cp "${{ steps.keypair.outputs.work }}/${program}-keypair.json" "target/deploy/${program}-keypair.json"
+          chmod 600 "target/deploy/${program}-keypair.json"
+          echo "PASS: selected permanent keypair staged for build."
+
+      - name: Build with pinned Anchor toolchain
+        run: |
+          set -euo pipefail
+          echo "Running Anchor build with nightly-2024-06-15..."
+          RUSTUP_TOOLCHAIN=nightly-2024-06-15 anchor build
+          echo "PASS: anchor build completed."
+
+      - name: Assert generated IDL identity
+        env:
+          KEYPAIR_ID: ${{ steps.keypair.outputs.program_id }}
+        run: |
+          set -euo pipefail
+          program="${{ inputs.program }}"
+          idl="target/idl/${program}.json"
+          if [[ ! -f "${idl}" ]]; then
+            echo "FAIL: build did not produce ${idl}." >&2
+            exit 1
+          fi
+
+          idl_id="$(node -e "const x=require('./${idl}'); process.stdout.write(x.address || x.metadata?.address || '')")"
+          if [[ -z "${idl_id}" ]]; then
+            echo "FAIL: generated IDL does not contain a program address." >&2
+            exit 1
+          fi
+          echo "Generated IDL address: ${idl_id}"
+          if [[ "${KEYPAIR_ID}" != "${idl_id}" ]]; then
+            echo "FAIL: generated IDL address ${idl_id} does not match permanent keypair ${KEYPAIR_ID}." >&2
+            exit 1
+          fi
+          echo "PASS: generated IDL identity matches permanent keypair."
+
+      - name: Assert build did not mutate committed identity
+        run: |
+          set -euo pipefail
+          program="${{ inputs.program }}"
+          if ! git diff --exit-code -- Anchor.toml "programs/${program}/src/lib.rs"; then
+            echo "FAIL: anchor build mutated committed identity files." >&2
+            echo "This is an identity/build consistency failure; do not deploy." >&2
+            exit 1
+          fi
+          echo "PASS: committed identity files remain clean after build."
+
+      - name: Record public diagnostic hashes
+        run: |
+          set -euo pipefail
+          program="${{ inputs.program }}"
+          test -f "target/idl/${program}.json"
+          test -f "target/deploy/${program}.so"
+          echo "Public build hashes:"
+          sha256sum "target/idl/${program}.json" "target/deploy/${program}.so"
+
+      - name: Diagnostic result
+        run: |
+          echo "PASS: permanent identity and build diagnostics completed."
+          echo "This workflow cannot deploy a program or transfer upgrade authority."
+
+      - name: Destroy signing material
+        if: always()
+        run: |
+          rm -rf "${{ steps.keypair.outputs.work }}" target/deploy/*-keypair.json
