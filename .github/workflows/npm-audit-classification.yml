@@ -1,0 +1,21 @@
+name: NPM audit classification
+
+on:
+  push:
+    branches: ["feat/npm-audit-classification"]
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: npm audit details
+        run: npm audit --json || true
