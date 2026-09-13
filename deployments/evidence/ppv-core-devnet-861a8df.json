@@ -1,0 +1,41 @@
+{
+  "cluster": "devnet",
+  "program": "ppv_core",
+  "programId": "9cWE41ZDNQChvFrRoVuPQDeoVLg46ACTiZRCZaBZzfwU",
+  "releaseCommit": "861a8dfce9533f75494621b8a36e60e60447cc0c",
+  "deploymentSignature": "3A1fMmAZiBfjKb9ijUW81KaqEyZqEtT7vha2Ms2hZanxhjcDaJn4wKJvEwSkDJBK3Co7eJnTyn6wvc2iXaYaAxAp",
+  "deploymentSlot": 497437304,
+  "deploymentStatus": "finalized",
+  "deploymentError": null,
+  "programExecutable": true,
+  "programOwner": "BPFLoaderUpgradeab1e11111111111111111111111",
+  "programDataAddress": "FfEQrpiQSzxUErCBkXCukbt26JivKiExA6HswMpQkiSA",
+  "upgradeAuthority": "B6tcsTrMCKTZV5vi3rRCnA3FMPeeWACSHuuTSz5XQgnX",
+  "upgradeAuthorityKind": "squads-multisig",
+  "upgradeAuthorityThreshold": 2,
+  "upgradeAuthorityMembers": [
+    "58kuGbxpvaamvYE44WYkyipBB6FVKt2qT9u3vAKtyKYV",
+    "2FFVcm9xJmUHG6zfo15ktzuGQTXACPG42iquGHe6faTN",
+    "BJmFM4k7Q32CiCYSdoYkAhXdD5Sk3BegMh2cbEAsgSwJ"
+  ],
+  "authorityTransferSignature": "5TX9vvX5ktHE19mDZw5VXkNajZESrPxQZGqxQ26B5pzrLhuVPELTaB8KTsKXCUmpvNzv9FCj2JpHR8Re3jiuTwgj",
+  "authorityTransferSlot": 497437312,
+  "releaseApprovals": [
+    {
+      "approver": "2FFVcm9xJmUHG6zfo15ktzuGQTXACPG42iquGHe6faTN",
+      "signature": "LlYyxx2wEoqhm7N5CTi6eX8iabNDTPj+pKPr7a2A+CDIow57WgA5xaF0leQ7x2sB9xqkHGZPFxBO2nn3kdRmDw=="
+    },
+    {
+      "approver": "58kuGbxpvaamvYE44WYkyipBB6FVKt2qT9u3vAKtyKYV",
+      "signature": "5xYq6JnsOsICiKBw0KjNDlD9IcuzaJm4ZVSa/3BoxYTKQ6D8lhr2Yh0o9DzKZVuGsqYX1gQuPMVQlAk69ELUBw=="
+    }
+  ],
+  "verification": {
+    "method": "raw-solana-json-rpc",
+    "rpc": "https://api.devnet.solana.com",
+    "githubActionsRunId": 34726889202,
+    "verifiedAt": "2026-09-13T00:01:25Z",
+    "result": "verified"
+  },
+  "notes": "The initial deployment workflow run completed the program deployment and Squads authority transfer, then failed only because its read-only post-deploy verifier depended on a missing default Solana CLI signer. This evidence was independently reconstructed from raw devnet JSON-RPC without signing material."
+}
