@@ -273,3 +273,67 @@ test("evidence collection refuses to record a binary the chain is not running", 
   // verification have drifted apart.
   assert.deepEqual(checkRecord(record), []);
 });
+
+/**
+ * The committed release records.
+ *
+ * These files are load-bearing — the deploy workflow, the preflight and the
+ * smoke suite all read them — so a record that has drifted out of the shape the
+ * verifier accepts would silently weaken all three. Checked here rather than
+ * only in the workflow that reads the chain, because this failure does not need
+ * a network to detect and should not wait for one.
+ */
+test("every committed release record is one the verifier accepts", async () => {
+  const { readdirSync, readFileSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { PERMANENT_PROGRAM_IDS } = await import("../lib/identity.mjs");
+  const { REPO } = await import("./helpers.mjs");
+
+  const dir = join(REPO, "deployments", "evidence");
+  const records = readdirSync(dir).filter((entry) => entry.endsWith(".json"));
+  assert.ok(records.length > 0, "there must be at least one committed release record");
+
+  for (const entry of records) {
+    const record = JSON.parse(readFileSync(join(dir, entry), "utf8"));
+    assert.deepEqual(checkRecord(record), [], `${entry} is not a record the verifier accepts`);
+    assert.equal(record.programId, PERMANENT_PROGRAM_IDS[record.program]);
+    assert.equal(record.binaryHash, record.onChainBinaryHash, `${entry} records a binary mismatch`);
+    assert.equal(record.binaryHash, record.builtBinaryHash, `${entry} records a binary mismatch`);
+    assert.equal(record.binaryHashesMatch, true);
+    // The loader's header sits in front of the ELF; the two lengths must agree
+    // or the record is describing an account layout that does not exist.
+    assert.equal(
+      record.programDataLength,
+      45 + record.binaryLength + record.programDataPaddingLength,
+      `${entry} has inconsistent ProgramData lengths`,
+    );
+    assert.equal(record.programOwner, "BPFLoaderUpgradeab1e11111111111111111111111");
+    assert.equal(record.programDataOwner, "BPFLoaderUpgradeab1e11111111111111111111111");
+    assert.equal(record.programExecutable, true);
+    assert.equal(record.deploymentStatus, "finalized");
+    assert.match(record.idlHash, /^sha256:[0-9a-f]{64}$/);
+    // No secret material, ever. A record is published evidence.
+    const text = JSON.stringify(record);
+    assert.doesNotMatch(text, /PRIVATE KEY|secretKey|mnemonic|\[\s*\d+\s*,\s*\d+\s*,/i);
+  }
+});
+
+test("the PPV Core record is the release this repository claims to have shipped", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { REPO } = await import("./helpers.mjs");
+
+  const record = JSON.parse(
+    readFileSync(join(REPO, "deployments", "evidence", "ppv-core-devnet-861a8df.json"), "utf8"),
+  );
+  assert.equal(record.releaseCommit, COMMIT);
+  assert.equal(record.programId, CORE_ID);
+  assert.equal(record.programDataAddress, CORE_PROGRAM_DATA);
+  assert.equal(record.deploymentSignature, DEPLOY_SIG);
+  assert.equal(record.authorityTransferSignature, TRANSFER_SIG);
+  assert.equal(record.upgradeAuthority, "B6tcsTrMCKTZV5vi3rRCnA3FMPeeWACSHuuTSz5XQgnX");
+  assert.equal(record.upgradeAuthorityThreshold, 2);
+  assert.equal(record.upgradeAuthorityMembers.length, 3);
+  assert.equal(record.cluster, "devnet");
+  assert.equal(record.genesisHash, "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG");
+});

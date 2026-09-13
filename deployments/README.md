@@ -1,5 +1,11 @@
 # Deployment manifests
 
+The canonical, load-bearing record of a release is the per-program JSON file in
+[`evidence/`](evidence/README.md). This manifest is the per-cluster log that sits
+alongside it: one entry per deployment, append-only, so a past binary can still
+be identified and restored years later. Both are written from the chain by
+read-only, signer-free tooling.
+
 Each cluster PPV is deployed to gets one manifest file in this directory —
 `devnet.json` for devnet. A manifest is the public, auditable record of what was
 deployed, from which source, by which authority.
@@ -32,7 +38,7 @@ means "deployed but undocumented".
 ```jsonc
 {
   "cluster": "devnet",
-  "genesisHash": "<cluster genesis hash from `solana genesis-hash`>",
+  "genesisHash": "<cluster genesis hash>",
   "deployments": [
     {
       "program": "ppv_core",                  // or "ppv_commerce"
@@ -82,12 +88,20 @@ toolchain must reproduce the same `binaryHash`.
 ## Verifying a manifest entry
 
 ```bash
-solana program show <programId> --url "$SOLANA_RPC_URL"
+./scripts/verify-deployment.sh
+PPV_VERIFY_RPC_URL=https://<second-provider> ./scripts/verify-deployment.sh
 ```
 
-The reported ProgramData address and upgrade authority must equal
-`programDataAddress` and `upgradeAuthority`. Repeat the read against a second,
-independent RPC provider — a manifest verified only through the node that served
-the deployment is not independently verified.
+Every live entry is checked against the chain: the program exists, is
+executable, is owned by the BPF upgradeable loader, resolves to the recorded
+ProgramData, is held by the recorded upgrade authority, and its deployment
+signature is in transaction history without an error.
+
+The reads are raw JSON-RPC. Not the Solana CLI — it expects a configured default
+signer even for read-only commands, so building verification on it quietly
+requires the ability to sign in order to look, which defeats the purpose of a
+manifest anyone can check. Repeat the check against a second, independent RPC
+provider: a manifest verified only through the node that served the deployment
+is not independently verified.
 
 See `docs/devnet-deployment.md` for the full deployment and rollback procedure.

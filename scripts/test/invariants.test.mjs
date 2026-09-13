@@ -138,14 +138,29 @@ test("the deterministic suite runs the invariant regressions and not the propert
   assert.match(GATE, /PPV_ANCHOR_TEST_GLOB="tests\/invariants\/\*\*\/\*\.invariant\.ts"/);
 });
 
-test("CI runs the PR invariant gate after the deterministic gate", () => {
-  assert.match(CI, /npm run test:invariants:pr/, "CI must run the PR invariant tier");
+test("CI runs the invariant gate after the deterministic gate", () => {
   const anchorJob = CI.slice(CI.indexOf("\n  anchor:"));
   const f1 = anchorJob.indexOf("npm run test:f1");
-  const invariants = anchorJob.indexOf("npm run test:invariants:pr");
+  const invariants = anchorJob.indexOf('npm run "test:invariants:${TIER}"');
   assert.ok(f1 >= 0 && invariants >= 0, "both gates must run in the validator job");
   assert.ok(
     f1 < invariants,
     "the invariant gate runs after deterministic correctness is established",
   );
+});
+
+test("a pull request gets the PR budget and a scheduled run gets the release budget", () => {
+  // The release tier is too slow to run on every pull request, and a gate that
+  // nobody ever runs is not a gate. So: PR budget by default, release budget on
+  // the weekly schedule and on demand, and no way to end up with neither.
+  const anchorJob = CI.slice(CI.indexOf("\n  anchor:"));
+  assert.match(
+    anchorJob,
+    /TIER: \$\{\{ inputs\.invariant_tier \|\| \(github\.event_name == 'schedule' && 'release'\) \|\| 'pr' \}\}/,
+  );
+  assert.match(CI, /schedule:\n\s+- cron:/);
+  assert.match(CI, /options: \[pr, release\]/);
+  // The job has to be allowed to run for the events that raise the budget.
+  assert.match(anchorJob, /github\.event_name == 'schedule'/);
+  assert.match(anchorJob, /github\.event_name == 'workflow_dispatch'/);
 });

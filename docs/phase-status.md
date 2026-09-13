@@ -19,10 +19,18 @@
 | 12 — Optional NFT | **Blocked** | needs a deployed program |
 | 13 — Advanced arbitration | **Blocked** | needs the security review |
 
-Everything marked Done is code, tests and documentation. **None of it is
-deployed.** `ppv_escrow` has a build-only placeholder program id and is
-deliberately absent from `[programs.devnet]` and from the devnet deploy
-workflow.
+**`ppv_core` is released to devnet** and is the only deployed program:
+`9cWE41ZDNQChvFrRoVuPQDeoVLg46ACTiZRCZaBZzfwU`, held by the Squads 2-of-3 vault,
+with its deployed bytes proven equal to the release commit. See
+[releases/ppv-core-devnet-v1.md](releases/ppv-core-devnet-v1.md).
+
+Everything else marked Done is code, tests and documentation, and is **not
+deployed**. `ppv_commerce` has a permanent identity and has not been deployed;
+its readiness is assessed in
+[releases/ppv-commerce-devnet-readiness.md](releases/ppv-commerce-devnet-readiness.md).
+`ppv_escrow` has a build-only placeholder program id and is deliberately absent
+from `[programs.devnet]` and from the devnet deploy workflow. Its custody gate
+is closed.
 
 ## What is blocking the rest
 

@@ -3,6 +3,16 @@
 This runbook covers PPV Foundation on **Solana devnet only**. Mainnet is out of
 scope for Foundation and is not covered here.
 
+> **`ppv_core` is already released to devnet.** Its initial deployment is
+> complete and its upgrade authority is the Squads vault. The initial-deployment
+> procedure below does not apply to it and the workflow refuses to run it; a
+> future Core change is an upgrade, described in
+> [`ppv-core-upgrade-runbook.md`](ppv-core-upgrade-runbook.md). The release
+> itself is recorded in
+> [`releases/ppv-core-devnet-v1.md`](releases/ppv-core-devnet-v1.md).
+>
+> The procedure below is live for `ppv_commerce`, which has not been deployed.
+
 Nothing in this document, and nothing committed to this repository, contains
 signing material. Program keypairs, deployer keypairs, and upgrade-authority
 keypairs live only in the operator secret store. This repository records public
@@ -296,22 +306,45 @@ not evidence.
 
 ## Post-deployment verification
 
-For each program:
+Do not verify a deployment with the Solana CLI. It expects a configured default
+signer even for read-only commands, so on a machine without a wallet — a CI
+runner, or anyone auditing the release from outside — it fails. That is not a
+hypothetical: it is what turned PPV Core's successful deployment into a failed
+workflow run with no evidence attached to it.
 
 ```bash
-solana program show <PROGRAM_ID> --url https://api.devnet.solana.com
-solana account <PROGRAM_ID> --url https://api.devnet.solana.com --output json
+# Reconstructs the canonical record from public chain state plus the build
+# output, and refuses to write one whose rebuild is not byte-identical to the
+# bytes the loader is holding.
+PPV_PROGRAM=ppv_core \
+PPV_RELEASE_COMMIT=<40-char sha> \
+PPV_DEPLOY_SIGNATURE=<base58> \
+PPV_AUTHORITY_TRANSFER_SIGNATURE=<base58> \
+PPV_UPGRADE_AUTHORITY_MEMBERS=<pubkey,pubkey,...> \
+PPV_UPGRADE_AUTHORITY_THRESHOLD=2 \
+  node scripts/collect-deployment-evidence.mjs deployments/evidence/<program>-devnet-<sha7>.json
+
+# Re-checks that record against the chain. Needs an endpoint and nothing else.
+node scripts/verify-deployed-program.mjs deployments/evidence/<program>-devnet-<sha7>.json
+
+# The same check through a second, independent provider, so verification does
+# not depend on the node that served the deployment.
+PPV_VERIFY_RPC_URL=https://<second-provider> \
+  node scripts/verify-deployed-program.mjs deployments/evidence/<program>-devnet-<sha7>.json
 ```
 
-Confirm:
+Commit the record. It is not documentation: the deploy workflow refuses to
+initially deploy any program that has one, the preflight stops treating that
+program's address as a blocker, and the smoke suite starts demanding it on
+chain. `.github/workflows/verify-devnet-deployment.yml` re-runs the verification
+weekly and on demand.
 
-- the account is `executable: true` and owned by `BPFLoaderUpgradeab1e11111111111111111111111`
-- the ProgramData address matches what `solana program show` reports
-- the upgrade authority equals the intended public key
-- the deployed slot and the deployment signature are recorded
+To look at live state without a record — before a first deployment, or while
+investigating:
 
-Then repeat the account read through a **second, independent RPC provider** so
-the verification does not depend on the same node that served the deployment.
+```bash
+node scripts/verify-deployed-program.mjs --inspect <PROGRAM_ID>
+```
 
 ## Deployment manifest
 
@@ -322,14 +355,17 @@ schema and the field-by-field meaning.
 ## Rollback and redeploy
 
 Upgradeable programs are not rolled back by deleting them; they are redeployed
-with a known-good artifact.
+with a known-good artifact. For a program whose upgrade authority is the Squads
+vault — which is every released program — a rollback is an upgrade, and it goes
+through [`ppv-core-upgrade-runbook.md`](ppv-core-upgrade-runbook.md) like any
+other. No individual key holds the authority to perform one.
 
-1. Check out the git commit named in the manifest entry you want to restore.
-2. Rebuild with the pinned toolchain and confirm the binary hash matches the
-   manifest's `binaryHash` for that entry.
-3. `solana program deploy --program-id <PROGRAM_ID> --upgrade-authority ...`
-   with the rebuilt artifact.
-4. Append a new manifest entry. Never edit or delete a past entry.
+1. Check out the git commit named in the record you want to restore.
+2. Rebuild with the pinned toolchain and confirm the binary hash matches that
+   record's `binaryHash`.
+3. Propose the upgrade in Squads with a buffer holding those bytes, reach the
+   2-of-3 threshold, and execute from the vault.
+4. Write and commit a new record. Never edit or delete a past one.
 
 If a program must be taken out of service entirely, close it with
 `solana program close <PROGRAM_ID> --bypass-warning` — this is irreversible and
@@ -338,14 +374,15 @@ permanently burns the program ID. It requires an explicit operator decision.
 ## Operational health check
 
 ```bash
-solana program show <CORE_ID>     --url "$SOLANA_RPC_URL"
-solana program show <COMMERCE_ID> --url "$SOLANA_RPC_URL"
+node scripts/verify-deployed-program.mjs deployments/evidence/ppv-core-devnet-861a8df.json
+npm run test:devnet:smoke -- --identity-only
 ```
 
-Healthy means: both accounts executable, both upgrade authorities unchanged from
-the manifest, and the GwapOS PPV surface able to fetch a known proof account.
-An upgrade authority that does not match the manifest is a security incident,
-not a configuration drift.
+Healthy means: every released program executable and loader-owned, every upgrade
+authority unchanged from its record, the deployed bytes still equal to the
+release artifact, and live program accounts still decoding through the declared
+layout. An upgrade authority that does not match the record is a security
+incident, not configuration drift — and so is a binary that no longer matches.
 
 ## Troubleshooting
 

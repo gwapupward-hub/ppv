@@ -70,6 +70,17 @@ jobs:
       - name: Verify the release record against live chain state
         run: node scripts/verify-deployed-program.mjs "${RECORD}"
 
+      # Reported, not asserted. A program with no release record has nothing to
+      # verify against, and the useful question before its first deployment is
+      # simply whether its permanent address is still free. Read-only, and
+      # informational only, so it can never fail this workflow.
+      - name: Report the live state of every permanent PPV program
+        run: |
+          for id in 9cWE41ZDNQChvFrRoVuPQDeoVLg46ACTiZRCZaBZzfwU \
+                    GmRDoFuPrBrsxnvTX751WK5rLu14JXe4sgjh6vNwHzr3; do
+            node scripts/verify-deployed-program.mjs --inspect "${id}"
+          done
+
       - name: Verify live PPV Core identity and custody through the smoke suite
         run: |
           npm ci
