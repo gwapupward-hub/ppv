@@ -119,19 +119,37 @@ impl EscrowAgreement {
         self.amount.saturating_sub(self.settled_total)
     }
 
+    /// Computed, checked, and only then written.
+    ///
+    /// Anchor unwinds the account on a returned error, so writing first and
+    /// validating after happens to be safe on chain today. It is still the
+    /// inverse of the rule the rest of this file follows — decide, then
+    /// record — and it leaves the struct holding a total the agreement never
+    /// paid for as long as the error is in flight. Any caller that ever
+    /// inspects the account after a failed call, or handles the error rather
+    /// than propagating it, would read custody accounting that is wrong.
     pub fn record_payout(&mut self, paid: u64) -> Result<()> {
-        self.settled_total = self
+        let total = self
             .settled_total
             .checked_add(paid)
             .ok_or(EscrowError::Overflow)?;
-        require!(
-            self.settled_total <= self.amount,
-            EscrowError::CustodyMismatch
-        );
+        require!(total <= self.amount, EscrowError::CustodyMismatch);
+        self.settled_total = total;
         Ok(())
     }
 
+    /// The default address is nobody.
+    ///
+    /// An unclaimed bounty stores `Pubkey::default()` in `counterparty`, so a
+    /// naive comparison makes that address look like the seller. Nothing can
+    /// sign for it, but a *destination* does not sign — it is named — and a
+    /// token account can be owned by any address at all. Excluding it here
+    /// keeps "is this a party" answerable without every caller first asking
+    /// whether the payee exists.
     pub fn is_party(&self, signer: &Pubkey) -> bool {
+        if *signer == Pubkey::default() {
+            return false;
+        }
         *signer == self.creator || *signer == self.counterparty
     }
 
@@ -209,21 +227,20 @@ impl EscrowAgreement {
         Ok(())
     }
 
+    /// Same discipline as `record_payout`: the schedule is validated before it
+    /// is written, so a refused milestone leaves the count and the total
+    /// exactly as they were.
     pub fn record_milestone(&mut self, amount: u64) -> Result<u32> {
         let index = self.milestone_count;
-        self.milestone_count = self
-            .milestone_count
-            .checked_add(1)
-            .ok_or(EscrowError::Overflow)?;
-        self.milestone_total = self
+        let count = index.checked_add(1).ok_or(EscrowError::Overflow)?;
+        let total = self
             .milestone_total
             .checked_add(amount)
             .ok_or(EscrowError::Overflow)?;
         // The schedule can never promise more than the escrow will hold.
-        require!(
-            self.milestone_total <= self.amount,
-            EscrowError::MilestoneTotalMismatch
-        );
+        require!(total <= self.amount, EscrowError::MilestoneTotalMismatch);
+        self.milestone_count = count;
+        self.milestone_total = total;
         Ok(index)
     }
 
@@ -240,11 +257,12 @@ impl EscrowAgreement {
     /// Records a settled milestone, and reports whether it was the last one —
     /// the moment the agreement itself is finished.
     pub fn record_milestone_settled(&mut self, paid: u64, now: i64) -> Result<bool> {
-        self.record_payout(paid)?;
-        self.milestones_settled = self
+        let settled = self
             .milestones_settled
             .checked_add(1)
             .ok_or(EscrowError::Overflow)?;
+        self.record_payout(paid)?;
+        self.milestones_settled = settled;
         let finished = self.milestones_settled == self.milestone_count;
         if finished {
             self.state = AgreementState::Settled;
@@ -284,6 +302,13 @@ impl EscrowAgreement {
     /// halts the normal settlement path, because `settle` demands `Completed`
     /// and this state is not it (Invariant 9).
     pub fn require_disputable(&self, signer: &Pubkey) -> Result<()> {
+        // A dispute is between two parties. An unclaimed bounty has one, and
+        // `Disputed` is a state it could not leave: `select_counterparty`
+        // wants `Open` or `Funded`, and both payout paths want a payee.
+        require!(
+            self.has_counterparty(),
+            EscrowError::CounterpartyNotAssigned
+        );
         require!(self.is_party(signer), EscrowError::NotAParty);
         require!(
             matches!(
@@ -308,6 +333,10 @@ impl EscrowAgreement {
     /// to a party that did not have it conceded to them, and no third party is
     /// trusted to decide, because none is consulted.
     pub fn require_resolvable(&self, signer: &Pubkey, beneficiary: &Pubkey) -> Result<()> {
+        require!(
+            self.has_counterparty(),
+            EscrowError::CounterpartyNotAssigned
+        );
         require!(
             self.state == AgreementState::Disputed,
             EscrowError::BadState
@@ -692,6 +721,62 @@ mod tests {
         // the record.
         assert!(agreement.require_proof_submittable(&buyer).is_ok());
         assert!(agreement.require_proof_submittable(&seller).is_ok());
+    }
+
+    /// An unfunded bounty has no payee, and `Pubkey::default()` is not one.
+    ///
+    /// Every other guard says so by asking `has_counterparty` first. The
+    /// dispute pair did not, and `is_party` answered yes for the default
+    /// address because it compares against a `counterparty` field that is
+    /// still zero. A sponsor could therefore dispute a bounty nobody had won,
+    /// and a disputed agreement cannot go back: `select_counterparty` wants
+    /// `Open` or `Funded`, `refund` and `settle` want a payee. The money is
+    /// then reachable only by conceding it to a token account owned by the
+    /// default address, which nothing can ever sign for.
+    #[test]
+    fn an_unclaimed_bounty_cannot_be_disputed_into_a_dead_end() {
+        let (sponsor, _, _) = parties();
+        let mut bounty = open(sponsor, Pubkey::default());
+        bounty.agreement_type = AgreementType::Bounty;
+        bounty.record_funded(20);
+
+        assert!(!bounty.has_counterparty());
+        // The default address is nobody. It is not a party to anything.
+        assert!(
+            !bounty.is_party(&Pubkey::default()),
+            "the unassigned payee field must not make the default address a party",
+        );
+        assert!(
+            bounty.require_disputable(&sponsor).is_err(),
+            "a bounty with no payee has no counterparty to dispute with",
+        );
+
+        // And if one is somehow reached, conceding to nobody is not a
+        // resolution — it is custody leaving the vault to an address that
+        // cannot sign.
+        bounty.record_disputed(sponsor, 30);
+        assert!(
+            bounty
+                .require_resolvable(&sponsor, &Pubkey::default())
+                .is_err(),
+            "a dispute cannot be resolved in favour of the default address",
+        );
+    }
+
+    /// The payee is assignable while a bounty is live, so a sponsor whose
+    /// bounty nobody won is never stuck: it names a payee and the ordinary
+    /// refund path returns the money.
+    #[test]
+    fn an_unclaimed_funded_bounty_still_has_a_way_out() {
+        let (sponsor, winner, _) = parties();
+        let mut bounty = open(sponsor, Pubkey::default());
+        bounty.agreement_type = AgreementType::Bounty;
+        bounty.record_funded(20);
+
+        bounty.require_counterparty_assignable(&sponsor).unwrap();
+        bounty.record_counterparty(winner, 30).unwrap();
+        assert!(bounty.require_refundable(&winner).is_ok());
+        assert!(bounty.require_disputable(&sponsor).is_ok());
     }
 
     #[test]

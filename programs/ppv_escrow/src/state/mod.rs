@@ -1,5 +1,7 @@
 pub mod agreement;
 pub mod enums;
+#[cfg(test)]
+mod lifecycle_model;
 pub mod milestone;
 pub mod proof;
 
