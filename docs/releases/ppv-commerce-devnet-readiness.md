@@ -49,19 +49,31 @@ The Anchor local-validator suite passes in CI.
 
 **Security — READY.** `npm run test:invariants:pr` (PPV-P1 … PPV-P10) passes in
 CI on every pull request. The release-tier budget is wired to the weekly
-schedule and to `workflow_dispatch` on the CI workflow; run it deliberately
-before the deployment rather than relying on the PR budget.
+schedule and to `workflow_dispatch` on the CI workflow, and **has not been run
+in this sprint** — run it deliberately before the deployment rather than relying
+on the PR budget.
 
 **Multisig — READY.** The vault is a real off-curve PDA holding a 2-of-3
 threshold, and it is already proven in production: it holds PPV Core's upgrade
 authority on devnet today. The deploy workflow refuses an on-curve authority and
 refuses a threshold below two, before it hands anything over.
 
-**Program address — READY.** `GmRDoFuPrBrsxnvTX751WK5rLu14JXe4sgjh6vNwHzr3` is
-reported on every run of `.github/workflows/verify-devnet-deployment.yml`, which
-prints the live state of every permanent PPV program. Read that report
-immediately before deploying; an occupied address is a stop, and the preflight
-and the deploy workflow both refuse one independently.
+**Program address — READY.** Read live from devnet at 2026-09-13T05:42:55Z
+([run 34740973693](https://github.com/gwapupward-hub/ppv/actions/runs/34740973693)):
+
+```json
+{
+  "programId": "GmRDoFuPrBrsxnvTX751WK5rLu14JXe4sgjh6vNwHzr3",
+  "exists": false,
+  "owner": null,
+  "upgradeAuthority": null
+}
+```
+
+The address is unoccupied. `.github/workflows/verify-devnet-deployment.yml`
+reports this on every run, so read it again immediately before deploying — an
+occupied address is a stop, and the preflight and the deploy workflow both
+refuse one independently.
 
 **Release workflow — READY.** `.github/workflows/deploy-devnet.yml` requires two
 independent cryptographic Squads-member approvals bound to the program id and
