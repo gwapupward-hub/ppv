@@ -1,0 +1,127 @@
+name: Diagnose PPV Core post-deploy state
+
+on:
+  push:
+    branches: ["diag/ppv-core-postdeploy-state"]
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Query PPV Core through raw devnet JSON-RPC
+        env:
+          PROGRAM_ID: 9cWE41ZDNQChvFrRoVuPQDeoVLg46ACTiZRCZaBZzfwU
+          EXPECTED_AUTHORITY: B6tcsTrMCKTZV5vi3rRCnA3FMPeeWACSHuuTSz5XQgnX
+          DEPLOY_SIGNATURE: 3A1fMmAZiBfjKb9ijUW81KaqEyZqEtT7vha2Ms2hZanxhjcDaJn4wKJvEwSkDJBK3Co7eJnTyn6wvc2iXaYaAxAp
+          RPC: https://api.devnet.solana.com
+        run: |
+          node <<'NODE'
+          const { PROGRAM_ID, EXPECTED_AUTHORITY, DEPLOY_SIGNATURE, RPC } = process.env;
+          const ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+          const UPGRADEABLE_LOADER = 'BPFLoaderUpgradeab1e11111111111111111111111';
+
+          function base58(bytes) {
+            let zeros = 0;
+            while (zeros < bytes.length && bytes[zeros] === 0) zeros++;
+            let value = 0n;
+            for (const b of bytes) value = (value << 8n) + BigInt(b);
+            let out = '';
+            while (value > 0n) {
+              const rem = Number(value % 58n);
+              value /= 58n;
+              out = ALPHABET[rem] + out;
+            }
+            return '1'.repeat(zeros) + (out || (zeros ? '' : '1'));
+          }
+
+          async function rpc(method, params) {
+            const res = await fetch(RPC, {
+              method: 'POST',
+              headers: {'content-type':'application/json'},
+              body: JSON.stringify({jsonrpc:'2.0', id:1, method, params}),
+            });
+            if (!res.ok) throw new Error(`${method}: HTTP ${res.status}`);
+            const json = await res.json();
+            if (json.error) throw new Error(`${method}: ${JSON.stringify(json.error)}`);
+            return json.result;
+          }
+
+          const accountInfo = async (address) => {
+            const result = await rpc('getAccountInfo', [address, {encoding:'base64', commitment:'confirmed'}]);
+            if (!result.value) return null;
+            const [b64] = result.value.data;
+            return {...result.value, bytes: Buffer.from(b64, 'base64')};
+          };
+
+          const main = async () => {
+            const program = await accountInfo(PROGRAM_ID);
+            if (!program) throw new Error('program_exists=false');
+            console.log('program_exists=true');
+            console.log(`program_executable=${program.executable}`);
+            console.log(`program_owner=${program.owner}`);
+            console.log(`program_data_len=${program.bytes.length}`);
+            if (!program.executable) throw new Error('program is not executable');
+            if (program.owner !== UPGRADEABLE_LOADER) throw new Error(`unexpected program owner ${program.owner}`);
+            if (program.bytes.length < 36) throw new Error(`program account too short: ${program.bytes.length}`);
+
+            const programState = program.bytes.readUInt32LE(0);
+            console.log(`program_state_variant=${programState}`);
+            if (programState !== 2) throw new Error(`expected UpgradeableLoaderState::Program (2), got ${programState}`);
+            const programDataAddress = base58(program.bytes.subarray(4, 36));
+            console.log(`programdata_address=${programDataAddress}`);
+
+            const programData = await accountInfo(programDataAddress);
+            if (!programData) throw new Error('programdata_exists=false');
+            console.log('programdata_exists=true');
+            console.log(`programdata_owner=${programData.owner}`);
+            console.log(`programdata_data_len=${programData.bytes.length}`);
+            if (programData.owner !== UPGRADEABLE_LOADER) throw new Error(`unexpected ProgramData owner ${programData.owner}`);
+            if (programData.bytes.length < 13) throw new Error(`ProgramData account too short: ${programData.bytes.length}`);
+
+            const programDataState = programData.bytes.readUInt32LE(0);
+            const deploySlot = programData.bytes.readBigUInt64LE(4);
+            const authorityTag = programData.bytes[12];
+            console.log(`programdata_state_variant=${programDataState}`);
+            console.log(`last_deploy_slot=${deploySlot}`);
+            console.log(`authority_option_tag=${authorityTag}`);
+            if (programDataState !== 3) throw new Error(`expected UpgradeableLoaderState::ProgramData (3), got ${programDataState}`);
+            if (authorityTag !== 1) throw new Error('upgrade authority is None');
+            if (programData.bytes.length < 45) throw new Error(`ProgramData metadata too short: ${programData.bytes.length}`);
+            const authority = base58(programData.bytes.subarray(13, 45));
+            console.log(`upgrade_authority=${authority}`);
+            console.log(`expected_upgrade_authority=${EXPECTED_AUTHORITY}`);
+            console.log(`authority_matches_expected=${authority === EXPECTED_AUTHORITY}`);
+            if (authority !== EXPECTED_AUTHORITY) throw new Error(`authority mismatch: ${authority}`);
+
+            const status = await rpc('getSignatureStatuses', [[DEPLOY_SIGNATURE], {searchTransactionHistory:true}]);
+            const deployStatus = status.value?.[0] || null;
+            console.log(`deploy_signature=${DEPLOY_SIGNATURE}`);
+            console.log(`deploy_signature_found=${deployStatus !== null}`);
+            if (deployStatus) {
+              console.log(`deploy_confirmation_status=${deployStatus.confirmationStatus}`);
+              console.log(`deploy_err=${JSON.stringify(deployStatus.err)}`);
+            }
+            if (!deployStatus || deployStatus.err) throw new Error('deployment signature missing or failed');
+
+            const programSigs = await rpc('getSignaturesForAddress', [PROGRAM_ID, {limit:10, commitment:'confirmed'}]);
+            const dataSigs = await rpc('getSignaturesForAddress', [programDataAddress, {limit:10, commitment:'confirmed'}]);
+            console.log(`program_signature_count=${programSigs.length}`);
+            for (const [i,s] of programSigs.entries()) console.log(`program_signature_${i}=${s.signature} err=${JSON.stringify(s.err)} slot=${s.slot}`);
+            console.log(`programdata_signature_count=${dataSigs.length}`);
+            for (const [i,s] of dataSigs.entries()) console.log(`programdata_signature_${i}=${s.signature} err=${JSON.stringify(s.err)} slot=${s.slot}`);
+
+            console.log('PPV_CORE_POSTDEPLOY_STATE=VERIFIED');
+          };
+
+          main().catch(err => {
+            console.error(`PPV_CORE_POSTDEPLOY_STATE=FAILED: ${err.message}`);
+            process.exit(1);
+          });
+          NODE
