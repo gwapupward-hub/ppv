@@ -93,6 +93,17 @@ export class BorshReader {
     return this.view(4).getUint32(0, true);
   }
 
+  /**
+   * The bytes not yet read. An Anchor account is allocated at its declared
+   * size and written with borsh, so any `Option::None` in it serializes
+   * shorter than the space reserved for it and leaves the tail unwritten.
+   * A decoder has to be able to look at that tail rather than assume it is
+   * empty.
+   */
+  rest(): Uint8Array {
+    return this.bytes.subarray(this.offset);
+  }
+
   skip(length: number): void {
     this.take(length);
   }
@@ -102,4 +113,27 @@ export function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i += 1) if (a[i] !== b[i]) return false;
   return true;
+}
+
+/**
+ * Asserts that whatever follows the decoded fields is unwritten account space.
+ *
+ * Anchor allocates an account at its declared `INIT_SPACE` and then writes
+ * borsh into it. Borsh encodes `Option::None` as a single tag byte, while
+ * `INIT_SPACE` reserves room for the tag *and* the payload — so an account
+ * holding a `None` is shorter on the wire than the space it occupies, and the
+ * difference is never written. For `ppv_commerce`'s `Agreement` that is the
+ * ordinary case: a pending agreement has at most one signature.
+ *
+ * Requiring nothing to remain would therefore reject every agreement that is
+ * not fully signed. Requiring what remains to be zero keeps the property that
+ * actually matters — that no unaccounted-for *content* follows the fields this
+ * decoder knows, which is how a layout change gets noticed instead of
+ * silently misread.
+ */
+export function assertOnlyUnwrittenSpaceRemains(reader: BorshReader, what: string): void {
+  const tail = reader.rest();
+  for (const byte of tail) {
+    if (byte !== 0) throw new RangeError(`${what} has trailing bytes`);
+  }
 }

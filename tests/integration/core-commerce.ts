@@ -592,10 +592,25 @@ describe("PPV Core ↔ Commerce integration", () => {
 
     // And at the decoder: Commerce event bytes decoded as Core throw rather
     // than returning a plausible-looking event of the wrong kind.
+    //
+    // The event CPI is found rather than assumed to be first. `init` makes a
+    // System Program CPI to create the account, so the event is not inner
+    // instruction zero — assuming it was is how this assertion came to pass
+    // vacuously against the system instruction, which is not a PPV event at
+    // all and so throws nothing.
     const tx = await fetchTransaction(connection, createSignature);
-    const inner = tx.meta!.innerInstructions![0]!.instructions[0]!;
+    const keys = tx.transaction.message.accountKeys;
+    const commerceAuthority = eventAuthority(commerce.programId).toBase58();
+    const inner = (tx.meta!.innerInstructions ?? [])
+      .flatMap((group) => group.instructions)
+      .find(
+        (instruction) =>
+          keys[instruction.programIdIndex] === programs.ppv_commerce &&
+          keys[instruction.accounts[0] ?? -1] === commerceAuthority,
+      );
+    assert.notEqual(inner, undefined, "the transaction must contain a Commerce event CPI");
     assert.throws(
-      () => decodeEventForProgram("ppv_core", decodeBase58(inner.data)),
+      () => decodeEventForProgram("ppv_core", decodeBase58(inner!.data)),
       /belongs to ppv_commerce/,
     );
   });
