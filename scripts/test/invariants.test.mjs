@@ -98,6 +98,14 @@ test("the run's budget is asserted over every seed, not per process", () => {
 test("a dead validator is diagnosed rather than reported as a protocol failure", () => {
   assert.match(GATE, /dump_validator_state "\$\{ledger\}"/);
   assert.match(GATE, /validator\.log/);
+  // The validator logs at INFO, so a raw tail is banking-stage metrics and
+  // none of the failure. What it complained about is the signal.
+  assert.match(GATE, /grep -E ' \(WARN\|ERROR\) '/);
+  // Free space is reported per seed: a seed that dies early having spent 61 of
+  // its usual 3,209 operations did so with 7.6G of 72G left, and nothing in
+  // the output said so.
+  assert.match(GATE, /report_headroom "seed \$\{seed\}"/);
+  assert.match(GATE, /disk headroom before/);
 });
 
 test("the property suite emits the coverage the aggregator sums", () => {
@@ -108,6 +116,25 @@ test("the property suite emits the coverage the aggregator sums", () => {
   assert.match(suite, /PPV_INVARIANT_COVERAGE_OUT/);
   // In `after`, so a failing seed still reports what it spent.
   assert.match(suite, /after\(function \(\) \{[\s\S]*?PPV_INVARIANT_COVERAGE_OUT/);
+});
+
+test("the destination the generator favours depends on the instruction", () => {
+  // A settlement pays the seller and a refund pays the buyer. One canonical
+  // destination for every kind makes the correct destination for the other a
+  // one-in-fourteen draw: the first release run of the extended suite produced
+  // 151 settlements and 8 refunds from the same 15,337 operations. Eight
+  // successes clear a coverage floor and prove very little about PPV-D3/D4.
+  const generators = readFileSync(
+    join(REPO, "tests", "invariants", "generators.ts"),
+    "utf8",
+  );
+  assert.match(generators, /function destinationArbitrary\(kind: ActionKind\)/);
+  assert.match(generators, /kind === "refund" \? "buyer" : "seller"/);
+  // The account variant must be drawn per kind, or the kind cannot inform it.
+  assert.match(generators, /kindArbitrary\.chain\(\(kind\)/);
+  // And the wrong-destination attack must still be generated: the weighting
+  // moved, the option set did not.
+  assert.match(generators, /\.filter\(\(ref\) => ref !== canonical\)/);
 });
 
 test("the PR tier spends the adversarial budget the docs claim", () => {

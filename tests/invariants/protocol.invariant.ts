@@ -179,6 +179,21 @@ describe("PPV protocol invariants (property-based)", function () {
       coverage.refusedNonCanonical > 0,
       "no wrong-relationship account was ever refused — PPV-P9 was never exercised",
     );
+    // The Phase 5 paths get their own floors rather than riding on the totals
+    // above: a generator that stopped producing disputes would still clear
+    // every floor that existed before they were modelled.
+    assert.ok(
+      coverage.refunds > 0,
+      "no refund ever succeeded — PPV-D3 and PPV-D4 were never exercised",
+    );
+    assert.ok(
+      coverage.disputes > 0,
+      "no dispute was ever opened — PPV-D1 and PPV-D2 were never exercised",
+    );
+    assert.ok(
+      coverage.resolutions > 0,
+      "no dispute was ever resolved — PPV-D5 was never exercised",
+    );
     console.log(`    coverage: ${JSON.stringify(coverage)}`);
   });
 

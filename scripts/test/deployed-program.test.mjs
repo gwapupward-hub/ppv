@@ -275,6 +275,72 @@ test("evidence collection refuses to record a binary the chain is not running", 
 });
 
 /**
+ * The member list is how every later reader learns what the governance
+ * actually is, because the threshold is not readable from the vault account
+ * itself. A record that overstates it is believed forever after.
+ */
+test("evidence collection refuses a member list that does not mean what it says", async () => {
+  const fixture = deployedCoreFixture();
+  const client = rpc("https://stub.invalid", {
+    fetchImpl: makeRpcTransport({ accounts: fixture.accounts, signatures: okSignatures }),
+  });
+  const { mkdtempSync, mkdirSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+
+  const buildDir = mkdtempSync(join(tmpdir(), "ppv-governance-"));
+  mkdirSync(join(buildDir, "idl"), { recursive: true });
+  mkdirSync(join(buildDir, "deploy"), { recursive: true });
+  writeFileSync(join(buildDir, "idl", "ppv_core.json"), JSON.stringify({ address: CORE_ID }));
+  writeFileSync(join(buildDir, "deploy", "ppv_core.so"), fixture.binary);
+
+  const baseEnv = {
+    PPV_PROGRAM: "ppv_core",
+    PPV_RELEASE_COMMIT: COMMIT,
+    PPV_DEPLOY_SIGNATURE: DEPLOY_SIG,
+    PPV_AUTHORITY_TRANSFER_SIGNATURE: TRANSFER_SIG,
+    PPV_UPGRADE_AUTHORITY_THRESHOLD: "2",
+  };
+
+  // A threshold counts distinct keys. Three entries that are two people is a
+  // 2-of-3 only on paper: one holder of the repeated key plus one other
+  // satisfies it, which is the 1-of-2 the policy exists to forbid.
+  await assert.rejects(
+    collect({
+      client,
+      env: {
+        ...baseEnv,
+        PPV_UPGRADE_AUTHORITY_MEMBERS: [MEMBERS[0], MEMBERS[0], MEMBERS[1]].join(","),
+      },
+      buildDir,
+    }),
+    /duplicates/,
+  );
+
+  // The vault cannot be one of its own signers.
+  await assert.rejects(
+    collect({
+      client,
+      env: {
+        ...baseEnv,
+        PPV_UPGRADE_AUTHORITY_MEMBERS: [VAULT_PDA, MEMBERS[0], MEMBERS[1]].join(","),
+      },
+      buildDir,
+    }),
+    /listed as one of its own members/,
+  );
+
+  // The honest list still records.
+  const record = await collect({
+    client,
+    env: { ...baseEnv, PPV_UPGRADE_AUTHORITY_MEMBERS: MEMBERS.join(",") },
+    buildDir,
+  });
+  assert.equal(record.upgradeAuthorityThreshold, 2);
+  assert.equal(new Set(record.upgradeAuthorityMembers).size, MEMBERS.length);
+});
+
+/**
  * The committed release records.
  *
  * These files are load-bearing — the deploy workflow, the preflight and the

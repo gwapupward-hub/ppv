@@ -184,5 +184,50 @@ export function executeAction(
           .signers([signer])
           .rpc({ commitment: "confirmed" }),
       );
+
+    case "refund":
+      return send(() =>
+        escrow.methods
+          .refund()
+          .accounts({
+            seller: signer.publicKey,
+            agreement,
+            mint: mintFor(fixture, action),
+            vault: vaultFor(fixture, world, action),
+            vaultAuthority: authorityFor(fixture, world, action),
+            buyerTokenAccount: fixture.tokens[action.accounts.destination],
+            tokenProgram: TOKEN_PROGRAM_ID,
+          })
+          .signers([signer])
+          .rpc({ commitment: "confirmed" }),
+      );
+
+    case "dispute":
+      return send(() =>
+        escrow.methods
+          // A non-zero reason hash: the program refuses an all-zero one, and a
+          // dispute refused on its hash would never exercise the state gate.
+          .openDispute(Array<number>(32).fill(5))
+          .accounts({ party: signer.publicKey, agreement })
+          .signers([signer])
+          .rpc({ commitment: "confirmed" }),
+      );
+
+    case "resolve":
+      return send(() =>
+        escrow.methods
+          .resolveDispute()
+          .accounts({
+            signer: signer.publicKey,
+            agreement,
+            mint: mintFor(fixture, action),
+            vault: vaultFor(fixture, world, action),
+            vaultAuthority: authorityFor(fixture, world, action),
+            destination: fixture.tokens[action.accounts.destination],
+            tokenProgram: TOKEN_PROGRAM_ID,
+          })
+          .signers([signer])
+          .rpc({ commitment: "confirmed" }),
+      );
   }
 }
