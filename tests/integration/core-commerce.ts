@@ -10,17 +10,21 @@ import {
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
 
+// Imported from source rather than by package name: this suite runs under
+// `anchor test` -> mocha -> tsx in CommonJS, and the workspaces are ESM-only
+// with no `require` export, so a package-name import cannot resolve here.
 import {
   CORE_PROOF_DISCRIMINATOR,
   COMMERCE_AGREEMENT_DISCRIMINATOR,
   canonicalizeV1,
   decodeCommerceAgreementAccount,
   decodeCoreProofAccount,
+  decodeBase58,
   decodeEventForProgram,
   encodeBase58,
   hashDocumentV1,
-} from "@gwap/ppv-sdk";
-import { extractPpvEvents, type RpcTransaction } from "@gwap/ppv-indexer";
+} from "../../sdk/src/index.js";
+
 
 /**
  * PPV Core ↔ Commerce, as one protocol history.
@@ -41,6 +45,92 @@ import { extractPpvEvents, type RpcTransaction } from "@gwap/ppv-indexer";
  * second signature from one wallet counted as two parties — are all failures
  * that look perfectly reasonable in a unit test with one program in scope.
  */
+
+/**
+ * The indexer's extraction rules, applied here rather than imported.
+ *
+ * `@gwap/ppv-indexer` is ESM-only and this suite runs under CommonJS, so it
+ * cannot be required — the same constraint `tests/escrow.ts` documents for the
+ * escrow extractor. The division of labour is deliberate: the indexer's own
+ * tests prove `extractPpvEvents` against fixtures this repository writes, and
+ * `scripts/devnet-lifecycle.mjs` runs the real extractor against real devnet
+ * transactions. What this suite proves is the thing those cannot — that the
+ * chain actually produces the shape they assume, with both programs live.
+ *
+ * The four rules, each a security property rather than a parsing convenience:
+ * a failed transaction is not history; only inner instructions are events; only
+ * with the emitting program's own `__event_authority`; and the event is decoded
+ * *for* that program, so a shared discriminator cannot cross the boundary.
+ */
+type Envelope = {
+  program: "ppv_core" | "ppv_commerce";
+  programId: string;
+  event: { name: string };
+  transactionSignature: string;
+  slot: number;
+  instructionIndex: number;
+  innerInstructionIndex: number;
+};
+
+function extractEvents(
+  tx: RpcTransaction,
+  programs: Readonly<Record<"ppv_core" | "ppv_commerce", string>>,
+): Envelope[] {
+  if (tx.meta?.err != null) return [];
+  const signature = tx.transaction.signatures[0];
+  if (!signature) return [];
+
+  const keys = [
+    ...tx.transaction.message.accountKeys,
+    ...(tx.meta?.loadedAddresses?.writable ?? []),
+    ...(tx.meta?.loadedAddresses?.readonly ?? []),
+  ];
+  const byId = new Map(
+    Object.entries(programs).map(([program, id]) => [id, program as "ppv_core" | "ppv_commerce"]),
+  );
+
+  const envelopes: Envelope[] = [];
+  for (const group of tx.meta?.innerInstructions ?? []) {
+    group.instructions.forEach((instruction, innerInstructionIndex) => {
+      const programId = keys[instruction.programIdIndex];
+      if (programId === undefined) return;
+      const program = byId.get(programId);
+      if (program === undefined) return;
+      const authority = eventAuthority(new PublicKey(programId)).toBase58();
+      if (keys[instruction.accounts[0] ?? -1] !== authority) return;
+      const decoded = decodeEventForProgram(program, decodeBase58(instruction.data));
+      if (!decoded || decoded.program === "ppv_escrow") return;
+      envelopes.push({
+        program: decoded.program,
+        programId,
+        event: decoded.event,
+        transactionSignature: signature,
+        slot: tx.slot,
+        instructionIndex: group.index,
+        innerInstructionIndex,
+      });
+    });
+  }
+  return envelopes;
+}
+
+/** The minimum of the indexer's transaction shape these assertions need. */
+type RpcTransaction = {
+  slot: number;
+  blockTime: number | null;
+  transaction: {
+    signatures: string[];
+    message: { accountKeys: string[]; instructions: unknown[] };
+  };
+  meta: {
+    err: unknown;
+    innerInstructions: Array<{
+      index: number;
+      instructions: Array<{ programIdIndex: number; accounts: number[]; data: string }>;
+    }>;
+    loadedAddresses?: { writable: string[]; readonly: string[] };
+  } | null;
+};
 
 const PROOF_SEED = new TextEncoder().encode("proof");
 const AGREEMENT_SEED = new TextEncoder().encode("agreement");
@@ -249,16 +339,25 @@ describe("PPV Core ↔ Commerce integration", () => {
     assert.notEqual(info, null);
     assert.equal(info!.owner.toBase58(), commerce.programId.toBase58());
 
-    // Creating it twice is refused by the runtime: the address is occupied.
+    // Creating it twice is refused, because the address is already occupied.
+    // Asserted as "this cannot happen" rather than by error string: the runtime
+    // and Anchor word an occupied `init` differently across versions, and the
+    // property under test is the refusal, not its phrasing.
     const expiresAt = new BN((await chainTime(connection)) + 3600);
-    await expectError(
+    await assert.rejects(
       commerce.methods
         .createAgreement(agreementId, partyB.publicKey, contentHash, termsHash, expiresAt)
         .accounts({ partyA: partyA.publicKey, agreement, systemProgram: SystemProgram.programId })
         .signers([partyA])
         .rpc(),
-      "already in use",
     );
+
+    // And the existing agreement is untouched by the attempt.
+    const after = decodeCommerceAgreementAccount(
+      new Uint8Array((await connection.getAccountInfo(agreement))!.data),
+    );
+    assert.equal(after.state, "Executed");
+    assert.equal(after.version, 1);
   });
 
   it("binds the executed agreement to the exact canonical terms hash", async () => {
@@ -408,13 +507,13 @@ describe("PPV Core ↔ Commerce integration", () => {
       ppv_commerce: commerce.programId.toBase58(),
     } as const;
 
-    const created = extractPpvEvents(await fetchTransaction(connection, createSignature), { programs });
+    const created = extractEvents(await fetchTransaction(connection, createSignature), programs);
     assert.equal(created.length, 1);
     assert.equal(created[0]!.program, "ppv_commerce");
     assert.equal(created[0]!.event.name, "AgreementCreated");
     assert.equal(created[0]!.programId, programs.ppv_commerce);
 
-    const proofEvents = extractPpvEvents(await fetchTransaction(connection, proofSignature), { programs });
+    const proofEvents = extractEvents(await fetchTransaction(connection, proofSignature), programs);
     assert.equal(proofEvents.length, 1);
     assert.equal(proofEvents[0]!.program, "ppv_core");
     assert.equal(proofEvents[0]!.event.name, "ProofCreated");
@@ -422,7 +521,7 @@ describe("PPV Core ↔ Commerce integration", () => {
 
     // Party B's signature executes the agreement: two events, one transaction,
     // both Commerce, in the order the program emitted them.
-    const executed = extractPpvEvents(await fetchTransaction(connection, signBSignature), { programs });
+    const executed = extractEvents(await fetchTransaction(connection, signBSignature), programs);
     assert.deepEqual(
       executed.map((envelope) => envelope.event.name),
       ["AgreementSigned", "AgreementExecuted"],
@@ -447,8 +546,9 @@ describe("PPV Core ↔ Commerce integration", () => {
     // Extracting the Commerce transaction while claiming both program ids point
     // at Core: the event authority no longer matches, so nothing is reported.
     // Silence is the correct outcome — never a Core event that never happened.
-    const mislabelled = extractPpvEvents(await fetchTransaction(connection, createSignature), {
-      programs: { ppv_core: programs.ppv_commerce, ppv_commerce: programs.ppv_core },
+    const mislabelled = extractEvents(await fetchTransaction(connection, createSignature), {
+      ppv_core: programs.ppv_commerce,
+      ppv_commerce: programs.ppv_core,
     });
     assert.deepEqual(
       mislabelled.map((e) => [e.program, e.event.name]),
@@ -460,7 +560,6 @@ describe("PPV Core ↔ Commerce integration", () => {
     // than returning a plausible-looking event of the wrong kind.
     const tx = await fetchTransaction(connection, createSignature);
     const inner = tx.meta!.innerInstructions![0]!.instructions[0]!;
-    const { decodeBase58 } = await import("@gwap/ppv-sdk");
     assert.throws(
       () => decodeEventForProgram("ppv_core", decodeBase58(inner.data)),
       /belongs to ppv_commerce/,
@@ -477,7 +576,7 @@ describe("PPV Core ↔ Commerce integration", () => {
 
     /** The whole history, from transactions alone — no database, no local state. */
     const reconstruct = (txs: RpcTransaction[]) => {
-      const events = txs.flatMap((tx) => extractPpvEvents(tx, { programs }));
+      const events = txs.flatMap((tx) => extractEvents(tx, programs));
       // Deduplicated on the chain coordinates that identify an event, so a
       // duplicate delivery of the same transaction cannot double-count.
       const seen = new Map<string, (typeof events)[number]>();
@@ -549,7 +648,7 @@ describe("PPV Core ↔ Commerce integration", () => {
       ...tx,
       meta: { ...tx.meta!, err: { InstructionError: [0, "Custom"] } },
     };
-    assert.deepEqual(extractPpvEvents(failed, { programs }), []);
+    assert.deepEqual(extractEvents(failed, programs), []);
   });
 
   it("requires the program's own event authority", async () => {
@@ -577,6 +676,6 @@ describe("PPV Core ↔ Commerce integration", () => {
       ...tx,
       transaction: { ...tx.transaction, message: { ...tx.transaction.message, accountKeys: keys } },
     };
-    assert.deepEqual(extractPpvEvents(tampered, { programs }), []);
+    assert.deepEqual(extractEvents(tampered, programs), []);
   });
 });
