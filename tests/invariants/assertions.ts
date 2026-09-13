@@ -28,7 +28,15 @@ export type InvariantId =
   | "PPV-P7"
   | "PPV-P8"
   | "PPV-P9"
-  | "PPV-P10";
+  | "PPV-P10"
+  // Dispute and refund invariants, added when those paths joined the model.
+  // Named separately from the PPV-P* family because they are claims about
+  // custody leaving by a path an ordinary escrow never takes, and a report
+  // that named them all "PPV-P1" would say less than the failure knows.
+  | "PPV-D2"
+  | "PPV-D3"
+  | "PPV-D4"
+  | "PPV-D5";
 
 export type CheckContext = {
   seed: number;
@@ -247,6 +255,16 @@ export function assertInvariants(ctx: CheckContext): void {
     fail(
       "PPV-P3",
       `settled total ${post.agreement.settledTotal} exceeds the escrowed amount ${post.agreement.amount}`,
+      ctx,
+    );
+  }
+  // A refunded agreement paid out everything the vault still owed, by the same
+  // rule and for the same reason as a settled one: the money is gone and the
+  // record is closed, so the books must say where all of it went (PPV-D3).
+  if (after === "refunded" && post.agreement.settledTotal !== post.agreement.amount) {
+    fail(
+      "PPV-D3",
+      `a refunded agreement returned ${post.agreement.settledTotal} of ${post.agreement.amount}`,
       ctx,
     );
   }

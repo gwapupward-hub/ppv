@@ -68,6 +68,14 @@ const EXPECTED_ACTOR: Record<ActionKind, Actor> = {
   // Either party may settle; the seller is the one being paid.
   settle: "seller",
   cancel: "buyer",
+  // A refund is the seller's own claim to surrender.
+  refund: "seller",
+  // Either party may dispute; the buyer is the one who usually wants to.
+  dispute: "buyer",
+  // Either party may resolve, and never in its own favour. The buyer
+  // conceding to the seller is the shape that pairs with the default
+  // destination, so it is the one that shrinks to first place.
+  resolve: "buyer",
 };
 
 const actorArbitrary: fc.Arbitrary<ActorChoice> = fc.oneof(
@@ -77,11 +85,23 @@ const actorArbitrary: fc.Arbitrary<ActorChoice> = fc.oneof(
   { arbitrary: fc.constant<ActorChoice>("attacker"), weight: 2 },
 );
 
+/**
+ * Weights, not a uniform draw.
+ *
+ * The lifecycle has to be walked before the interesting states exist: nothing
+ * can be disputed until something is funded. The three original transitions
+ * therefore stay heaviest, and the Phase 5 paths are common enough to be
+ * reached often within a sequence of a few dozen actions. `dispute` carries
+ * the same weight as `resolve` because a resolution is only legal after one.
+ */
 const kindArbitrary: fc.Arbitrary<ActionKind> = fc.oneof(
   { arbitrary: fc.constant<ActionKind>("fund"), weight: 4 },
   { arbitrary: fc.constant<ActionKind>("complete"), weight: 4 },
   { arbitrary: fc.constant<ActionKind>("settle"), weight: 4 },
   { arbitrary: fc.constant<ActionKind>("cancel"), weight: 1 },
+  { arbitrary: fc.constant<ActionKind>("refund"), weight: 2 },
+  { arbitrary: fc.constant<ActionKind>("dispute"), weight: 3 },
+  { arbitrary: fc.constant<ActionKind>("resolve"), weight: 3 },
 );
 
 const variantArbitrary: fc.Arbitrary<AccountVariant> = fc.record({

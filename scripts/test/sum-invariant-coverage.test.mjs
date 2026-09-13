@@ -28,6 +28,9 @@ function coverage(attempted) {
     completions: 4,
     settlements: 3,
     cancellations: 2,
+    refunds: 3,
+    disputes: 4,
+    resolutions: 2,
     postTerminalAttempts: 6,
     sequences: 100,
   };
@@ -81,6 +84,17 @@ describe("sum-invariant-coverage", () => {
     const result = run(dir, "8000", "9");
     assert.equal(result.status, 1);
     assert.match(result.stderr, /no settlement ever succeeded/);
+  });
+
+  test("fails when a whole lifecycle family was never exercised", () => {
+    // A generator that stopped producing disputes would still clear every
+    // floor that existed before disputes were modelled, so each family needs
+    // its own.
+    const noDisputes = { ...coverage(9000), disputes: 0 };
+    writeFileSync(join(dir, "10.json"), JSON.stringify(noDisputes));
+    const result = run(dir, "8000", "10");
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /no dispute was ever opened/);
   });
 
   test("refuses a non-positive floor rather than passing everything", () => {

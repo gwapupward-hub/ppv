@@ -179,8 +179,11 @@ for id in "${requested[@]}"; do
     printf '                 UNDETECTED — the suite passed a broken program\n'
     undetected+=("${id}")
   else
+    # `pipefail` is on and this cargo run is *expected* to fail, so the
+    # pipeline's status is the mutation working, not an error to abort on.
     detected=$(cargo test -p ppv_escrow --locked 2>&1 \
-      | grep -E '^\s+state::|^\s+events::' | head -3 | sed 's/^\s*/                   /')
+      | grep -E '^\s+state::|^\s+events::' | head -3 \
+      | sed 's/^[[:space:]]*/                   /' || true)
     printf '                 detected [%s]\n%s\n' "${CLASS[${id}]}" "${detected}"
   fi
   restore

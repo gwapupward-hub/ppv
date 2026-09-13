@@ -68,13 +68,23 @@ export type AccountVariant = {
   destination: TokenAccountRef;
 };
 
-export type ActionKind = "fund" | "complete" | "settle" | "cancel";
+export type ActionKind =
+  | "fund"
+  | "complete"
+  | "settle"
+  | "cancel"
+  | "refund"
+  | "dispute"
+  | "resolve";
 
 export type GeneratedAction =
   | { kind: "fund"; actor: Actor; accounts: AccountVariant }
   | { kind: "complete"; actor: Actor; accounts: AccountVariant }
   | { kind: "settle"; actor: Actor; accounts: AccountVariant }
-  | { kind: "cancel"; actor: Actor; accounts: AccountVariant };
+  | { kind: "cancel"; actor: Actor; accounts: AccountVariant }
+  | { kind: "refund"; actor: Actor; accounts: AccountVariant }
+  | { kind: "dispute"; actor: Actor; accounts: AccountVariant }
+  | { kind: "resolve"; actor: Actor; accounts: AccountVariant };
 
 /** Which accounts an instruction actually reads, for compact reporting. */
 const RELEVANT: Record<ActionKind, Array<keyof AccountVariant>> = {
@@ -82,6 +92,9 @@ const RELEVANT: Record<ActionKind, Array<keyof AccountVariant>> = {
   complete: ["agreement"],
   settle: ["agreement", "mint", "vault", "vaultAuthority", "destination"],
   cancel: ["agreement"],
+  refund: ["agreement", "mint", "vault", "vaultAuthority", "destination"],
+  dispute: ["agreement"],
+  resolve: ["agreement", "mint", "vault", "vaultAuthority", "destination"],
 };
 
 /**
@@ -92,19 +105,29 @@ const RELEVANT: Record<ActionKind, Array<keyof AccountVariant>> = {
 export function describeAction(action: GeneratedAction): string {
   const deviations = RELEVANT[action.kind]
     .map((field) => [field, action.accounts[field]] as const)
-    .filter(([field, value]) => value !== canonicalValue(field))
+    .filter(([field, value]) => value !== canonicalValue(action.kind, field))
     .map(([field, value]) => `${field}=${value}`);
   const suffix = deviations.length === 0 ? "canonical" : deviations.join(" ");
   return `${action.kind}(${action.actor}) [${suffix}]`;
 }
 
-/** The value of each variant field that names the agreement's own accounts. */
-function canonicalValue(field: keyof AccountVariant): string {
+/**
+ * The value of each variant field that names the agreement's own accounts.
+ *
+ * `destination` depends on the instruction, because the three payout paths do
+ * not pay the same party: settlement pays the seller, a refund pays the buyer,
+ * and a dispute resolution pays whichever party the *other* one conceded to —
+ * so neither of its two legal destinations is more canonical than the other.
+ * Calling the seller's account "the canonical destination" for a refund would
+ * classify every legitimate refund as an attack and quietly inflate the
+ * wrong-relationship coverage counter.
+ */
+function canonicalValue(kind: ActionKind, field: keyof AccountVariant): string {
   switch (field) {
     case "source":
       return "buyer";
     case "destination":
-      return "seller";
+      return kind === "refund" ? "buyer" : "seller";
     default:
       return "canonical";
   }
@@ -112,8 +135,22 @@ function canonicalValue(field: keyof AccountVariant): string {
 
 /** True when every account this instruction reads is the agreement's own. */
 export function isCanonicallyAddressed(action: GeneratedAction): boolean {
+  // A resolution has two legal destinations and no canonical one, so it is
+  // canonically addressed when it names either party's account in the right
+  // mint. Which of the two is legal for a given signer is the model's call,
+  // not this function's.
+  if (action.kind === "resolve") {
+    const destinationIsAParty =
+      action.accounts.destination === "buyer" || action.accounts.destination === "seller";
+    return (
+      destinationIsAParty &&
+      RELEVANT.resolve
+        .filter((field) => field !== "destination")
+        .every((field) => action.accounts[field] === canonicalValue(action.kind, field))
+    );
+  }
   return RELEVANT[action.kind].every(
-    (field) => action.accounts[field] === canonicalValue(field),
+    (field) => action.accounts[field] === canonicalValue(action.kind, field),
   );
 }
 

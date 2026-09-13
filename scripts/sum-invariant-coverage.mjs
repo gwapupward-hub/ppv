@@ -39,6 +39,9 @@ const COUNTERS = [
   "completions",
   "settlements",
   "cancellations",
+  "refunds",
+  "disputes",
+  "resolutions",
   "postTerminalAttempts",
   "sequences",
 ];
@@ -89,6 +92,9 @@ for (const [name, message] of [
     "refusedNonCanonical",
     "no wrong-relationship account was ever refused — PPV-P9 was never exercised",
   ],
+  ["refunds", "no refund ever succeeded — PPV-D3 and PPV-D4 were never exercised"],
+  ["disputes", "no dispute was ever opened — PPV-D1 and PPV-D2 were never exercised"],
+  ["resolutions", "no dispute was ever resolved — PPV-D5 was never exercised"],
 ]) {
   if (total[name] === 0) failures.push(message);
 }

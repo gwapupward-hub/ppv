@@ -8,7 +8,7 @@ import { assertInvariants } from "./assertions";
 import { executeAction, resolveAccounts, type SequenceWorld } from "./execute";
 import { agreementAddresses, AMOUNT, type Fixture } from "./fixture";
 import type { EscrowModel } from "./model";
-import { applySuccess, predict } from "./model";
+import { applySuccess, predict, TERMINAL_STATES } from "./model";
 import { snapshotProtocolState, type SnapshotContext } from "./snapshots";
 
 /**
@@ -39,8 +39,12 @@ export type Coverage = {
   refusedNonCanonical: number;
   fundings: number;
   completions: number;
+  /** Every path that paid the seller, including a conceded dispute. */
   settlements: number;
   cancellations: number;
+  refunds: number;
+  disputes: number;
+  resolutions: number;
   postTerminalAttempts: number;
   sequences: number;
 };
@@ -55,6 +59,9 @@ export function emptyCoverage(): Coverage {
     completions: 0,
     settlements: 0,
     cancellations: 0,
+    refunds: 0,
+    disputes: 0,
+    resolutions: 0,
     postTerminalAttempts: 0,
     sequences: 0,
   };
@@ -165,12 +172,24 @@ export class InvariantRunner {
         const action = sequence[index];
         const pre = await snapshotProtocolState(ctx);
         const prediction = predict(model, action);
-        const wasTerminal = model.state === "settled" || model.state === "cancelled";
+        // Read from the model's own terminal set rather than re-listed here:
+        // a state added to one and not the other is how PPV-P2 stops being
+        // checked on the paths that were added last.
+        const wasTerminal = TERMINAL_STATES.has(model.state);
 
         const result = await executeAction(fixture, world, action);
         const post = await snapshotProtocolState(ctx);
 
-        if (result.succeeded && action.kind === "settle") settlementCount += 1;
+        // Every way the seller can be paid counts as a settlement, because
+        // PPV-P3 is about the money leaving once, not about which instruction
+        // sent it. A dispute conceded to the seller is a settlement.
+        if (
+          result.succeeded &&
+          (action.kind === "settle" ||
+            (action.kind === "resolve" && action.accounts.destination === "seller"))
+        ) {
+          settlementCount += 1;
+        }
         const expected =
           prediction.succeeds && result.succeeded ? applySuccess(model, action) : model;
 
@@ -201,6 +220,12 @@ export class InvariantRunner {
           if (action.kind === "complete") coverage.completions += 1;
           if (action.kind === "settle") coverage.settlements += 1;
           if (action.kind === "cancel") coverage.cancellations += 1;
+          if (action.kind === "refund") coverage.refunds += 1;
+          if (action.kind === "dispute") coverage.disputes += 1;
+          if (action.kind === "resolve") {
+            coverage.resolutions += 1;
+            if (action.accounts.destination === "seller") coverage.settlements += 1;
+          }
         } else {
           coverage.refused += 1;
           if (!isCanonicallyAddressed(action)) coverage.refusedNonCanonical += 1;
