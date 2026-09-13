@@ -71,6 +71,16 @@ export async function collect({ client, env, buildDir = "target", now = () => ne
   for (const member of members) {
     if (!isAddress(member)) throw new Error(`authority member ${member} is not an address`);
   }
+  // A threshold counts distinct keys, not list entries. Two copies of one
+  // member in a "2-of-3" is a 1-of-2 that reads like a 2-of-3 forever after,
+  // because this record is what every later verification compares against.
+  const distinct = new Set(members);
+  if (distinct.size !== members.length) {
+    throw new Error(
+      `authority members contain duplicates: ${members.length} entries, ${distinct.size} distinct keys. ` +
+        `A ${threshold}-of-${members.length} whose members repeat does not require ${threshold} holders.`,
+    );
+  }
 
   // The built artifact must name the permanent identity, or the record would
   // describe a deployment of something else under this program's name.
@@ -103,6 +113,14 @@ export async function collect({ client, env, buildDir = "target", now = () => ne
   }
   if (!state.upgradeAuthority) {
     throw new Error(`${program} is immutable: its upgrade authority has been revoked`);
+  }
+  // The vault is not one of its own signers. A member list that names the
+  // authority itself would make the threshold unsatisfiable by people, or —
+  // worse — satisfiable by whatever can make the vault sign.
+  if (members.includes(state.upgradeAuthority)) {
+    throw new Error(
+      `SECURITY: the upgrade authority ${state.upgradeAuthority} is listed as one of its own members`,
+    );
   }
   if (!isProgramDerived(state.upgradeAuthority)) {
     throw new Error(
