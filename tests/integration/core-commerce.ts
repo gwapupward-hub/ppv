@@ -381,15 +381,42 @@ describe("PPV Core ↔ Commerce integration", () => {
     );
 
     // And the program will not accept a signature naming different terms as a
-    // signature on this agreement.
+    // signature on the agreement. Checked on a *pending* agreement: on the
+    // executed one the state guard fires first and reports BadState, which is
+    // correct but says nothing about terms binding.
     const wrongTerms = [...(await hashDocumentV1(otherTerms))];
+    const pendingId = id16();
+    const pending = agreementAddress(commerce.programId, partyA.publicKey, pendingId);
+    await commerce.methods
+      .createAgreement(
+        pendingId,
+        partyB.publicKey,
+        contentHash,
+        termsHash,
+        new BN((await chainTime(connection)) + 3600),
+      )
+      .accounts({ partyA: partyA.publicKey, agreement: pending, systemProgram: SystemProgram.programId })
+      .signers([partyA])
+      .rpc();
+
     await expectError(
       commerce.methods
         .signAgreement(1, contentHash, wrongTerms)
-        .accounts({ signer: partyA.publicKey, agreement })
+        .accounts({ signer: partyA.publicKey, agreement: pending })
         .signers([partyA])
         .rpc(),
       "TermsHashMismatch",
+    );
+
+    // An executed agreement refuses any further signature at all, on its own
+    // terms or otherwise: terminal is terminal.
+    await expectError(
+      commerce.methods
+        .signAgreement(1, contentHash, termsHash)
+        .accounts({ signer: partyA.publicKey, agreement })
+        .signers([partyA])
+        .rpc(),
+      "BadState",
     );
   });
 
@@ -408,8 +435,10 @@ describe("PPV Core ↔ Commerce integration", () => {
       assert.equal(signature.contentHashSigned, decoded.contentHash);
     }
 
-    // A fresh agreement, signed twice by party A, must not execute. This is the
-    // assertion that a wallet cannot represent both sides of its own deal.
+    // A fresh agreement that party A tries to accept twice. The program does
+    // not merely decline to execute it — it rejects the second acceptance
+    // outright, which is the stronger form of the same guarantee: a wallet
+    // cannot represent both sides of its own deal, and cannot even try.
     const soloId = id16();
     const solo = agreementAddress(commerce.programId, partyA.publicKey, soloId);
     const expiresAt = new BN((await chainTime(connection)) + 3600);
@@ -423,11 +452,14 @@ describe("PPV Core ↔ Commerce integration", () => {
       .accounts({ signer: partyA.publicKey, agreement: solo })
       .signers([partyA])
       .rpc();
-    await commerce.methods
-      .signAgreement(1, contentHash, termsHash)
-      .accounts({ signer: partyA.publicKey, agreement: solo })
-      .signers([partyA])
-      .rpc();
+    await expectError(
+      commerce.methods
+        .signAgreement(1, contentHash, termsHash)
+        .accounts({ signer: partyA.publicKey, agreement: solo })
+        .signers([partyA])
+        .rpc(),
+      "AlreadySigned",
+    );
 
     const soloInfo = await connection.getAccountInfo(solo);
     const soloDecoded = decodeCommerceAgreementAccount(new Uint8Array(soloInfo!.data));
@@ -543,17 +575,19 @@ describe("PPV Core ↔ Commerce integration", () => {
       ppv_commerce: commerce.programId.toBase58(),
     } as const;
 
-    // Extracting the Commerce transaction while claiming both program ids point
-    // at Core: the event authority no longer matches, so nothing is reported.
-    // Silence is the correct outcome — never a Core event that never happened.
-    const mislabelled = extractEvents(await fetchTransaction(connection, createSignature), {
-      ppv_core: programs.ppv_commerce,
-      ppv_commerce: programs.ppv_core,
-    });
-    assert.deepEqual(
-      mislabelled.map((e) => [e.program, e.event.name]),
-      [],
-      "a Commerce event attributed to Core must not decode",
+    // Extract the Commerce transaction with the two program ids swapped, so the
+    // reader believes Commerce's id belongs to Core. The event authority still
+    // matches — it is derived from the id on the instruction — so the mislabel
+    // survives until the decode, and there it is refused loudly rather than
+    // reported as a Core event that never happened. The indexer's own unit
+    // tests assert the same refusal.
+    await assert.rejects(
+      async () =>
+        extractEvents(await fetchTransaction(connection, createSignature), {
+          ppv_core: programs.ppv_commerce,
+          ppv_commerce: programs.ppv_core,
+        }),
+      /AgreementCreated belongs to ppv_commerce, decoded as ppv_core/,
     );
 
     // And at the decoder: Commerce event bytes decoded as Core throw rather
