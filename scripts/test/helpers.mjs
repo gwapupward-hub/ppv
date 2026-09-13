@@ -204,7 +204,13 @@ export function goodDeploymentEnv(overrides = {}) {
  * Buffer. Anything not in the map is reported as a non-existent account, which
  * is what the chain does.
  */
-export function makeRpcTransport({ genesis = DEVNET_GENESIS, accounts = {}, signatures = {}, programAccounts = {} } = {}) {
+export function makeRpcTransport({
+  genesis = DEVNET_GENESIS,
+  accounts = {},
+  signatures = {},
+  programAccounts = {},
+  balances = {},
+} = {}) {
   const calls = [];
   const transport = async (_endpoint, init) => {
     const request = JSON.parse(init.body);
@@ -231,6 +237,12 @@ export function makeRpcTransport({ genesis = DEVNET_GENESIS, accounts = {}, sign
             data: [Buffer.from(account.data).toString("base64"), "base64"],
           },
         });
+      }
+      case "getBalance": {
+        const lamports = balances[request.params[0]];
+        // An address with no entry has no balance, which is what the chain says
+        // about an account that does not exist.
+        return respond({ context: { slot: 1 }, value: lamports ?? 0 });
       }
       case "getProgramAccounts":
         return respond(

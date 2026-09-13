@@ -102,6 +102,17 @@ jobs:
             node scripts/verify-deployed-program.mjs --inspect "${id}"
           done
 
+      # Reported, not asserted, and read-only: a balance is public. The deploy
+      # workflow enforces the funding policy itself and fails closed; this only
+      # answers the question an operator needs *before* scheduling a
+      # deployment, because a devnet faucet is not instantaneous.
+      - name: Report deployer funding against the deployment policy
+        if: ${{ vars.PPV_DEVNET_DEPLOYER_PUBKEY != '' }}
+        env:
+          DEPLOYER: ${{ vars.PPV_DEVNET_DEPLOYER_PUBKEY }}
+          MIN_LAMPORTS: "2000000000"
+        run: node scripts/report-deployer-funding.mjs "${DEPLOYER}" "${MIN_LAMPORTS}"
+
       - name: Verify live PPV Core identity and custody through the smoke suite
         run: |
           npm ci

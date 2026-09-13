@@ -131,6 +131,8 @@ manifest. Never deploy these placeholder IDs.
 - [PPV Core devnet release v1](docs/releases/ppv-core-devnet-v1.md)
 - [PPV Core upgrade runbook](docs/ppv-core-upgrade-runbook.md)
 - [PPV Commerce devnet readiness](docs/releases/ppv-commerce-devnet-readiness.md)
+- [PPV Commerce release runbook](docs/ppv-commerce-release-runbook.md)
+- [PPV Escrow readiness assessment](docs/releases/ppv-escrow-readiness-assessment.md)
 - [Devnet release readiness](docs/devnet-release-readiness.md)
 - [Devnet deployment runbook](docs/devnet-deployment.md)
 - [Deployment manifests](deployments/README.md)
