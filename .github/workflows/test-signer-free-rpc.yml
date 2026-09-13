@@ -1,0 +1,42 @@
+name: Test signer-free devnet RPC verifier
+
+on:
+  push:
+    branches: ["fix/devnet-rpc-verification"]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify deployed PPV Core without a signer
+        env:
+          PROGRAM_ID: 9cWE41ZDNQChvFrRoVuPQDeoVLg46ACTiZRCZaBZzfwU
+          EXPECTED_AUTHORITY: B6tcsTrMCKTZV5vi3rRCnA3FMPeeWACSHuuTSz5XQgnX
+          DEPLOY_SIGNATURE: 3A1fMmAZiBfjKb9ijUW81KaqEyZqEtT7vha2Ms2hZanxhjcDaJn4wKJvEwSkDJBK3Co7eJnTyn6wvc2iXaYaAxAp
+        run: |
+          genesis="$(node scripts/query-solana-rpc.mjs genesis)"
+          [[ "${genesis}" == "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG" ]]
+
+          exists="$(node scripts/query-solana-rpc.mjs exists "${PROGRAM_ID}")"
+          [[ "${exists}" == "true" ]]
+
+          state="$(node scripts/query-solana-rpc.mjs program "${PROGRAM_ID}")"
+          node -e '
+            const s = JSON.parse(process.argv[1]);
+            if (!s.exists || !s.executable) throw new Error("program is not executable");
+            if (s.owner !== "BPFLoaderUpgradeab1e11111111111111111111111") throw new Error("loader mismatch");
+            if (s.authority !== process.env.EXPECTED_AUTHORITY) throw new Error(`authority mismatch: ${s.authority}`);
+          ' "${state}"
+
+          signature="$(node scripts/query-solana-rpc.mjs signature "${DEPLOY_SIGNATURE}")"
+          node -e '
+            const s = JSON.parse(process.argv[1]);
+            if (!s || s.err !== null) throw new Error("deployment signature is missing or failed");
+          ' "${signature}"
