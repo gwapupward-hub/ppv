@@ -344,12 +344,13 @@ import { tmpdir } from "node:os";
 
 import {
   LIFECYCLE_COVERAGE,
+  checkDeployedBinary,
   releasedPrograms,
   runCoreReadPhase,
   runSdkTargetingPhase,
 } from "../devnet-smoke.mjs";
 import { PROOF_RECORD_DISCRIMINATOR, PROOF_RECORD_LEN, decodeProofRecord } from "../lib/core-accounts.mjs";
-import { makeRpcTransport } from "./helpers.mjs";
+import { deployedCoreFixture, makeRpcTransport } from "./helpers.mjs";
 
 /** A ProofRecord as the program writes it. */
 function proofRecordBytes({ authority, proofId = 7, contentHash = 9, kind = 0, status = 0 } = {}) {
@@ -483,4 +484,29 @@ test("coverage never reports a devnet claim for something only a validator prove
       assert.equal(entry.coverage, "need-escrow", `${entry.step} must not claim live coverage`);
     }
   }
+});
+
+test("the deployed bytes are checked against the release record, not assumed", async () => {
+  const binary = Buffer.from("ppv_core release artifact");
+  const fixture = deployedCoreFixture({ binary, authority: VAULT });
+  const release = {
+    programId: PERMANENT_PROGRAM_IDS.ppv_core,
+    binaryLength: binary.length,
+    binaryHash: `sha256:${createHash("sha256").update(binary).digest("hex")}`,
+  };
+  const client = rpc("https://stub.invalid", {
+    fetchImpl: makeRpcTransport({ accounts: fixture.accounts }),
+  });
+  assert.equal(await checkDeployedBinary(client, "ppv_core", release), release.binaryHash);
+
+  // A program running bytes that are not the release is the finding this whole
+  // release path exists to surface. It must stop the suite.
+  const wrong = { ...release, binaryHash: `sha256:${"0".repeat(64)}` };
+  await assert.rejects(
+    checkDeployedBinary(client, "ppv_core", wrong),
+    /live binary is sha256:.*, the release record is/,
+  );
+
+  // A record with no binary recorded is skipped rather than silently passed.
+  assert.equal(await checkDeployedBinary(client, "ppv_core", {}), null);
 });

@@ -34,6 +34,7 @@ import {
   MAINNET_GENESIS,
   decodeProgramDataAddress,
   decodeProgramDataAuthority,
+  readDeployedProgram,
   rpc,
 } from "./lib/rpc.mjs";
 
@@ -61,7 +62,7 @@ export const LIFECYCLE_COVERAGE = [
   { step: "ppv_core executable + loader owner", coverage: "live", how: "account flags and owner read from chain" },
   { step: "ppv_core ProgramData", coverage: "live", how: "resolved from the Program account and read" },
   { step: "ppv_core Squads upgrade authority", coverage: "live", how: "ProgramData authority equals the vault" },
-  { step: "ppv_core deployed bytes", coverage: "live", how: "verify-deployed-program.mjs against the release record" },
+  { step: "ppv_core deployed bytes", coverage: "live", how: "live ProgramData bytes hashed and compared to the release record" },
   { step: "ppv_core account layout", coverage: "live", how: "ProofRecord discriminator and layout over live program accounts" },
   { step: "SDK PDA derivation for ppv_core", coverage: "live", how: "proof PDAs derived under the permanent Core id" },
   { step: "SDK ppv_core instruction targeting", coverage: "live", how: "built instructions address the permanent Core id" },
@@ -157,6 +158,34 @@ export async function checkProgram(client, name, expectedId, expectedAuthority, 
 }
 
 /**
+ * The deployed bytes against the release record's bytes.
+ *
+ * Done here as well as in `verify-deployed-program.mjs` so the coverage table
+ * below can say "LIVE VERIFIED" about the deployed binary without that claim
+ * depending on a second command someone may not have run. A checkmark that is
+ * only true in one particular workflow is the kind of checkmark this suite
+ * exists to avoid.
+ */
+export async function checkDeployedBinary(client, name, release) {
+  if (!release?.binaryHash || !release?.binaryLength) return null;
+  const state = await readDeployedProgram(client, release.programId, {
+    binaryLength: release.binaryLength,
+  });
+  const liveHash = `sha256:${state.deployedBinaryHash}`;
+  if (liveHash !== release.binaryHash) {
+    throw new SmokeFailure(
+      `${name} live binary is ${liveHash}, the release record is ${release.binaryHash}`,
+    );
+  }
+  record(
+    `${name}: deployed bytes equal the release artifact`,
+    true,
+    `${release.binaryLength} bytes, ${release.binaryHash}`,
+  );
+  return liveHash;
+}
+
+/**
  * Which programs this suite expects to find live.
  *
  * Driven by the committed release records rather than by the identity table: a
@@ -214,6 +243,7 @@ export async function runIdentityPhase(
       continue;
     }
     programs[name] = await checkProgram(client, name, id, expectedAuthority, encodeBase58);
+    await checkDeployedBinary(client, name, expected[name]);
   }
   return { genesis, programs, notReleased };
 }
