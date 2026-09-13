@@ -327,3 +327,22 @@ function stepIndexOffset(name) {
   assert.notEqual(offset, -1, `workflow has no step named '${name}'`);
   return offset;
 }
+
+test("verification covers every committed release record, not a named one", () => {
+  // A program released later must be verified from the commit its record lands
+  // in. Naming one record here means the second program is silently unverified
+  // until somebody remembers to edit this file.
+  assert.match(VERIFY_WORKFLOW, /records=\(deployments\/evidence\/\*\.json\)/);
+  assert.match(VERIFY_WORKFLOW, /No committed release records to verify/);
+  // One failing record fails the run rather than being lost in a loop.
+  assert.match(VERIFY_WORKFLOW, /\|\| failed=1/);
+  assert.match(VERIFY_WORKFLOW, /exit "\$\{failed\}"/);
+});
+
+test("verification reports the live state of every permanent program", () => {
+  // Including programs with no record yet: before a first deployment the useful
+  // question is whether the permanent address is still free.
+  assert.match(VERIFY_WORKFLOW, /9cWE41ZDNQChvFrRoVuPQDeoVLg46ACTiZRCZaBZzfwU/);
+  assert.match(VERIFY_WORKFLOW, /GmRDoFuPrBrsxnvTX751WK5rLu14JXe4sgjh6vNwHzr3/);
+  assert.match(VERIFY_WORKFLOW, /--inspect/);
+});

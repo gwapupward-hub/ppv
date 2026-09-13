@@ -133,9 +133,33 @@ jobs:
       # asserted by the suite itself. A scheduled or dispatched run raises it to
       # the release budget: 200 sequences of up to 32 actions across five seeds,
       # floor 12,000.
+      - name: Detect a release-candidate change
+        id: candidate
+        run: |
+          # A pull request that touches deployments/release-candidates/ is
+          # declaring a program ready to deploy. That is the change the heavy
+          # invariant budget exists for, so it runs there rather than on every
+          # pull request or never at all.
+          changed=false
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            git fetch --depth=1 origin "${{ github.base_ref }}"
+            if git diff --name-only "origin/${{ github.base_ref }}...HEAD" \
+                 | grep -q '^deployments/release-candidates/'; then
+              changed=true
+            fi
+          fi
+          echo "release_candidate=${changed}" >> "${GITHUB_OUTPUT}"
+          echo "release-candidate change: ${changed}"
+
       - name: Security invariants (PPV-P1..P10, property-based)
         env:
-          TIER: ${{ inputs.invariant_tier || (github.event_name == 'schedule' && 'release') || 'pr' }}
-        run: npm run "test:invariants:${TIER}"
+          TIER: >-
+            ${{ inputs.invariant_tier
+                || (github.event_name == 'schedule' && 'release')
+                || (steps.candidate.outputs.release_candidate == 'true' && 'release')
+                || 'pr' }}
+        run: |
+          echo "invariant tier: ${TIER}"
+          npm run "test:invariants:${TIER}"
       - name: Assert the build did not rewrite the lockfile
         run: git diff --exit-code -- Cargo.lock

@@ -149,18 +149,32 @@ test("CI runs the invariant gate after the deterministic gate", () => {
   );
 });
 
-test("a pull request gets the PR budget and a scheduled run gets the release budget", () => {
-  // The release tier is too slow to run on every pull request, and a gate that
-  // nobody ever runs is not a gate. So: PR budget by default, release budget on
-  // the weekly schedule and on demand, and no way to end up with neither.
+test("the release budget runs where it is needed and the PR budget everywhere else", () => {
+  // The release tier is too slow for every pull request, and a gate nobody ever
+  // runs is not a gate. It runs on the weekly schedule, on demand, and — the
+  // case that matters for a deployment — on the pull request that declares a
+  // program a release candidate. Never neither.
   const anchorJob = CI.slice(CI.indexOf("\n  anchor:"));
-  assert.match(
-    anchorJob,
-    /TIER: \$\{\{ inputs\.invariant_tier \|\| \(github\.event_name == 'schedule' && 'release'\) \|\| 'pr' \}\}/,
-  );
+  assert.match(anchorJob, /inputs\.invariant_tier/);
+  assert.match(anchorJob, /github\.event_name == 'schedule' && 'release'/);
+  assert.match(anchorJob, /steps\.candidate\.outputs\.release_candidate == 'true' && 'release'/);
+  assert.match(anchorJob, /\|\| 'pr' \}\}/, "the budget must always resolve to something");
   assert.match(CI, /schedule:\n\s+- cron:/);
   assert.match(CI, /options: \[pr, release\]/);
   // The job has to be allowed to run for the events that raise the budget.
   assert.match(anchorJob, /github\.event_name == 'schedule'/);
   assert.match(anchorJob, /github\.event_name == 'workflow_dispatch'/);
+});
+
+test("a release-candidate change is detected from the diff, not from a label", () => {
+  // Read off the diff against the base branch: a human cannot forget to set it,
+  // and it cannot be turned off for the one pull request that needs the gate.
+  const anchorJob = CI.slice(CI.indexOf("\n  anchor:"));
+  assert.match(anchorJob, /deployments\/release-candidates\//);
+  assert.match(anchorJob, /git diff --name-only "origin\/\$\{\{ github\.base_ref \}\}\.\.\.HEAD"/);
+  assert.ok(
+    anchorJob.indexOf("- name: Detect a release-candidate change") <
+      anchorJob.indexOf("- name: Security invariants"),
+    "detection must precede the gate that reads it",
+  );
 });

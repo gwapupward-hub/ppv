@@ -18,9 +18,9 @@ on:
   workflow_dispatch:
     inputs:
       record:
-        description: Evidence record to verify
+        description: "One evidence record to verify; empty means every committed record"
         required: false
-        default: deployments/evidence/ppv-core-devnet-861a8df.json
+        default: ""
         type: string
       verify_rpc_url:
         description: Optional second RPC endpoint for an independent read
@@ -54,7 +54,7 @@ jobs:
     env:
       PPV_RPC_URL: https://api.devnet.solana.com
       PPV_VERIFY_RPC_URL: ${{ inputs.verify_rpc_url }}
-      RECORD: ${{ inputs.record || 'deployments/evidence/ppv-core-devnet-861a8df.json' }}
+      RECORD: ${{ inputs.record }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -67,8 +67,29 @@ jobs:
       # scripts/test/workflow.test.mjs, so adding a deploy step, a keypair or a
       # `secrets.` reference here breaks a test rather than passing quietly.
 
-      - name: Verify the release record against live chain state
-        run: node scripts/verify-deployed-program.mjs "${RECORD}"
+      # Every committed record, not one named record. A program released later
+      # is verified from the commit its record lands in, with nobody having to
+      # remember to add it here — and a record that stops verifying fails this
+      # run whichever program it belongs to.
+      - name: Verify every release record against live chain state
+        run: |
+          if [[ -n "${RECORD}" ]]; then
+            node scripts/verify-deployed-program.mjs "${RECORD}"
+            exit 0
+          fi
+          shopt -s nullglob
+          records=(deployments/evidence/*.json)
+          if (( ${#records[@]} == 0 )); then
+            echo "No committed release records to verify." >&2
+            exit 1
+          fi
+          failed=0
+          for record in "${records[@]}"; do
+            echo "::group::${record}"
+            node scripts/verify-deployed-program.mjs "${record}" || failed=1
+            echo "::endgroup::"
+          done
+          exit "${failed}"
 
       # Reported, not asserted. A program with no release record has nothing to
       # verify against, and the useful question before its first deployment is
