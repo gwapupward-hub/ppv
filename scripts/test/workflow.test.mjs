@@ -203,3 +203,96 @@ test("no secret can reach a shell line", () => {
 test("the preflight runs inside the workflow, not only on a developer's machine", () => {
   assert.match(WORKFLOW, /\.\/scripts\/verify-devnet-readiness\.sh --repo-only/);
 });
+
+/**
+ * Static invariants of the read-only verification workflow.
+ *
+ * Its whole value is a negative property — that nothing in it can change the
+ * chain, and that it needs no signing material to run. A property like that
+ * does not survive on good intentions: it survives because adding a deploy
+ * step, a keypair or a secret reference to the file fails a test here.
+ */
+/**
+ * The executable part of a workflow: comments removed.
+ *
+ * These assertions are about what the file can *do*, and a comment explaining
+ * that the workflow must never run `solana program deploy` is not an instance
+ * of running it. Matching the raw text would make the safety documentation
+ * fail the safety test, which teaches people to delete the documentation.
+ */
+function executable(yaml) {
+  return yaml
+    .split("\n")
+    .filter((line) => !/^\s*#/.test(line))
+    .join("\n");
+}
+
+const VERIFY_WORKFLOW = executable(
+  readFileSync(join(REPO, ".github", "workflows", "verify-devnet-deployment.yml"), "utf8"),
+);
+
+test("verification contains no command that can mutate the chain", () => {
+  const forbidden = [
+    /solana\s+program\s+(deploy|write|upgrade|close|set-upgrade-authority|extend)/,
+    /solana\s+(transfer|airdrop|send-transaction|sign)/,
+    /set-upgrade-authority/,
+    /anchor\s+(deploy|upgrade|idl\s+(init|upgrade|set-authority))/,
+    /solana-keygen\s+new/,
+  ];
+  for (const pattern of forbidden) {
+    assert.doesNotMatch(VERIFY_WORKFLOW, pattern, `verification must not contain ${pattern}`);
+  }
+});
+
+test("verification needs no secret, no keypair and no protected environment", () => {
+  assert.doesNotMatch(VERIFY_WORKFLOW, /secrets\./, "verification must not read a repository secret");
+  assert.doesNotMatch(VERIFY_WORKFLOW, /environment:\s*devnet/, "verification must not hold deploy credentials");
+  assert.doesNotMatch(VERIFY_WORKFLOW, /keypair/i, "verification must not touch a keypair");
+  assert.match(VERIFY_WORKFLOW, /^permissions:\n\s+contents: read$/m);
+});
+
+test("verification is separate from deployment and can run unattended", () => {
+  // Separate file, separate concurrency group: a verification run must never
+  // queue behind, or cancel, a deployment.
+  assert.doesNotMatch(VERIFY_WORKFLOW, /group: deploy-devnet/);
+  assert.match(VERIFY_WORKFLOW, /group: verify-devnet-deployment/);
+  assert.match(VERIFY_WORKFLOW, /schedule:/);
+  assert.match(VERIFY_WORKFLOW, /workflow_dispatch:/);
+});
+
+test("verification pins the devnet endpoint and the expected Squads vault", () => {
+  assert.match(VERIFY_WORKFLOW, /PPV_RPC_URL: https:\/\/api\.devnet\.solana\.com/);
+  assert.match(VERIFY_WORKFLOW, /PPV_SQUADS_VAULT_PDA: B6tcsTrMCKTZV5vi3rRCnA3FMPeeWACSHuuTSz5XQgnX/);
+  assert.doesNotMatch(VERIFY_WORKFLOW, /mainnet/);
+});
+
+/**
+ * Static invariants of the one-time evidence recovery workflow.
+ *
+ * It rebuilds a release and reads the chain. It must be able to do neither more
+ * nor less than that.
+ */
+const RECOVERY_WORKFLOW = executable(
+  readFileSync(join(REPO, ".github", "workflows", "recover-ppv-core-devnet-evidence.yml"), "utf8"),
+);
+
+test("evidence recovery cannot deploy, sign, or reach a secret", () => {
+  for (const pattern of [
+    /solana\s+program\s+(deploy|write|upgrade|close|set-upgrade-authority)/,
+    /set-upgrade-authority/,
+    /anchor\s+deploy/,
+    /solana-keygen/,
+    /secrets\./,
+  ]) {
+    assert.doesNotMatch(RECOVERY_WORKFLOW, pattern, `recovery must not contain ${pattern}`);
+  }
+  assert.match(RECOVERY_WORKFLOW, /^permissions:\n\s+contents: read$/m);
+});
+
+test("evidence recovery pins the exact deployed release commit", () => {
+  assert.match(RECOVERY_WORKFLOW, /PPV_RELEASE_COMMIT: 861a8dfce9533f75494621b8a36e60e60447cc0c/);
+  assert.match(RECOVERY_WORKFLOW, /ref: \$\{\{ env\.PPV_RELEASE_COMMIT \}\}/);
+  // The rebuild is checked against the checkout, so a moved ref cannot quietly
+  // produce a record describing a different source.
+  assert.match(RECOVERY_WORKFLOW, /Checked out \$\{actual_commit\}, expected \$\{PPV_RELEASE_COMMIT\}/);
+});

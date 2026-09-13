@@ -1,0 +1,80 @@
+name: Verify devnet deployment
+
+# Re-verifies an already-deployed PPV program against its committed release
+# record. This is deliberately separate from the initial-deployment workflow and
+# shares no step with it.
+#
+# ZERO MUTATIONS. There is no `solana program deploy`, `write`, `upgrade`,
+# `set-upgrade-authority`, `close`, `transfer`, or any other command that can
+# sign or submit a transaction — the only chain access in this workflow is
+# `getGenesisHash`, `getAccountInfo` and `getSignatureStatuses` over public
+# JSON-RPC. It uses no repository secrets, no program keypair, no deployer
+# keypair and no Squads member key, because every fact it checks is public.
+#
+# It fails closed: any mismatch between the record and the chain fails the run,
+# and a cluster that is not the recorded one is refused before anything else.
+
+on:
+  workflow_dispatch:
+    inputs:
+      record:
+        description: Evidence record to verify
+        required: false
+        default: deployments/evidence/ppv-core-devnet-861a8df.json
+        type: string
+      verify_rpc_url:
+        description: Optional second RPC endpoint for an independent read
+        required: false
+        default: ""
+        type: string
+  schedule:
+    # Weekly, so a change to the live upgrade authority or the deployed bytes is
+    # noticed by the repository rather than by whoever happens to look.
+    - cron: "17 7 * * 1"
+  pull_request:
+    paths:
+      - deployments/evidence/**
+      - scripts/verify-deployed-program.mjs
+      - scripts/collect-deployment-evidence.mjs
+      - scripts/lib/rpc.mjs
+      - .github/workflows/verify-devnet-deployment.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-devnet-deployment-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify deployed PPV programs
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PPV_RPC_URL: https://api.devnet.solana.com
+      PPV_VERIFY_RPC_URL: ${{ inputs.verify_rpc_url }}
+      RECORD: ${{ inputs.record || 'deployments/evidence/ppv-core-devnet-861a8df.json' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # The zero-mutation and no-secrets properties of this file are asserted by
+      # scripts/test/workflow.test.mjs, so adding a deploy step, a keypair or a
+      # `secrets.` reference here breaks a test rather than passing quietly.
+
+      - name: Verify the release record against live chain state
+        run: node scripts/verify-deployed-program.mjs "${RECORD}"
+
+      - name: Verify live PPV Core identity and custody through the smoke suite
+        run: |
+          npm ci
+          npm run build:sdk --silent
+          node scripts/devnet-smoke.mjs --identity-only
+        env:
+          PPV_SMOKE_RPC_URL: https://api.devnet.solana.com
+          PPV_SQUADS_VAULT_PDA: B6tcsTrMCKTZV5vi3rRCnA3FMPeeWACSHuuTSz5XQgnX
