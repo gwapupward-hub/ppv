@@ -227,8 +227,9 @@ test("no ppv_escrow account has an Option field, which is what makes the strict 
     // are free to use anything.
     const struct = source.match(/#\[account\]\s*#\[derive\(InitSpace\)\]\s*pub struct \w+ \{([\s\S]*?)\n\}/);
     assert.ok(struct, `${file} declares no #[account] struct`);
+    const fields = struct[1] ?? "";
     assert.ok(
-      !/\bOption</.test(struct[1]),
+      !/\bOption</.test(fields),
       `${file} has an Option field: the SDK's strict trailing-bytes check will ` +
         `reject every account whose Option is None, exactly as it did for ppv_commerce`,
     );
