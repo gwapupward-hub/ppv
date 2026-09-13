@@ -5,7 +5,9 @@ executable evidence for it. A claim with no test is listed as having no test.
 
 **Nothing here authorises a deployment.** `ppv_escrow` is not deployed to any
 cluster, and the custody gate in [deployment-gates.md](../deployment-gates.md)
-is closed.
+is closed. The readiness verdict is
+[**NO-GO**](ppv-escrow-readiness-verdict.md); a matrix of passing rows is not a
+verdict, and this one is not read as one.
 
 ## How to read the evidence column
 

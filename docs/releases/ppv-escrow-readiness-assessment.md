@@ -7,6 +7,15 @@ the custody gate in [`deployment-gates.md`](../deployment-gates.md), and does no
 change `ppv_escrow`'s absence from `[programs.devnet]` or from the deploy
 workflow.
 
+> **Superseded in part.** This document answered one question at the close of
+> Sprint 2 — *should the next sprint be an Escrow security and readiness
+> sprint?* — and its GO was acted on: that sprint ran. It is **not** a
+> deployment-readiness verdict and never was. The deployment-readiness verdict
+> is [PPV ESCROW DEVNET DEPLOYMENT READINESS:
+> NO-GO](../security/ppv-escrow-readiness-verdict.md), issued at the close of
+> Sprint 3. Where the two appear to disagree, they are answering different
+> questions and the Sprint 3 verdict is the one about deployment.
+
 ## Verdict
 
 **PPV ESCROW NEXT SPRINT: GO FOR SECURITY/READINESS**

@@ -1,5 +1,12 @@
 # PPV Escrow residual-risk register
 
+**Readiness verdict: PPV ESCROW DEVNET DEPLOYMENT READINESS: NO-GO.** The
+blocking entries are **RR-1** (milestones and bounties are not modelled under
+randomized adversarial execution) and **RR-8** (the randomized layer is not
+mutation-qualified). See
+[ppv-escrow-readiness-verdict.md](ppv-escrow-readiness-verdict.md) for the full
+verdict and its statements of record.
+
 What Sprint 3 did not resolve, classified honestly. Every entry here is
 referenced from the [attack matrix](ppv-escrow-attack-matrix.md), so a risk
 cannot exist in one document and not the other.
@@ -34,7 +41,7 @@ are fixed, regression-tested and mutation-qualified:
 
 ## MEDIUM
 
-### RR-1 — Milestones and bounties are not randomly attacked
+### RR-1 — Milestones and bounties are not randomly attacked — **BLOCKS GO**
 
 The model-based property suite attacks `fund`, `mark_completed`, `settle`,
 `cancel`, `refund`, `open_dispute` and `resolve_dispute` — the ordinary-escrow
@@ -143,7 +150,7 @@ and applies to them today.
 Attempted in Sprint 1 against two candidate program ids without a match; not
 guessed at since.
 
-### RR-8 — The property suite is not mutation-qualified
+### RR-8 — The property suite is not mutation-qualified — **BLOCKS GO**
 
 `scripts/mutation-qualify.sh` breaks seven defences and requires the host
 suite to fail. It does not run the local-validator property suite, because each
