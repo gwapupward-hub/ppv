@@ -133,23 +133,29 @@ jobs:
       # asserted by the suite itself. A scheduled or dispatched run raises it to
       # the release budget: 200 sequences of up to 32 actions across five seeds,
       # floor 12,000.
-      - name: Detect a release-candidate change
+      - name: Detect a declared release candidate
         id: candidate
         run: |
-          # A pull request that touches deployments/release-candidates/ is
-          # declaring a program ready to deploy. That is the change the heavy
-          # invariant budget exists for, so it runs there rather than on every
-          # pull request or never at all.
-          changed=false
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            git fetch --depth=1 origin "${{ github.base_ref }}"
-            if git diff --name-only "origin/${{ github.base_ref }}...HEAD" \
-                 | grep -q '^deployments/release-candidates/'; then
-              changed=true
-            fi
-          fi
-          echo "release_candidate=${changed}" >> "${GITHUB_OUTPUT}"
-          echo "release-candidate change: ${changed}"
+          # Presence, not a diff. The first version of this asked git whether
+          # the pull request touched deployments/release-candidates/, which on
+          # a shallow checkout fails with "no merge base" — and because the
+          # command sat inside an `if`, the failure answered "no" instead of
+          # aborting. The gate silently downgraded itself to the PR budget on
+          # the very change that declared a release. A security gate that fails
+          # open is worse than no gate, because it reports success.
+          #
+          # Asking whether the file exists needs no git history, no network and
+          # no base branch, so there is nothing left to fail. It is also the
+          # better rule: while a program is queued for release, every commit is
+          # a candidate for the commit that gets deployed, and all of them
+          # should be held to the release budget. The file is deleted when the
+          # release record lands.
+          shopt -s nullglob
+          candidates=(deployments/release-candidates/*.json)
+          declared=false
+          (( ${#candidates[@]} > 0 )) && declared=true
+          echo "release_candidate=${declared}" >> "${GITHUB_OUTPUT}"
+          echo "release candidate declared: ${declared} (${candidates[*]:-none})"
 
       - name: Security invariants (PPV-P1..P10, property-based)
         env:

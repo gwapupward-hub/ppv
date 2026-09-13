@@ -166,15 +166,47 @@ test("the release budget runs where it is needed and the PR budget everywhere el
   assert.match(anchorJob, /github\.event_name == 'workflow_dispatch'/);
 });
 
-test("a release-candidate change is detected from the diff, not from a label", () => {
-  // Read off the diff against the base branch: a human cannot forget to set it,
-  // and it cannot be turned off for the one pull request that needs the gate.
+test("a release candidate is detected from the checkout, with nothing that can fail", () => {
+  // This gate once downgraded itself silently. It asked git whether the pull
+  // request touched deployments/release-candidates/, which on a shallow
+  // checkout fails with "no merge base"; the command sat inside an `if`, so the
+  // failure answered "no" and the release budget never ran on the change that
+  // declared a release.
+  //
+  // Presence needs no history, no base branch and no network, so there is
+  // nothing left to fail. These assertions keep it that way.
   const anchorJob = CI.slice(CI.indexOf("\n  anchor:"));
-  assert.match(anchorJob, /deployments\/release-candidates\//);
-  assert.match(anchorJob, /git diff --name-only "origin\/\$\{\{ github\.base_ref \}\}\.\.\.HEAD"/);
+  const step = anchorJob.slice(
+    anchorJob.indexOf("- name: Detect a declared release candidate"),
+    anchorJob.indexOf("- name: Security invariants"),
+  );
+  assert.match(step, /candidates=\(deployments\/release-candidates\/\*\.json\)/);
+
+  // Comments removed first: this step's comment explains the git-based version
+  // it replaced, and matching that prose would make the explanation fail the
+  // test it explains.
+  const commands = step
+    .split("\n")
+    .filter((line) => !/^\s*#/.test(line))
+    .join("\n");
+  assert.doesNotMatch(commands, /\bgit\b/, "detection must not depend on git history");
+  assert.doesNotMatch(commands, /curl|\bfetch\b/, "detection must not depend on the network");
+  assert.doesNotMatch(commands, /github\.base_ref/, "detection must not depend on a base branch");
   assert.ok(
-    anchorJob.indexOf("- name: Detect a release-candidate change") <
+    anchorJob.indexOf("- name: Detect a declared release candidate") <
       anchorJob.indexOf("- name: Security invariants"),
     "detection must precede the gate that reads it",
+  );
+});
+
+test("a declared release candidate exists, so the release budget is what runs", () => {
+  // While this holds, every commit is a candidate for the one that gets
+  // deployed, and all of them are held to the release budget.
+  const declared = readdirSync(join(REPO, "deployments", "release-candidates")).filter((entry) =>
+    entry.endsWith(".json"),
+  );
+  assert.ok(
+    declared.length > 0,
+    "expected a declared release candidate; delete this expectation when none is queued",
   );
 });
