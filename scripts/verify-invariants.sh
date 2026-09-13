@@ -165,14 +165,56 @@ wait_for_validator() {
 # A validator that stopped accepting transactions answers RPC and rejects every
 # blockhash, which reads like a protocol failure and is not one. Print what it
 # was actually doing so the next reader does not have to guess.
+#
+# The first version of this tailed 40 raw lines, which at the validator's INFO
+# level is forty lines of banking-stage metrics and none of the failure. The
+# signal is whatever the validator complained about, so that is what it prints;
+# the raw tail is kept short and last, as context rather than as the answer.
 dump_validator_state() {
   local ledger="$1"
+  local log="${ledger}/validator.log"
   echo >&2
-  echo "--- solana-test-validator log tail (${ledger}) ---" >&2
-  tail -n 40 "${ledger}/validator.log" >&2 2>/dev/null || echo "(no validator.log)" >&2
-  echo "--- disk where the ledger lives ---" >&2
+  echo "--- solana-test-validator complaints (${ledger}) ---" >&2
+  if [[ -r "${log}" ]]; then
+    local complaints
+    complaints="$(grep -E ' (WARN|ERROR) ' "${log}" | tail -n 15 || true)"
+    if [[ -n "${complaints}" ]]; then
+      printf '%s\n' "${complaints}" >&2
+    else
+      echo "(none: the validator logged no warnings or errors)" >&2
+    fi
+    echo "--- last 8 lines, for context ---" >&2
+    tail -n 8 "${log}" | cut -c1-200 >&2
+  else
+    echo "(no validator.log at ${log})" >&2
+  fi
+  echo "--- disk ---" >&2
   df -h "${ledger}" >&2 2>/dev/null || true
   du -sh "${ledger}" >&2 2>/dev/null || true
+}
+
+# Free space, reported per seed.
+#
+# A GitHub-hosted runner starts this job with the Rust toolchains, the cargo
+# registry and an `anchor build` target/ already on disk, and the release tier
+# then asks for five validators in sequence. A run that died on the first seed
+# after 61 of its 3,209 usual operations did so with 7.6G of 72G left, and
+# nothing in the output said so. Reporting headroom before each seed turns
+# "the suite failed strangely" into a number a reader can act on.
+report_headroom() {
+  local label="$1"
+  local avail
+  avail="$(df -BG --output=avail / 2>/dev/null | tail -1 | tr -dc '0-9' || echo "")"
+  if [[ -z "${avail}" ]]; then
+    echo "  disk headroom: unknown"
+    return 0
+  fi
+  echo "  disk headroom before ${label}: ${avail}G free on /"
+  if (( avail < 8 )); then
+    echo "  WARNING: under 8G free. The validator writes its ledger and its" >&2
+    echo "  snapshots here; a seed that dies early with little free space is" >&2
+    echo "  more likely short of disk than short of correctness." >&2
+  fi
 }
 
 start_validator() {
@@ -246,6 +288,7 @@ for seed in "${run_seeds[@]}"; do
   ledger="${workdir}/test-ledger-${seed}"
   echo
   echo "=== seed ${seed} — fresh validator ==="
+  report_headroom "seed ${seed}"
   start_validator "${ledger}"
 
   if ! PPV_INVARIANT_SEED="" \

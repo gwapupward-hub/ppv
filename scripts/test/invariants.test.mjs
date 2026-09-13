@@ -98,6 +98,14 @@ test("the run's budget is asserted over every seed, not per process", () => {
 test("a dead validator is diagnosed rather than reported as a protocol failure", () => {
   assert.match(GATE, /dump_validator_state "\$\{ledger\}"/);
   assert.match(GATE, /validator\.log/);
+  // The validator logs at INFO, so a raw tail is banking-stage metrics and
+  // none of the failure. What it complained about is the signal.
+  assert.match(GATE, /grep -E ' \(WARN\|ERROR\) '/);
+  // Free space is reported per seed: a seed that dies early having spent 61 of
+  // its usual 3,209 operations did so with 7.6G of 72G left, and nothing in
+  // the output said so.
+  assert.match(GATE, /report_headroom "seed \$\{seed\}"/);
+  assert.match(GATE, /disk headroom before/);
 });
 
 test("the property suite emits the coverage the aggregator sums", () => {
