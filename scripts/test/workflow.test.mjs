@@ -171,10 +171,47 @@ test("the handoff is verified on chain and an exact mismatch fails the run", () 
 test("evidence is recorded, verified and published", () => {
   assert.match(WORKFLOW, /\.\/scripts\/record-deployment\.sh/);
   assert.match(WORKFLOW, /\.\/scripts\/verify-deployment\.sh/);
-  assert.match(WORKFLOW, /path: deployments\/devnet\.json/);
+  assert.match(WORKFLOW, /deployments\/devnet\.json/);
+  assert.match(WORKFLOW, /deployments\/evidence\/\*\.json/);
   assert.match(WORKFLOW, /if-no-files-found: error/);
   // Evidence must not claim a weaker authority than policy allows.
   assert.match(WORKFLOW, /Refusing to record a deployment with threshold/);
+});
+
+test("the deployment writes its own canonical release record", () => {
+  // Sprint 1 shipped PPV Core and reconstructed its record from the chain
+  // afterwards, because the record was a manual step after the workflow. Both
+  // signatures are captured during the run, and the record is written and
+  // verified before the run ends.
+  assert.match(WORKFLOW, /node scripts\/collect-deployment-evidence\.mjs/);
+  assert.match(WORKFLOW, /node scripts\/verify-deployed-program\.mjs "\$\{record\}"/);
+  assert.match(WORKFLOW, /PPV_AUTHORITY_TRANSFER_SIGNATURE="\$\{TRANSFER_SIGNATURE\}"/);
+  assert.match(WORKFLOW, /transfer_signature=\$\{transfer_signature\}/);
+  assert.match(WORKFLOW, /PPV_RELEASE_COMMIT="\$\(git rev-parse HEAD\)"/);
+
+  assert.ok(
+    stepIndex("Transfer upgrade authority to Squads") <
+      stepIndex("Write and verify the canonical release record"),
+    "the record must describe a completed handoff",
+  );
+  assert.ok(
+    stepIndex("Verify on chain and record the deployment") <
+      stepIndex("Write and verify the canonical release record"),
+    "the live authority is checked before the record claims it",
+  );
+});
+
+test("the authority-transfer signature is read from ProgramData, not the program", () => {
+  // `set-upgrade-authority` touches ProgramData. Reading the program account's
+  // newest signature there would record the deploy signature twice.
+  const transferStep = WORKFLOW.slice(
+    WORKFLOW.indexOf("- name: Transfer upgrade authority to Squads"),
+    WORKFLOW.indexOf("- name: Verify on chain and record the deployment"),
+  );
+  assert.match(transferStep, /programDataAddress/);
+  assert.match(transferStep, /\$\{program_data\}/);
+  // A missing signature must not undo a successful handoff.
+  assert.match(transferStep, /never that the release is/);
 });
 
 test("signing material is destroyed on every exit path", () => {
@@ -327,3 +364,22 @@ function stepIndexOffset(name) {
   assert.notEqual(offset, -1, `workflow has no step named '${name}'`);
   return offset;
 }
+
+test("verification covers every committed release record, not a named one", () => {
+  // A program released later must be verified from the commit its record lands
+  // in. Naming one record here means the second program is silently unverified
+  // until somebody remembers to edit this file.
+  assert.match(VERIFY_WORKFLOW, /records=\(deployments\/evidence\/\*\.json\)/);
+  assert.match(VERIFY_WORKFLOW, /No committed release records to verify/);
+  // One failing record fails the run rather than being lost in a loop.
+  assert.match(VERIFY_WORKFLOW, /\|\| failed=1/);
+  assert.match(VERIFY_WORKFLOW, /exit "\$\{failed\}"/);
+});
+
+test("verification reports the live state of every permanent program", () => {
+  // Including programs with no record yet: before a first deployment the useful
+  // question is whether the permanent address is still free.
+  assert.match(VERIFY_WORKFLOW, /9cWE41ZDNQChvFrRoVuPQDeoVLg46ACTiZRCZaBZzfwU/);
+  assert.match(VERIFY_WORKFLOW, /GmRDoFuPrBrsxnvTX751WK5rLu14JXe4sgjh6vNwHzr3/);
+  assert.match(VERIFY_WORKFLOW, /--inspect/);
+});

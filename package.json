@@ -22,7 +22,7 @@
     "test:indexer": "npm run build:sdk && npm run test --workspace @gwap/ppv-indexer",
     "test:release": "node --test scripts/test/*.test.mjs",
     "test:sdk": "npm run test --workspace @gwap/ppv-sdk",
-    "typecheck": "tsc --noEmit -p tsconfig.json && npm run typecheck --workspace @gwap/ppv-sdk && npm run build:sdk && npm run typecheck --workspace @gwap/ppv-indexer && npm run build:indexer && tsc --noEmit -p scripts/tsconfig.json",
+    "typecheck": "npm run typecheck --workspace @gwap/ppv-sdk && npm run build:sdk && npm run typecheck --workspace @gwap/ppv-indexer && npm run build:indexer && tsc --noEmit -p tsconfig.json && tsc --noEmit -p scripts/tsconfig.json",
     "verify:devnet-readiness": "./scripts/verify-devnet-readiness.sh",
     "verify:idl-build": "./scripts/verify-idl-build.sh"
   },

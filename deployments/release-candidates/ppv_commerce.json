@@ -1,0 +1,22 @@
+{
+  "program": "ppv_commerce",
+  "programId": "GmRDoFuPrBrsxnvTX751WK5rLu14JXe4sgjh6vNwHzr3",
+  "cluster": "devnet",
+  "status": "awaiting-approvals",
+  "requiredGates": [
+    "cargo fmt --all -- --check",
+    "cargo test --workspace --locked",
+    "cargo clippy --workspace --all-targets --locked",
+    "npm ci",
+    "npm test",
+    "npm run build:sdk",
+    "npm run test:invariants:pr",
+    "npm run test:invariants:release",
+    "npm run test:f1"
+  ],
+  "approvalMessageVersion": "PPV_DEVNET_RELEASE_V1",
+  "upgradeAuthority": "B6tcsTrMCKTZV5vi3rRCnA3FMPeeWACSHuuTSz5XQgnX",
+  "upgradeAuthorityKind": "squads-multisig",
+  "upgradeAuthorityThreshold": 2,
+  "notes": "Declares ppv_commerce queued for its initial devnet release. Presence of this file makes CI run the release-tier invariant budget on any pull request that touches it, and lets scripts/prepare-release-candidate.mjs emit the approval message. It carries no commit sha: the candidate commit is whatever the operator dispatches, and the deploy workflow binds it from its own checkout rather than from input. Delete this file once the release record lands in deployments/evidence/."
+}

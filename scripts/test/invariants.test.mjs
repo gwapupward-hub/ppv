@@ -67,6 +67,49 @@ test("the gate runs against a real local validator, never a mock", () => {
   assert.doesNotMatch(GATE, /--skip-deploy/);
 });
 
+test("each seed gets its own validator, and none is reused", () => {
+  // The release budget killed a single shared validator part way through: it
+  // kept answering RPC and refused every transaction with "Blockhash not
+  // found", so two seeds attempted zero operations. Restarting per seed is
+  // what makes the budget spendable; nothing about the budget changed.
+  assert.match(GATE, /for seed in "\$\{run_seeds\[@\]\}"/);
+  assert.match(GATE, /start_validator "\$\{ledger\}"/);
+  assert.match(GATE, /stop_validator/);
+  assert.match(GATE, /ledger="\$\{workdir\}\/test-ledger-\$\{seed\}"/);
+  // A per-seed ledger that is never removed reintroduces the disk growth the
+  // restart exists to avoid.
+  assert.match(GATE, /rm -rf "\$\{ledger\}"/);
+});
+
+test("the run's budget is asserted over every seed, not per process", () => {
+  // No single execution can assert a floor it only spends a fifth of.
+  assert.match(GATE, /PPV_INVARIANT_COVERAGE_OUT="\$\{coverage_dir\}\/\$\{seed\}\.json"/);
+  assert.match(
+    GATE,
+    /node scripts\/sum-invariant-coverage\.mjs[\s\\]+"\$\{coverage_dir\}" "\$\{PPV_INVARIANT_MIN_OPERATIONS\}" "\$\{run_seeds\[@\]\}"/,
+  );
+  // The aggregator must run before the green line, or the line means nothing.
+  assert.ok(
+    GATE.indexOf("sum-invariant-coverage.mjs") < GATE.indexOf("SECURITY_INVARIANTS_GREEN"),
+    "the budget is summed after the gate already declared itself green",
+  );
+});
+
+test("a dead validator is diagnosed rather than reported as a protocol failure", () => {
+  assert.match(GATE, /dump_validator_state "\$\{ledger\}"/);
+  assert.match(GATE, /validator\.log/);
+});
+
+test("the property suite emits the coverage the aggregator sums", () => {
+  const suite = readFileSync(
+    join(REPO, "tests", "invariants", "protocol.invariant.ts"),
+    "utf8",
+  );
+  assert.match(suite, /PPV_INVARIANT_COVERAGE_OUT/);
+  // In `after`, so a failing seed still reports what it spent.
+  assert.match(suite, /after\(function \(\) \{[\s\S]*?PPV_INVARIANT_COVERAGE_OUT/);
+});
+
 test("the PR tier spends the adversarial budget the docs claim", () => {
   const tier = GATE.split(/^\s+pr\)$/m)[1]?.split(/;;/)[0] ?? "";
   assert.match(tier, /PPV_INVARIANT_SEQUENCES:=100\b/, "PR tier must run 100 sequences");
@@ -149,18 +192,64 @@ test("CI runs the invariant gate after the deterministic gate", () => {
   );
 });
 
-test("a pull request gets the PR budget and a scheduled run gets the release budget", () => {
-  // The release tier is too slow to run on every pull request, and a gate that
-  // nobody ever runs is not a gate. So: PR budget by default, release budget on
-  // the weekly schedule and on demand, and no way to end up with neither.
+test("the release budget runs where it is needed and the PR budget everywhere else", () => {
+  // The release tier is too slow for every pull request, and a gate nobody ever
+  // runs is not a gate. It runs on the weekly schedule, on demand, and — the
+  // case that matters for a deployment — on the pull request that declares a
+  // program a release candidate. Never neither.
   const anchorJob = CI.slice(CI.indexOf("\n  anchor:"));
-  assert.match(
-    anchorJob,
-    /TIER: \$\{\{ inputs\.invariant_tier \|\| \(github\.event_name == 'schedule' && 'release'\) \|\| 'pr' \}\}/,
-  );
+  assert.match(anchorJob, /inputs\.invariant_tier/);
+  assert.match(anchorJob, /github\.event_name == 'schedule' && 'release'/);
+  assert.match(anchorJob, /steps\.candidate\.outputs\.release_candidate == 'true' && 'release'/);
+  assert.match(anchorJob, /\|\| 'pr' \}\}/, "the budget must always resolve to something");
   assert.match(CI, /schedule:\n\s+- cron:/);
   assert.match(CI, /options: \[pr, release\]/);
   // The job has to be allowed to run for the events that raise the budget.
   assert.match(anchorJob, /github\.event_name == 'schedule'/);
   assert.match(anchorJob, /github\.event_name == 'workflow_dispatch'/);
+});
+
+test("a release candidate is detected from the checkout, with nothing that can fail", () => {
+  // This gate once downgraded itself silently. It asked git whether the pull
+  // request touched deployments/release-candidates/, which on a shallow
+  // checkout fails with "no merge base"; the command sat inside an `if`, so the
+  // failure answered "no" and the release budget never ran on the change that
+  // declared a release.
+  //
+  // Presence needs no history, no base branch and no network, so there is
+  // nothing left to fail. These assertions keep it that way.
+  const anchorJob = CI.slice(CI.indexOf("\n  anchor:"));
+  const step = anchorJob.slice(
+    anchorJob.indexOf("- name: Detect a declared release candidate"),
+    anchorJob.indexOf("- name: Security invariants"),
+  );
+  assert.match(step, /candidates=\(deployments\/release-candidates\/\*\.json\)/);
+
+  // Comments removed first: this step's comment explains the git-based version
+  // it replaced, and matching that prose would make the explanation fail the
+  // test it explains.
+  const commands = step
+    .split("\n")
+    .filter((line) => !/^\s*#/.test(line))
+    .join("\n");
+  assert.doesNotMatch(commands, /\bgit\b/, "detection must not depend on git history");
+  assert.doesNotMatch(commands, /curl|\bfetch\b/, "detection must not depend on the network");
+  assert.doesNotMatch(commands, /github\.base_ref/, "detection must not depend on a base branch");
+  assert.ok(
+    anchorJob.indexOf("- name: Detect a declared release candidate") <
+      anchorJob.indexOf("- name: Security invariants"),
+    "detection must precede the gate that reads it",
+  );
+});
+
+test("a declared release candidate exists, so the release budget is what runs", () => {
+  // While this holds, every commit is a candidate for the one that gets
+  // deployed, and all of them are held to the release budget.
+  const declared = readdirSync(join(REPO, "deployments", "release-candidates")).filter((entry) =>
+    entry.endsWith(".json"),
+  );
+  assert.ok(
+    declared.length > 0,
+    "expected a declared release candidate; delete this expectation when none is queued",
+  );
 });

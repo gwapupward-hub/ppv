@@ -1,5 +1,5 @@
 import { anchorDiscriminator } from "../reputation/hashing.js";
-import { BorshReader, bytesEqual } from "../escrow/reader.js";
+import { BorshReader, assertOnlyUnwrittenSpaceRemains, bytesEqual } from "../escrow/reader.js";
 
 /**
  * Decoder for `ppv_commerce`'s `Agreement` — the negotiated document, not the
@@ -90,7 +90,7 @@ export function decodeCommerceAgreementAccount(data: Uint8Array): CommerceAgreem
     cancelledAt: reader.i64(),
   };
   reader.skip(64); // reserved
-  if (reader.remaining !== 0) throw new RangeError("commerce agreement has trailing bytes");
+  assertOnlyUnwrittenSpaceRemains(reader, "commerce agreement");
   return account;
 }
 

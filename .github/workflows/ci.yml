@@ -133,9 +133,39 @@ jobs:
       # asserted by the suite itself. A scheduled or dispatched run raises it to
       # the release budget: 200 sequences of up to 32 actions across five seeds,
       # floor 12,000.
+      - name: Detect a declared release candidate
+        id: candidate
+        run: |
+          # Presence, not a diff. The first version of this asked git whether
+          # the pull request touched deployments/release-candidates/, which on
+          # a shallow checkout fails with "no merge base" — and because the
+          # command sat inside an `if`, the failure answered "no" instead of
+          # aborting. The gate silently downgraded itself to the PR budget on
+          # the very change that declared a release. A security gate that fails
+          # open is worse than no gate, because it reports success.
+          #
+          # Asking whether the file exists needs no git history, no network and
+          # no base branch, so there is nothing left to fail. It is also the
+          # better rule: while a program is queued for release, every commit is
+          # a candidate for the commit that gets deployed, and all of them
+          # should be held to the release budget. The file is deleted when the
+          # release record lands.
+          shopt -s nullglob
+          candidates=(deployments/release-candidates/*.json)
+          declared=false
+          (( ${#candidates[@]} > 0 )) && declared=true
+          echo "release_candidate=${declared}" >> "${GITHUB_OUTPUT}"
+          echo "release candidate declared: ${declared} (${candidates[*]:-none})"
+
       - name: Security invariants (PPV-P1..P10, property-based)
         env:
-          TIER: ${{ inputs.invariant_tier || (github.event_name == 'schedule' && 'release') || 'pr' }}
-        run: npm run "test:invariants:${TIER}"
+          TIER: >-
+            ${{ inputs.invariant_tier
+                || (github.event_name == 'schedule' && 'release')
+                || (steps.candidate.outputs.release_candidate == 'true' && 'release')
+                || 'pr' }}
+        run: |
+          echo "invariant tier: ${TIER}"
+          npm run "test:invariants:${TIER}"
       - name: Assert the build did not rewrite the lockfile
         run: git diff --exit-code -- Cargo.lock

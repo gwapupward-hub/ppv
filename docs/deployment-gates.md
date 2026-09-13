@@ -30,8 +30,11 @@ machine behavior only. It does not authorize deployment.
 - The model-based property suite holds `PPV-P1` … `PPV-P10` across randomized
   valid and invalid instruction sequences, asserted after every attempted
   action, on the same local-validator architecture F1 uses.
-- The suite proves its own budget: it counts the operations it actually
-  attempted and fails below the tier floor.
+- The gate proves its own budget: it counts the operations it actually
+  attempted and fails below the tier floor. Each seed runs against its own
+  local validator — one instance does not survive the release budget on a
+  hosted runner — so the floor is asserted over the summed coverage of every
+  seed, and a seed that produced no coverage fails the gate.
 - The suite proves its own reach: it fails if the run never funded, completed,
   settled or cancelled an agreement, never attacked a terminal one, and never
   refused a wrong-relationship account.

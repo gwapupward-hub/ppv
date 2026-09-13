@@ -337,3 +337,125 @@ test("the PPV Core record is the release this repository claims to have shipped"
   assert.equal(record.cluster, "devnet");
   assert.equal(record.genesisHash, "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG");
 });
+
+/**
+ * The two ProofRecord decoders, checked against each other.
+ *
+ * There are now two: `scripts/lib/core-accounts.mjs`, which the signer-free
+ * release tooling uses because it must run before any install, and the SDK's
+ * TypeScript decoder, which clients use. Two decoders for one on-chain layout
+ * is a drift risk, and a drift here means the release tooling and the product
+ * disagree about what a proof says. So they are made to decode the same bytes
+ * and required to agree.
+ */
+test("the release tooling and the SDK decode a ProofRecord identically", async () => {
+  const { PROOF_RECORD_DISCRIMINATOR, PROOF_RECORD_LEN, decodeProofRecord } = await import(
+    "../lib/core-accounts.mjs"
+  );
+  const { decodeCoreProofAccount } = await import("../../sdk/dist/index.js");
+
+  const authority = "55y7B46ZUAyeYaMFUPxHAg9UUcwrfZ2eZDFDabxinhjp";
+  const { decodeBase58 } = await import("../lib/pubkey.mjs");
+
+  const data = Buffer.alloc(PROOF_RECORD_LEN);
+  PROOF_RECORD_DISCRIMINATOR.copy(data, 0);
+  data[8] = 1;
+  data[9] = 250;
+  data.fill(0x2a, 10, 26);
+  Buffer.from(decodeBase58(authority)).copy(data, 26);
+  data.fill(0x5c, 58, 90);
+  data.fill(0x77, 90, 122);
+  data[122] = 2; // Agreement
+  data[123] = 1; // Revoked
+  data.writeBigInt64LE(1757000000n, 124);
+  data.writeBigInt64LE(1757000900n, 132);
+
+  const fromTooling = decodeProofRecord(data);
+  const fromSdk = decodeCoreProofAccount(new Uint8Array(data));
+
+  assert.equal(fromTooling.schemaVersion, fromSdk.schemaVersion);
+  assert.equal(fromTooling.bump, fromSdk.bump);
+  assert.equal(fromTooling.proofId, fromSdk.proofId);
+  assert.equal(fromTooling.authority, fromSdk.authority);
+  assert.equal(fromTooling.contentHash, fromSdk.contentHash);
+  assert.equal(fromTooling.contextHash, fromSdk.contextHash);
+  assert.equal(fromTooling.createdAt, fromSdk.createdAt);
+  assert.equal(fromTooling.revokedAt, fromSdk.revokedAt);
+  // The two spell the enums differently by design — the tooling prints lowercase
+  // for a terminal report, the SDK keeps the program's own casing — so compare
+  // them case-insensitively rather than pretending one is wrong.
+  assert.equal(fromTooling.kind, fromSdk.kind.toLowerCase());
+  assert.equal(fromTooling.status, fromSdk.status.toLowerCase());
+  assert.equal(PROOF_RECORD_LEN, 204);
+});
+
+/**
+ * The deployer funding report.
+ *
+ * It gates a deployment window, so the case that matters is the one where it
+ * cannot tell: an unreadable balance must never be reported as funded, and a
+ * cluster that is not devnet must stop it before any balance is considered.
+ */
+test("funding is reported against the policy, and fails closed when unknown", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const { startRpcServerProcess, REPO } = await import("./helpers.mjs");
+  const { join } = await import("node:path");
+  const script = join(REPO, "scripts", "report-deployer-funding.mjs");
+  const address = "58kuGbxpvaamvYE44WYkyipBB6FVKt2qT9u3vAKtyKYV";
+
+  const run = (url, args = []) => {
+    try {
+      return {
+        code: 0,
+        out: execFileSync("node", [script, address, ...args], {
+          encoding: "utf8",
+          env: { ...process.env, PPV_RPC_URL: url },
+        }),
+      };
+    } catch (error) {
+      return { code: error.status, out: `${error.stdout}${error.stderr}` };
+    }
+  };
+
+  // Funded at exactly the policy minimum is funded: the bound is inclusive.
+  let server = await startRpcServerProcess({ balances: { [address]: 2_000_000_000 } });
+  try {
+    const result = run(server.url);
+    assert.equal(result.code, 0, result.out);
+    assert.match(result.out, /result {4}funded/);
+    assert.match(result.out, /2\.0000 SOL/);
+  } finally {
+    server.close();
+  }
+
+  // One lamport short is short, and the shortfall is named.
+  server = await startRpcServerProcess({ balances: { [address]: 1_999_999_999 } });
+  try {
+    const result = run(server.url);
+    assert.equal(result.code, 1);
+    assert.match(result.out, /UNDERFUNDED/);
+    assert.match(result.out, /needs 1 more lamports/);
+  } finally {
+    server.close();
+  }
+
+  // An account with no balance at all, and a cluster that is not devnet: both
+  // are refusals, never a pass.
+  server = await startRpcServerProcess({});
+  try {
+    assert.equal(run(server.url).code, 1);
+  } finally {
+    server.close();
+  }
+  server = await startRpcServerProcess({
+    genesis: "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d",
+    balances: { [address]: 50_000_000_000 },
+  });
+  try {
+    const result = run(server.url);
+    assert.equal(result.code, 1);
+    assert.match(result.out, /mainnet-beta, which is not an authorized PPV cluster/);
+  } finally {
+    server.close();
+  }
+});

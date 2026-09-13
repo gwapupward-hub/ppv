@@ -1,0 +1,91 @@
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { after, before, describe, test } from "node:test";
+import { fileURLToPath } from "node:url";
+
+/**
+ * The aggregator is the part of the invariant gate that decides whether the
+ * budget was spent. The release tier runs one seed per validator precisely
+ * because a single validator could not survive the whole run, and the failure
+ * that forced that change was two seeds attempting zero operations while the
+ * gate still reported a number. So the case that matters most here is a seed
+ * that produced nothing at all.
+ */
+
+const SCRIPT = fileURLToPath(new URL("../sum-invariant-coverage.mjs", import.meta.url));
+
+/** A seed that did ordinary work: enough of every state to satisfy the floors. */
+function coverage(attempted) {
+  return {
+    attempted,
+    succeeded: Math.floor(attempted / 4),
+    refused: attempted - Math.floor(attempted / 4),
+    refusedNonCanonical: 5,
+    fundings: 5,
+    completions: 4,
+    settlements: 3,
+    cancellations: 2,
+    postTerminalAttempts: 6,
+    sequences: 100,
+  };
+}
+
+let dir;
+
+before(() => {
+  dir = mkdtempSync(join(tmpdir(), "ppv-coverage-"));
+});
+after(() => {
+  rmSync(dir, { recursive: true, force: true });
+});
+
+function write(seed, body) {
+  writeFileSync(join(dir, `${seed}.json`), JSON.stringify(body));
+}
+
+function run(...args) {
+  return spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8" });
+}
+
+describe("sum-invariant-coverage", () => {
+  test("sums every seed and passes when the run clears the floor", () => {
+    write(1, coverage(3000));
+    write(2, coverage(3000));
+    write(3, coverage(3000));
+    const result = run(dir, "8000", "1", "2", "3");
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /run total: 9000 operations attempted/);
+    assert.match(result.stdout, /budget met: 9000 >= 8000/);
+  });
+
+  test("fails when the summed operations fall below the floor", () => {
+    const result = run(dir, "12000", "1", "2", "3");
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /expected at least 12000 attempted operations, ran 9000/);
+  });
+
+  test("fails when a seed wrote no coverage at all", () => {
+    // The Sprint 2 failure exactly: seeds that never ran. Summing what is
+    // present would report 9000 and call an incomplete run green.
+    const result = run(dir, "8000", "1", "2", "3", "4", "5");
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /no coverage was written for seed\(s\) 4, 5/);
+  });
+
+  test("fails when the run never reached a state the invariants are about", () => {
+    const unreached = { ...coverage(9000), settlements: 0 };
+    writeFileSync(join(dir, "9.json"), JSON.stringify(unreached));
+    const result = run(dir, "8000", "9");
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /no settlement ever succeeded/);
+  });
+
+  test("refuses a non-positive floor rather than passing everything", () => {
+    const result = run(dir, "0", "1");
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /min-operations must be a positive integer/);
+  });
+});
