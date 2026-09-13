@@ -7,13 +7,16 @@ import test from "node:test";
 import {
   COMMERCE_ID,
   CORE_ID,
+  CORE_PROGRAM_DATA,
   REPO,
   MEMBERS,
   VAULT_PDA,
+  deployedCoreFixture,
   goodDeploymentEnv,
   makeFixture,
   makeStubs,
   runReadiness,
+  startRpcServerProcess,
 } from "./helpers.mjs";
 
 /**
@@ -26,6 +29,26 @@ import {
  */
 
 const WRONG_ID = "11111111111111111111111111111112";
+const DEVNET_GENESIS = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";
+
+/**
+ * Runs the preflight against a deterministic cluster.
+ *
+ * The chain half of this preflight used to go through the Solana CLI, so these
+ * tests stubbed a CLI on PATH. It now reads JSON-RPC — the same change that
+ * stops it failing on a machine with no wallet — so the stub is an endpoint.
+ * Nothing here reaches a real cluster: `runReadiness` points every other run at
+ * an address that cannot connect, so a test that quietly depends on devnet
+ * fails rather than passing when the network happens to be up.
+ */
+async function runAgainstChain({ chain = {}, ...options }) {
+  const server = await startRpcServerProcess({ genesis: DEVNET_GENESIS, ...chain });
+  try {
+    return runReadiness({ ...options, rpcUrl: server.url });
+  } finally {
+    server.close();
+  }
+}
 
 function expectFailure(result, pattern) {
   assert.notEqual(result.code, 0, `expected a non-zero exit\n${result.output}`);
@@ -185,9 +208,9 @@ test("a dirty tree is refused for a deployment-grade run", () => {
   );
 });
 
-test("a fully configured deployment-grade run passes", () => {
+test("a fully configured deployment-grade run passes", async () => {
   const fixture = makeFixture();
-  const result = runReadiness({
+  const result = await runAgainstChain({
     repoRoot: fixture.root,
     stubBin: makeStubs(),
     env: goodDeploymentEnv(),
@@ -312,20 +335,21 @@ test("duplicate members, an invalid member, or the vault as a member are refused
   }
 });
 
-test("the wrong cluster is refused", () => {
+test("the wrong cluster is refused", async () => {
   const fixture = makeFixture();
   expectFailure(
-    runReadiness({
+    await runAgainstChain({
       repoRoot: fixture.root,
+      stubBin: makeStubs(),
       // Mainnet-beta's genesis, served where devnet was expected.
-      stubBin: makeStubs({ genesis: "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d" }),
+      chain: { genesis: "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d" },
       env: goodDeploymentEnv(),
     }),
     /is not the configured devnet genesis/,
   );
 
   expectFailure(
-    runReadiness({
+    await runAgainstChain({
       repoRoot: fixture.root,
       stubBin: makeStubs(),
       env: goodDeploymentEnv({ PPV_DEVNET_GENESIS_HASH: "" }),
@@ -334,11 +358,21 @@ test("the wrong cluster is refused", () => {
   );
 });
 
-test("an address that already holds a program is refused, and reported not overwritten", () => {
+test("an unreachable cluster fails rather than being reported as clear", async () => {
+  // Fail-closed: "I could not look" must never read as "nothing is there".
   const fixture = makeFixture();
-  const result = runReadiness({
+  expectFailure(
+    runReadiness({ repoRoot: fixture.root, stubBin: makeStubs(), env: goodDeploymentEnv() }),
+    /could not read a genesis hash/,
+  );
+});
+
+test("an address that already holds a program is refused, and reported not overwritten", async () => {
+  const fixture = makeFixture();
+  const result = await runAgainstChain({
     repoRoot: fixture.root,
-    stubBin: makeStubs({ existingPrograms: { [CORE_ID]: VAULT_PDA } }),
+    stubBin: makeStubs(),
+    chain: { accounts: deployedCoreFixture({ authority: VAULT_PDA }).accounts },
     env: goodDeploymentEnv(),
   });
   expectFailure(result, /ppv_core already exists at .* — initial deployment must not overwrite it/);
@@ -346,7 +380,7 @@ test("an address that already holds a program is refused, and reported not overw
   assert.match(result.output, /ppv_commerce address .* is unoccupied/);
 });
 
-test("a supplied permanent keypair must derive the committed id", () => {
+test("a supplied permanent keypair must derive the committed id", async () => {
   const fixture = makeFixture();
   // A placeholder file, never read for its contents: the verifier only ever
   // asks solana-keygen for the derived public key.
@@ -356,7 +390,7 @@ test("a supplied permanent keypair must derive the committed id", () => {
   writeFileSync(rightPath, "placeholder");
   writeFileSync(wrongPath, "placeholder");
 
-  const good = runReadiness({
+  const good = await runAgainstChain({
     repoRoot: fixture.root,
     stubBin: makeStubs({ keypairs: { [rightPath]: CORE_ID } }),
     env: goodDeploymentEnv({ PPV_CORE_PROGRAM_KEYPAIR_PATH: rightPath }),
@@ -408,4 +442,45 @@ test("the scanner does not flag itself, or anything else in this repository", ()
   const result = runReadiness({ repoRoot: REPO, args: ["--repo-only"] });
   assert.equal(result.code, 0, result.output);
   assert.match(result.output, /no committed private key material found/);
+});
+
+test("a released program does not block the release of another one", async () => {
+  // The state after PPV Core shipped: Core's address is supposed to be
+  // occupied. Treating that as a failure would hold the preflight red forever
+  // and block Commerce's first deployment on a fact that is not a problem.
+  const fixture = makeFixture((f) => {
+    f.write(
+      "deployments/evidence/ppv-core-devnet.json",
+      JSON.stringify({ cluster: "devnet", program: "ppv_core", programId: CORE_ID }),
+    );
+    f.commitAll();
+  });
+  const result = await runAgainstChain({
+    repoRoot: fixture.root,
+    stubBin: makeStubs(),
+    chain: { accounts: deployedCoreFixture({ authority: VAULT_PDA }).accounts },
+    env: goodDeploymentEnv(),
+  });
+  assert.equal(result.code, 0, result.output);
+  assert.match(result.output, /ppv_core is already released at .* — verify, never redeploy/);
+  assert.match(result.output, /ppv_commerce address .* is unoccupied and ready for initial deployment/);
+});
+
+test("a release record with no program behind it is a failure, not a pass", async () => {
+  const fixture = makeFixture((f) => {
+    f.write(
+      "deployments/evidence/ppv-core-devnet.json",
+      JSON.stringify({ cluster: "devnet", program: "ppv_core", programId: CORE_ID }),
+    );
+    f.commitAll();
+  });
+  expectFailure(
+    await runAgainstChain({
+      repoRoot: fixture.root,
+      stubBin: makeStubs(),
+      chain: { accounts: {} },
+      env: goodDeploymentEnv(),
+    }),
+    /ppv_core has a release record .* but no program at/,
+  );
 });

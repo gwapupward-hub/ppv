@@ -21,13 +21,24 @@ on:
         description: Type ppv_core to run read-only recovery verification
         required: true
         type: string
+  # The original failure was evidence tooling that no run had ever exercised, so
+  # a change to that tooling exercises it here, on the pull request that makes
+  # the change. Read-only, so this is safe to run automatically; the confirmation
+  # input exists for the manual path and is not required for a pull request.
+  pull_request:
+    paths:
+      - .github/workflows/recover-ppv-core-devnet-evidence.yml
+      - scripts/collect-deployment-evidence.mjs
+      - scripts/verify-deployed-program.mjs
+      - scripts/lib/rpc.mjs
+      - scripts/lib/pubkey.mjs
 
 permissions:
   contents: read
 
 concurrency:
-  group: recover-ppv-core-devnet-evidence
-  cancel-in-progress: false
+  group: recover-ppv-core-devnet-evidence-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   verify:
@@ -47,6 +58,7 @@ jobs:
 
     steps:
       - name: Confirm read-only recovery
+        if: github.event_name == 'workflow_dispatch'
         run: |
           if [[ "${{ inputs.confirm }}" != "${PPV_PROGRAM}" ]]; then
             echo "Confirmation must be exactly '${PPV_PROGRAM}'." >&2

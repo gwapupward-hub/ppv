@@ -328,3 +328,159 @@ test("instruction data is the discriminator followed by borsh arguments", () => 
   assert.equal(take(8).readBigInt64LE(0), BigInt(expiresAt));
   assert.equal(offset, ix.data.length, "no trailing bytes");
 });
+
+/**
+ * The live Core phases: which programs the suite demands on chain, what it
+ * reads back, and what it refuses to claim.
+ *
+ * The point of these is the boundary between "verified on devnet" and
+ * "verified somewhere else". A suite that fails because ppv_commerce is not
+ * deployed is useless during the window where Core is released and Commerce is
+ * not; a suite that silently passes without checking Core is worse.
+ */
+
+import { mkdtempSync, writeFileSync as write, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+
+import {
+  LIFECYCLE_COVERAGE,
+  releasedPrograms,
+  runCoreReadPhase,
+  runSdkTargetingPhase,
+} from "../devnet-smoke.mjs";
+import { PROOF_RECORD_DISCRIMINATOR, PROOF_RECORD_LEN, decodeProofRecord } from "../lib/core-accounts.mjs";
+import { makeRpcTransport } from "./helpers.mjs";
+
+/** A ProofRecord as the program writes it. */
+function proofRecordBytes({ authority, proofId = 7, contentHash = 9, kind = 0, status = 0 } = {}) {
+  const data = Buffer.alloc(PROOF_RECORD_LEN);
+  PROOF_RECORD_DISCRIMINATOR.copy(data, 0);
+  data[8] = 1;
+  data[9] = 255;
+  data.fill(proofId, 10, 26);
+  Buffer.from(new PublicKey(authority).toBytes()).copy(data, 26);
+  data.fill(contentHash, 58, 90);
+  data[122] = kind;
+  data[123] = status;
+  data.writeBigInt64LE(1757000000n, 124);
+  return data;
+}
+
+test("a program with no release record is not demanded on chain", async () => {
+  // The state this release is actually in: Core is live, Commerce is not.
+  delete state.accounts[PERMANENT_PROGRAM_IDS.ppv_commerce];
+  const result = await runIdentityPhase(rpc(endpoint), {
+    expectedAuthority: VAULT,
+    expectedGenesis: DEVNET_GENESIS,
+    encodeBase58: encodeBase58Sdk,
+    released: { ppv_core: {} },
+  });
+  assert.deepEqual(result.notReleased, ["ppv_commerce"]);
+  assert.equal(result.programs.ppv_core.authorityAddress, VAULT);
+  assert.equal(result.programs.ppv_commerce, undefined);
+  state = defaultState();
+});
+
+test("a program that has a release record is still demanded on chain", async () => {
+  delete state.accounts[PERMANENT_PROGRAM_IDS.ppv_commerce];
+  await assert.rejects(
+    runIdentityPhase(rpc(endpoint), {
+      expectedAuthority: VAULT,
+      expectedGenesis: DEVNET_GENESIS,
+      encodeBase58: encodeBase58Sdk,
+      released: { ppv_core: {}, ppv_commerce: {} },
+    }),
+    /ppv_commerce is not deployed/,
+  );
+  state = defaultState();
+});
+
+test("release records decide which programs are released", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ppv-evidence-"));
+  try {
+    write(join(dir, "core.json"), JSON.stringify({ cluster: "devnet", program: "ppv_core" }));
+    write(join(dir, "other.json"), JSON.stringify({ cluster: "localnet", program: "ppv_commerce" }));
+    write(join(dir, "notes.md"), "ignored");
+    const released = releasedPrograms(dir);
+    assert.deepEqual(Object.keys(released), ["ppv_core"]);
+    // A directory that does not exist means nothing is released, not a crash.
+    assert.deepEqual(releasedPrograms(join(dir, "missing")), {});
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("live ppv_core accounts are read and decoded through the declared layout", async () => {
+  const authority = "55y7B46ZUAyeYaMFUPxHAg9UUcwrfZ2eZDFDabxinhjp";
+  const client = rpc("https://stub.invalid", {
+    fetchImpl: makeRpcTransport({
+      programAccounts: {
+        [PERMANENT_PROGRAM_IDS.ppv_core]: [
+          { pubkey: "8Jj9yvR3F3SqK1qCTCcFYfkEj96gzBSwVGvfnk8zkQ6Q", account: { data: proofRecordBytes({ authority }) } },
+        ],
+      },
+    }),
+  });
+  const proofs = await runCoreReadPhase(client);
+  assert.equal(proofs.length, 1);
+  assert.equal(proofs[0].authority, authority);
+  assert.equal(proofs[0].kind, "creation");
+  assert.equal(proofs[0].status, "active");
+  assert.equal(proofs[0].reservedIsZero, true);
+});
+
+test("no live proofs yet is a fact about devnet, not a failure", async () => {
+  const client = rpc("https://stub.invalid", { fetchImpl: makeRpcTransport({}) });
+  assert.deepEqual(await runCoreReadPhase(client), []);
+});
+
+test("a live account that does not decode stops the suite", async () => {
+  const broken = proofRecordBytes({ authority: VAULT });
+  broken[122] = 9; // a proof kind the program cannot have written
+  const client = rpc("https://stub.invalid", {
+    fetchImpl: makeRpcTransport({
+      programAccounts: {
+        [PERMANENT_PROGRAM_IDS.ppv_core]: [{ pubkey: "brokenProofAccount", account: { data: broken } }],
+      },
+    }),
+  });
+  await assert.rejects(runCoreReadPhase(client), /does not decode/);
+});
+
+test("ProofRecord decoding rejects the wrong discriminator and the wrong size", () => {
+  const bytes = proofRecordBytes({ authority: VAULT });
+  bytes[0] ^= 0xff;
+  assert.throws(() => decodeProofRecord(bytes), /discriminator is not ProofRecord's/);
+  assert.throws(() => decodeProofRecord(Buffer.alloc(PROOF_RECORD_LEN - 1)), /expected 204/);
+});
+
+test("SDK targeting is checked against the permanent Core id, not a configured one", async () => {
+  const result = await runSdkTargetingPhase();
+  assert.equal(result.programId, PERMANENT_PROGRAM_IDS.ppv_core);
+  await assert.rejects(
+    runSdkTargetingPhase("11111111111111111111111111111112"),
+    /targets .*, not the permanent/,
+  );
+});
+
+test("coverage never reports a devnet claim for something only a validator proved", () => {
+  const classes = new Set(LIFECYCLE_COVERAGE.map((entry) => entry.coverage));
+  assert.deepEqual(
+    [...classes].sort(),
+    ["live", "need-commerce", "need-escrow", "need-wallet", "validator"],
+    "every step must declare exactly one of the known coverage classes",
+  );
+  // Everything that needs escrow or commerce must say so rather than being
+  // folded into a general "not covered" bucket.
+  for (const entry of LIFECYCLE_COVERAGE) {
+    assert.ok(entry.how.length > 0, `${entry.step} must say how it is covered`);
+    if (entry.coverage === "need-escrow") assert.match(entry.how, /escrow/);
+    if (entry.coverage === "need-commerce") assert.match(entry.how, /commerce/);
+  }
+  // Nothing that touches custody may claim to be live-verified in this release.
+  for (const entry of LIFECYCLE_COVERAGE) {
+    if (/fund|settle|refund|milestone|dispute|approval|bounty/.test(entry.step)) {
+      assert.equal(entry.coverage, "need-escrow", `${entry.step} must not claim live coverage`);
+    }
+  }
+});

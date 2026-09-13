@@ -1,4 +1,4 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -155,7 +155,7 @@ echo "stub rustup: unexpected args: $*" >&2; exit 93`,
   return bin;
 }
 
-export function runReadiness({ repoRoot, args = [], env = {}, stubBin } = {}) {
+export function runReadiness({ repoRoot, args = [], env = {}, stubBin, rpcUrl } = {}) {
   const path = stubBin ? `${stubBin}:${process.env.PATH}` : process.env.PATH;
   const result = spawnSync("bash", [READINESS, ...args], {
     encoding: "utf8",
@@ -170,6 +170,9 @@ export function runReadiness({ repoRoot, args = [], env = {}, stubBin } = {}) {
       PPV_DEVNET_GENESIS_HASH: "",
       PPV_CORE_PROGRAM_KEYPAIR_PATH: "",
       PPV_COMMERCE_PROGRAM_KEYPAIR_PATH: "",
+      // Pointed at a stub endpoint by every chain-dependent test, so a test
+      // that reaches the real devnet is a bug rather than a flake.
+      PPV_READINESS_RPC_URL: rpcUrl ?? "http://127.0.0.1:1/unreachable-by-design",
       ...env,
     },
   });
@@ -201,7 +204,7 @@ export function goodDeploymentEnv(overrides = {}) {
  * Buffer. Anything not in the map is reported as a non-existent account, which
  * is what the chain does.
  */
-export function makeRpcTransport({ genesis = DEVNET_GENESIS, accounts = {}, signatures = {} } = {}) {
+export function makeRpcTransport({ genesis = DEVNET_GENESIS, accounts = {}, signatures = {}, programAccounts = {} } = {}) {
   const calls = [];
   const transport = async (_endpoint, init) => {
     const request = JSON.parse(init.body);
@@ -229,6 +232,19 @@ export function makeRpcTransport({ genesis = DEVNET_GENESIS, accounts = {}, sign
           },
         });
       }
+      case "getProgramAccounts":
+        return respond(
+          (programAccounts[request.params[0]] ?? []).map(({ pubkey, account }) => ({
+            pubkey,
+            account: {
+              lamports: account.lamports ?? 1,
+              owner: account.owner ?? request.params[0],
+              executable: false,
+              rentEpoch: 0,
+              data: [Buffer.from(account.data).toString("base64"), "base64"],
+            },
+          })),
+        );
       case "getSignatureStatuses":
         return respond({
           context: { slot: 1 },
@@ -295,7 +311,48 @@ export function deployedCoreFixture({
   };
 }
 
-/** A serving JSON-RPC endpoint on loopback, for the shell scripts that shell out. */
+/**
+ * The same stub, in a child process, for tests that run a shell script.
+ *
+ * `spawnSync` blocks this process's event loop, so an in-process server would
+ * never get to answer the script it is meant to be serving.
+ */
+export async function startRpcServerProcess(config) {
+  const fixture = join(mkdtempSync(join(tmpdir(), "ppv-rpc-fixture-")), "fixture.json");
+  const encode = (account) => ({ ...account, data: Buffer.from(account.data).toString("base64") });
+  writeFileSync(
+    fixture,
+    JSON.stringify({
+      ...config,
+      accounts: Object.fromEntries(
+        Object.entries(config.accounts ?? {}).map(([address, account]) => [address, encode(account)]),
+      ),
+      programAccounts: Object.fromEntries(
+        Object.entries(config.programAccounts ?? {}).map(([program, entries]) => [
+          program,
+          entries.map((entry) => ({ ...entry, account: encode(entry.account) })),
+        ]),
+      ),
+    }),
+  );
+
+  const child = spawn("node", [join(REPO, "scripts", "test", "rpc-server.mjs"), fixture], {
+    stdio: ["ignore", "pipe", "inherit"],
+  });
+  const url = await new Promise((resolve, reject) => {
+    let out = "";
+    child.stdout.on("data", (chunk) => {
+      out += chunk;
+      const newline = out.indexOf("\n");
+      if (newline !== -1) resolve(out.slice(0, newline).trim());
+    });
+    child.once("error", reject);
+    child.once("exit", (code) => reject(new Error(`stub rpc server exited with ${code}`)));
+  });
+  return { url, close: () => child.kill("SIGKILL") };
+}
+
+/** A serving JSON-RPC endpoint on loopback, for in-process async callers. */
 export async function startRpcServer(config) {
   const transport = makeRpcTransport(config);
   const server = createServer((request, response) => {

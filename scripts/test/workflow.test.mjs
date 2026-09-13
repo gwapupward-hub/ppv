@@ -296,3 +296,34 @@ test("evidence recovery pins the exact deployed release commit", () => {
   // produce a record describing a different source.
   assert.match(RECOVERY_WORKFLOW, /Checked out \$\{actual_commit\}, expected \$\{PPV_RELEASE_COMMIT\}/);
 });
+
+test("a released program can never be initially deployed again", () => {
+  // PPV Core's initial deployment is complete. The refusal reads a committed
+  // file first, so it holds even when the RPC call that follows it does not.
+  assert.match(WORKFLOW, /for record in deployments\/evidence\/\*\.json/);
+  assert.match(WORKFLOW, /Its initial deployment is COMPLETE/);
+  assert.ok(
+    WORKFLOW.indexOf("deployments/evidence/*.json") < WORKFLOW.indexOf("query-chain.mjs program"),
+    "the committed-record refusal must not depend on a chain read succeeding",
+  );
+});
+
+test("an unreadable chain is not treated as a free address", () => {
+  assert.match(WORKFLOW, /Refusing to deploy on an unknown state/);
+  assert.match(WORKFLOW, /if \[\[ "\$\{exists\}" != "false" \]\]/);
+});
+
+test("post-deployment verification reads public state without a signer", () => {
+  // The failure this encodes: the Solana CLI wants a default signer even to
+  // read, so a deployment that worked reported failure and left no evidence.
+  const verifyStep = WORKFLOW.slice(stepIndexOffset("Verify on chain and record the deployment"));
+  assert.doesNotMatch(verifyStep.slice(0, 2000), /solana (program show|account)\b/);
+  assert.match(WORKFLOW, /node scripts\/query-chain\.mjs program/);
+});
+
+/** Character offset of a step's `- name:` line, for slicing one step out. */
+function stepIndexOffset(name) {
+  const offset = WORKFLOW.indexOf(`- name: ${name}`);
+  assert.notEqual(offset, -1, `workflow has no step named '${name}'`);
+  return offset;
+}

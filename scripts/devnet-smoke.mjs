@@ -22,10 +22,13 @@
  *   PPV_SMOKE_WALLET         path to a funded devnet keypair (lifecycle only)
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { PERMANENT_PROGRAM_IDS, UPGRADEABLE_LOADER_ID } from "./lib/identity.mjs";
-import { isAddress, isProgramDerived } from "./lib/pubkey.mjs";
+import { PROOF_RECORD_DISCRIMINATOR, PROOF_RECORD_LEN, decodeProofRecord } from "./lib/core-accounts.mjs";
+import { encodeBase58, isAddress, isProgramDerived } from "./lib/pubkey.mjs";
 import {
   DEVNET_GENESIS,
   MAINNET_GENESIS,
@@ -37,25 +40,54 @@ import {
 const ENCODER = new TextEncoder();
 
 /**
- * Every lifecycle step the sprint asks the suite to cover, and where each one
- * actually stands in this release. Recorded here rather than in prose so the
- * suite reports its own coverage and cannot quietly claim more than it checks.
+ * Every lifecycle step, and exactly how far each one is actually verified.
+ *
+ * Recorded here rather than in prose so the suite reports its own coverage and
+ * cannot claim more than it checks. The four classes are deliberately distinct:
+ *
+ *   live         verified against the deployed devnet program
+ *   validator    verified, but only against a local validator
+ *   need-escrow  cannot be tested until ppv_escrow is deployed
+ *   need-commerce cannot be tested until ppv_commerce is deployed
+ *   need-wallet  a live devnet transaction the suite can send, once it is
+ *                given a funded devnet keypair
+ *
+ * A step that is only proven on a local validator is not proven on devnet, and
+ * a green checkmark that blurs the two is worse than no checkmark at all.
  */
 export const LIFECYCLE_COVERAGE = [
-  { step: "proof creation", status: "covered", how: "ppv_core create_proof" },
-  { step: "agreement creation", status: "covered", how: "ppv_commerce create_agreement" },
-  { step: "funding", status: "not-in-release", how: "requires ppv_escrow" },
-  { step: "proof submission", status: "covered", how: "ppv_core create_proof + SDK deliverable reference" },
-  { step: "approval", status: "not-in-release", how: "requires ppv_escrow approve_proof" },
-  { step: "milestone release", status: "not-in-release", how: "requires ppv_escrow milestones" },
-  { step: "settlement", status: "not-in-release", how: "requires ppv_escrow settle" },
-  { step: "cancellation / refund", status: "partial", how: "ppv_commerce cancel_agreement; refund requires ppv_escrow" },
-  { step: "concession / dispute", status: "not-in-release", how: "requires ppv_escrow disputes" },
-  { step: "bounty counterparty selection", status: "not-in-release", how: "requires ppv_escrow bounties" },
-  { step: "contract / proof binding", status: "covered", how: "canonical hash vs on-chain content and terms hashes" },
-  { step: "normalized reputation event", status: "covered", how: "SDK normalizeChainEvent over the emitted events" },
-  { step: "receipt / credential derivation", status: "covered", how: "SDK receipts and seal state from those events" },
+  { step: "devnet cluster identity", coverage: "live", how: "getGenesisHash equals the devnet genesis" },
+  { step: "ppv_core permanent identity", coverage: "live", how: "program account at the permanent id" },
+  { step: "ppv_core executable + loader owner", coverage: "live", how: "account flags and owner read from chain" },
+  { step: "ppv_core ProgramData", coverage: "live", how: "resolved from the Program account and read" },
+  { step: "ppv_core Squads upgrade authority", coverage: "live", how: "ProgramData authority equals the vault" },
+  { step: "ppv_core deployed bytes", coverage: "live", how: "verify-deployed-program.mjs against the release record" },
+  { step: "ppv_core account layout", coverage: "live", how: "ProofRecord discriminator and layout over live program accounts" },
+  { step: "SDK PDA derivation for ppv_core", coverage: "live", how: "proof PDAs derived under the permanent Core id" },
+  { step: "SDK ppv_core instruction targeting", coverage: "live", how: "built instructions address the permanent Core id" },
+  { step: "proof creation", coverage: "need-wallet", how: "ppv_core create_proof; needs PPV_SMOKE_WALLET" },
+  { step: "proof revocation", coverage: "need-wallet", how: "ppv_core revoke_proof; needs PPV_SMOKE_WALLET" },
+  { step: "contract / proof binding", coverage: "validator", how: "canonical hash vs on-chain content and terms hashes" },
+  { step: "normalized reputation event", coverage: "validator", how: "SDK normalizeChainEvent over the emitted events" },
+  { step: "receipt / credential derivation", coverage: "validator", how: "SDK receipts and seal state from those events" },
+  { step: "agreement creation", coverage: "need-commerce", how: "ppv_commerce create_agreement" },
+  { step: "cancellation", coverage: "need-commerce", how: "ppv_commerce cancel_agreement" },
+  { step: "funding", coverage: "need-escrow", how: "requires ppv_escrow custody" },
+  { step: "approval", coverage: "need-escrow", how: "requires ppv_escrow approve_proof" },
+  { step: "milestone release", coverage: "need-escrow", how: "requires ppv_escrow milestones" },
+  { step: "settlement", coverage: "need-escrow", how: "requires ppv_escrow settle" },
+  { step: "refund", coverage: "need-escrow", how: "requires ppv_escrow refund" },
+  { step: "concession / dispute", coverage: "need-escrow", how: "requires ppv_escrow disputes" },
+  { step: "bounty counterparty selection", coverage: "need-escrow", how: "requires ppv_escrow bounties" },
 ];
+
+const COVERAGE_LABELS = Object.freeze({
+  live: "LIVE VERIFIED",
+  validator: "LOCAL-VALIDATOR VERIFIED",
+  "need-escrow": "NOT TESTABLE UNTIL ESCROW",
+  "need-commerce": "NOT TESTABLE UNTIL COMMERCE",
+  "need-wallet": "NOT RUN — NEEDS A FUNDED DEVNET WALLET",
+});
 
 export class SmokeFailure extends Error {
   constructor(message) {
@@ -124,7 +156,37 @@ export async function checkProgram(client, name, expectedId, expectedAuthority, 
   return { programDataAddress, authorityAddress, lastDeploySlot: slot };
 }
 
-export async function runIdentityPhase(client, { expectedAuthority, expectedGenesis, encodeBase58 }) {
+/**
+ * Which programs this suite expects to find live.
+ *
+ * Driven by the committed release records rather than by the identity table: a
+ * program with no record has not been released, and demanding it on chain would
+ * make the suite fail for the one reason that is not a problem. When a program
+ * is released its record lands in the same commit, and the suite starts
+ * requiring it without anyone remembering to edit a list here.
+ */
+export function releasedPrograms(evidenceDir) {
+  const released = {};
+  let entries = [];
+  try {
+    entries = readdirSync(evidenceDir);
+  } catch {
+    return released;
+  }
+  for (const entry of entries) {
+    if (!entry.endsWith(".json")) continue;
+    const path = join(evidenceDir, entry);
+    const parsed = JSON.parse(readFileSync(path, "utf8"));
+    if (parsed.cluster !== "devnet") continue;
+    released[parsed.program] = { ...parsed, recordPath: path };
+  }
+  return released;
+}
+
+export async function runIdentityPhase(
+  client,
+  { expectedAuthority, expectedGenesis, encodeBase58, released = null },
+) {
   process.stdout.write("\nCluster\n");
   const genesis = await assertDevnet(client, expectedGenesis);
   record("target cluster is devnet", true, genesis);
@@ -138,19 +200,122 @@ export async function runIdentityPhase(client, { expectedAuthority, expectedGene
     );
   }
 
+  // Default to the whole identity table, which is what a caller that has not
+  // thought about release state wants: every program is required.
+  const expected = released ?? Object.fromEntries(Object.keys(PERMANENT_PROGRAM_IDS).map((n) => [n, {}]));
+
   process.stdout.write("\nPrograms\n");
   const programs = {};
+  const notReleased = [];
   for (const [name, id] of Object.entries(PERMANENT_PROGRAM_IDS)) {
+    if (!(name in expected)) {
+      notReleased.push(name);
+      process.stdout.write(`  n/a   ${name}: no devnet release record — not expected on chain yet\n`);
+      continue;
+    }
     programs[name] = await checkProgram(client, name, id, expectedAuthority, encodeBase58);
   }
-  return { genesis, programs };
+  return { genesis, programs, notReleased };
 }
 
-function reportCoverage() {
-  process.stdout.write("\nLifecycle coverage in this release\n");
+/**
+ * Live reads of the accounts ppv_core owns.
+ *
+ * This is the part of Core that can be exercised on devnet without signing
+ * anything: the program's own account space, read back and decoded through the
+ * declared layout. Finding no proofs yet is a fact about devnet, not a failure —
+ * but a proof that exists and does not decode is a layout problem, and that is
+ * the thing worth catching.
+ */
+export async function runCoreReadPhase(client, programId = PERMANENT_PROGRAM_IDS.ppv_core) {
+  process.stdout.write("\nppv_core account reads\n");
+  const accounts = await client.call("getProgramAccounts", [
+    programId,
+    {
+      encoding: "base64",
+      commitment: "confirmed",
+      filters: [
+        { dataSize: PROOF_RECORD_LEN },
+        { memcmp: { offset: 0, bytes: encodeBase58(PROOF_RECORD_DISCRIMINATOR) } },
+      ],
+    },
+  ]);
+
+  const proofs = [];
+  for (const entry of accounts ?? []) {
+    const bytes = Buffer.from(entry.account.data[0], "base64");
+    try {
+      proofs.push({ address: entry.pubkey, ...decodeProofRecord(bytes) });
+    } catch (error) {
+      record(`ppv_core: proof ${entry.pubkey} decodes`, false, error.message);
+      throw new SmokeFailure(`live ppv_core account ${entry.pubkey} does not decode: ${error.message}`);
+    }
+  }
+  record(
+    "ppv_core: live program accounts read and decoded",
+    true,
+    proofs.length === 0
+      ? "no ProofRecord accounts exist on devnet yet"
+      : `${proofs.length} ProofRecord account(s), all decoded`,
+  );
+  return proofs;
+}
+
+/**
+ * The SDK's view of ppv_core, checked against the permanent identity.
+ *
+ * Derivation and instruction targeting are deterministic, so this needs no
+ * chain — but it is the check that catches an SDK pointed at a different
+ * program than the one that is deployed, which would make every live read above
+ * look fine while addressing nothing.
+ */
+export async function runSdkTargetingPhase(programId = PERMANENT_PROGRAM_IDS.ppv_core) {
+  process.stdout.write("\nSDK targeting\n");
+  const { createProofInstruction, devnetFixtures, proofAddress, instructionDiscriminator } =
+    await import("./devnet-lifecycle.mjs");
+  const { Keypair } = await import("@solana/web3.js");
+
+  const fixtures = devnetFixtures();
+  const authority = Keypair.generate().publicKey;
+  const proof = proofAddress(authority, fixtures.proofId);
+  const instruction = createProofInstruction({
+    authority,
+    proofId: fixtures.proofId,
+    contentHash: fixtures.contentHash,
+    contextHash: fixtures.contextHash,
+    kind: "creation",
+  });
+
+  if (instruction.programId.toBase58() !== programId) {
+    throw new SmokeFailure(
+      `SDK create_proof targets ${instruction.programId.toBase58()}, not the permanent ${programId}`,
+    );
+  }
+  record("ppv_core: SDK instruction targets the permanent program id", true, programId);
+
+  const derived = instruction.keys[1].pubkey.toBase58();
+  if (derived !== proof.toBase58()) {
+    throw new SmokeFailure(`proof PDA disagrees with the instruction account: ${derived}`);
+  }
+  record("ppv_core: proof PDA derives under the permanent program id", true, derived);
+
+  const discriminator = instruction.data.subarray(0, 8);
+  if (!discriminator.equals(instructionDiscriminator("create_proof"))) {
+    throw new SmokeFailure("create_proof discriminator is not Anchor's for that instruction name");
+  }
+  record("ppv_core: instruction discriminator is Anchor's for create_proof", true);
+  return { proof: proof.toBase58(), programId };
+}
+
+export function reportCoverage(notReleased = []) {
+  process.stdout.write("\nCoverage — what this run actually verified\n");
+  const width = Math.max(...Object.values(COVERAGE_LABELS).map((l) => l.length));
   for (const entry of LIFECYCLE_COVERAGE) {
-    const mark = entry.status === "covered" ? "ok  " : entry.status === "partial" ? "part" : "n/a ";
-    process.stdout.write(`  ${mark}  ${entry.step} — ${entry.how}\n`);
+    const label = COVERAGE_LABELS[entry.coverage] ?? entry.coverage;
+    process.stdout.write(`  ${label.padEnd(width)}  ${entry.step} — ${entry.how}\n`);
+  }
+  for (const name of notReleased) {
+    process.stdout.write(`\n  ${name} has no devnet release record; nothing above claims to test it live.\n`);
   }
 }
 
@@ -159,18 +324,30 @@ async function main() {
   const endpoint = process.env.PPV_SMOKE_RPC_URL || "https://api.devnet.solana.com";
   const client = rpc(endpoint);
 
-  const { encodeBase58 } = await import("@gwap/ppv-sdk");
+  const { encodeBase58: encodeBase58Sdk } = await import("@gwap/ppv-sdk");
 
-  await runIdentityPhase(client, {
+  const released = releasedPrograms(
+    process.env.PPV_EVIDENCE_DIR || join(dirname(fileURLToPath(import.meta.url)), "..", "deployments", "evidence"),
+  );
+  const { notReleased } = await runIdentityPhase(client, {
     expectedAuthority: process.env.PPV_SQUADS_VAULT_PDA || "",
     expectedGenesis: process.env.PPV_DEVNET_GENESIS_HASH || "",
-    encodeBase58,
+    encodeBase58: encodeBase58Sdk,
+    released,
   });
 
-  reportCoverage();
+  if (!released.ppv_core) {
+    throw new SmokeFailure(
+      "no ppv_core devnet release record was found; there is nothing to smoke-test against",
+    );
+  }
+  await runCoreReadPhase(client);
+  await runSdkTargetingPhase();
+
+  reportCoverage(notReleased);
 
   if (identityOnly) {
-    process.stdout.write("\nIdentity phase passed. Lifecycle not run (--identity-only).\n");
+    process.stdout.write("\nLive Core verification passed. No transaction was sent (--identity-only).\n");
     return;
   }
 

@@ -5,6 +5,8 @@ set -euo pipefail
 #
 # Read-only. It signs nothing and needs no credentials, so anyone can run it —
 # which is the point: a manifest nobody can independently check is not evidence.
+# Every chain read is JSON-RPC, not the Solana CLI, so "independently checkable"
+# does not quietly require a configured wallet on the machine doing the checking.
 #
 # Reads through a second RPC when PPV_VERIFY_RPC_URL is set, so verification does
 # not depend on the same node that served the deployment.
@@ -34,7 +36,7 @@ second_rpc="${PPV_VERIFY_RPC_URL:-}"
 }
 
 expected_genesis="$(node -e "process.stdout.write(require('./${manifest}').genesisHash)")"
-actual_genesis="$(solana genesis-hash --url "${primary_rpc}")"
+actual_genesis="$(node scripts/query-chain.mjs genesis "${primary_rpc}")"
 [[ "${expected_genesis}" == "${actual_genesis}" ]] || {
   echo "Genesis hash mismatch: manifest ${expected_genesis}, cluster ${actual_genesis}" >&2
   exit 1
@@ -54,38 +56,30 @@ failures=0
 
 check_one() {
   local rpc="$1" label="$2" program="$3" program_id="$4" expected_data="$5" expected_authority="$6"
-  local show executable data authority
+  local state exists executable owner data authority
 
-  show="$(solana program show "${program_id}" --url "${rpc}" --output json 2>/dev/null)" || {
-    echo "  ${label}: FAIL — no program account at ${program_id}"
+  state="$(node scripts/query-chain.mjs program "${program_id}" "${rpc}" 2>/dev/null)" || {
+    echo "  ${label}: FAIL — could not read ${program_id} from ${rpc}"
     return 1
   }
-
-  executable="$(node -e "process.stdout.write(String(JSON.parse(process.argv[1]).authority !== undefined))" "${show}")"
-  data="$(node -e "process.stdout.write(JSON.parse(process.argv[1]).programdataAddress || '')" "${show}")"
-  authority="$(node -e "process.stdout.write(JSON.parse(process.argv[1]).authority || '')" "${show}")"
+  local field
+  field() { node -e "process.stdout.write(String(JSON.parse(process.argv[1])[process.argv[2]] ?? ''))" "${state}" "$1"; }
+  exists="$(field exists)"
+  executable="$(field executable)"
+  owner="$(field owner)"
+  data="$(field programDataAddress)"
+  authority="$(field upgradeAuthority)"
 
   local ok=0
-  [[ "${executable}" == "true" ]] || { echo "  ${label}: FAIL — not an executable upgradeable program"; ok=1; }
+  [[ "${exists}" == "true" ]] || { echo "  ${label}: FAIL — no program account at ${program_id}"; ok=1; }
+  [[ "${executable}" == "true" ]] || { echo "  ${label}: FAIL — account is not executable"; ok=1; }
 
   # Ownership is checked directly rather than inferred: an account can be
   # executable under a different loader and is then not this program at all.
-  local account owner account_executable
-  if account="$(solana account "${program_id}" --url "${rpc}" --output json 2>/dev/null)"; then
-    owner="$(node -e "process.stdout.write(JSON.parse(process.argv[1]).account.owner)" "${account}")"
-    account_executable="$(node -e "process.stdout.write(String(JSON.parse(process.argv[1]).account.executable))" "${account}")"
-    [[ "${owner}" == "${UPGRADEABLE_LOADER}" ]] || {
-      echo "  ${label}: FAIL — owned by ${owner}, not the BPF upgradeable loader"
-      ok=1
-    }
-    [[ "${account_executable}" == "true" ]] || {
-      echo "  ${label}: FAIL — account is not executable"
-      ok=1
-    }
-  else
-    echo "  ${label}: FAIL — could not read the program account"
+  [[ "${owner}" == "${UPGRADEABLE_LOADER}" ]] || {
+    echo "  ${label}: FAIL — owned by ${owner}, not the BPF upgradeable loader"
     ok=1
-  fi
+  }
   [[ "${data}" == "${expected_data}" ]] || { echo "  ${label}: FAIL — programData ${data}, manifest ${expected_data}"; ok=1; }
   if [[ "${authority}" != "${expected_authority}" ]]; then
     # An upgrade authority that does not match the manifest is a security

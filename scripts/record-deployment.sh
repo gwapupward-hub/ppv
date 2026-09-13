@@ -4,7 +4,11 @@ set -euo pipefail
 # Records one deployed program into deployments/<cluster>.json.
 #
 # Public data only. This script reads the chain and the build output; it never
-# touches a keypair, and it refuses to run if you hand it a path to one.
+# touches a keypair, and it refuses to run if you hand it a path to one. Chain
+# reads go through JSON-RPC rather than the Solana CLI, because the CLI wants a
+# configured default signer even for read-only commands — which is exactly what
+# failed on the runner that deployed PPV Core, after the deployment itself had
+# already succeeded.
 #
 # Run it once per program, immediately after `solana program deploy`, from the
 # same checkout and build output that produced the artifact.
@@ -80,13 +84,45 @@ if [[ "${program_id}" != "${PERMANENT_IDS[${program}]}" ]]; then
   exit 1
 fi
 
-# `solana program show` is the authority for what is actually on chain.
-show="$(solana program show "${program_id}" --url "${rpc_url}" --output json)"
-program_data="$(node -e "process.stdout.write(JSON.parse(process.argv[1]).programdataAddress)" "${show}")"
-authority="$(node -e "process.stdout.write(JSON.parse(process.argv[1]).authority)" "${show}")"
-slot="$(node -e "process.stdout.write(String(JSON.parse(process.argv[1]).lastDeploySlot))" "${show}")"
+# The chain is the authority for what is actually deployed. Read it directly.
+state="$(node scripts/query-chain.mjs program "${program_id}" "${rpc_url}")"
+field() { node -e "process.stdout.write(String(JSON.parse(process.argv[1])[process.argv[2]] ?? ''))" "${state}" "$1"; }
+exists="$(field exists)"
+executable="$(field executable)"
+owner="$(field owner)"
+program_data="$(field programDataAddress)"
+authority="$(field upgradeAuthority)"
+slot="$(field lastDeploySlot)"
 
-genesis="$(solana genesis-hash --url "${rpc_url}")"
+# Recorded evidence must describe an executable program under the upgradeable
+# loader. Anything else is not the thing this manifest claims it is.
+if [[ "${exists}" != "true" || "${executable}" != "true" ]]; then
+  echo "${program_id} is not an executable program account on ${cluster}." >&2
+  exit 1
+fi
+if [[ "${owner}" != "BPFLoaderUpgradeab1e11111111111111111111111" ]]; then
+  echo "${program_id} is owned by ${owner}, not the BPF upgradeable loader." >&2
+  exit 1
+fi
+if [[ -z "${program_data}" || -z "${authority}" || -z "${slot}" ]]; then
+  echo "Could not resolve complete upgradeable-program metadata for ${program_id}." >&2
+  exit 1
+fi
+
+# The deployment signature is part of the evidence, so it is checked rather than
+# copied down: a signature that is absent or failed does not identify a deploy.
+signature_state="$(node scripts/query-chain.mjs signature "${signature}" "${rpc_url}")"
+if [[ "${signature_state}" == "null" ]]; then
+  echo "Deployment signature ${signature} is not in ${cluster} transaction history." >&2
+  exit 1
+fi
+signature_error="$(node -e "process.stdout.write(JSON.stringify(JSON.parse(process.argv[1]).err))" "${signature_state}")"
+if [[ "${signature_error}" != "null" ]]; then
+  echo "Deployment signature ${signature} is recorded with error ${signature_error}." >&2
+  exit 1
+fi
+
+genesis="$(node scripts/query-chain.mjs genesis "${rpc_url}")"
 idl_hash="$(sha256sum "${idl}" | cut -d' ' -f1)"
 binary_hash="$(sha256sum "${binary}" | cut -d' ' -f1)"
 commit="$(git rev-parse HEAD)"
