@@ -71,6 +71,14 @@ deliberately absent from `[programs.devnet]` in `Anchor.toml`, from
 `.github/workflows/deploy-devnet.yml`, and from `scripts/record-deployment.sh`,
 so no existing path can deploy it by accident.
 
+The program's instruction surface, its real state graph, and its token-program
+scope are documented in
+[security/ppv-escrow-surface.md](security/ppv-escrow-surface.md). Every security
+claim made about it and the evidence for that claim are in
+[security/ppv-escrow-attack-matrix.md](security/ppv-escrow-attack-matrix.md),
+with what remains unresolved in
+[security/ppv-escrow-residual-risk.md](security/ppv-escrow-residual-risk.md).
+
 Before any cluster deployment of `ppv_escrow`:
 
 - Independent Solana security review of the custody path, with all critical and
