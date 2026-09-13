@@ -379,6 +379,7 @@ jobs:
 
       - name: Transfer upgrade authority to Squads
         if: ${{ !inputs.verify_only }}
+        id: transfer
         env:
           UPGRADE_AUTHORITY: ${{ vars.PPV_SQUADS_VAULT_PDA }}
         run: |
@@ -396,6 +397,36 @@ jobs:
             --upgrade-authority "${{ steps.keys.outputs.work }}/deployer.json" \
             --new-upgrade-authority "${UPGRADE_AUTHORITY}" \
             --skip-new-upgrade-authority-signer-check
+
+          # The transfer signature is part of the release evidence, so it is read
+          # back here rather than hunted for afterwards. It lands on the
+          # ProgramData account, not the program account — the program account's
+          # newest signature is still the deploy — so query ProgramData. Read at
+          # confirmed commitment with a short retry, for the same RPC indexing
+          # lag the deploy step allows for.
+          program_data="$(
+            node scripts/query-chain.mjs program "${program_id}" https://api.devnet.solana.com \
+              | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{process.stdout.write(JSON.parse(s).programDataAddress||"")})'
+          )"
+          transfer_signature=""
+          if [[ -n "${program_data}" ]]; then
+            for _ in $(seq 1 10); do
+              transfer_signature="$(
+                curl -fsS https://api.devnet.solana.com \
+                  -X POST -H 'Content-Type: application/json' \
+                  -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"getSignaturesForAddress\",\"params\":[\"${program_data}\",{\"limit\":1,\"commitment\":\"confirmed\"}]}" \
+                  | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const r=(JSON.parse(s)||{}).result;process.stdout.write(r&&r[0]?r[0].signature:"")})'
+              )"
+              [[ -n "${transfer_signature}" ]] && break
+              sleep 3
+            done
+          fi
+          # Not fatal on its own: the transfer already succeeded, and the next
+          # step verifies the live authority regardless. A missing signature
+          # means the record is written without it, never that the release is
+          # rolled back — Sprint 1's lesson is that evidence trouble after a
+          # successful handoff is repaired, not redeployed.
+          echo "transfer_signature=${transfer_signature}" >> "${GITHUB_OUTPUT}"
 
       - name: Verify on chain and record the deployment
         if: ${{ !inputs.verify_only }}
@@ -445,12 +476,50 @@ jobs:
           ./scripts/verify-deployment.sh
           sha256sum "target/idl/${program}.json" "target/deploy/${program}.so"
 
+      # The canonical release record, written by the deployment that produced it.
+      #
+      # Sprint 1 shipped PPV Core and then had to reconstruct its record from the
+      # chain weeks later, because the record was a manual step after the
+      # workflow rather than part of it. This is that step, moved inside. It
+      # gates on the built artifact being byte-identical to the bytes the loader
+      # is holding, so the record cannot describe a binary that is not deployed.
+      - name: Write and verify the canonical release record
+        if: ${{ !inputs.verify_only }}
+        env:
+          AUTHORITY_MEMBERS: ${{ vars.PPV_SQUADS_MEMBER_PUBKEYS }}
+          AUTHORITY_THRESHOLD: ${{ vars.PPV_SQUADS_THRESHOLD }}
+          DEPLOY_SIGNATURE: ${{ steps.deploy.outputs.signature }}
+          TRANSFER_SIGNATURE: ${{ steps.transfer.outputs.transfer_signature }}
+        run: |
+          program="${{ inputs.program }}"
+          short="$(git rev-parse --short=7 HEAD)"
+          record="deployments/evidence/${program//_/-}-devnet-${short}.json"
+          mkdir -p deployments/evidence
+
+          PPV_PROGRAM="${program}" \
+          PPV_RELEASE_COMMIT="$(git rev-parse HEAD)" \
+          PPV_DEPLOY_SIGNATURE="${DEPLOY_SIGNATURE}" \
+          PPV_AUTHORITY_TRANSFER_SIGNATURE="${TRANSFER_SIGNATURE}" \
+          PPV_UPGRADE_AUTHORITY_MEMBERS="${AUTHORITY_MEMBERS}" \
+          PPV_UPGRADE_AUTHORITY_THRESHOLD="${AUTHORITY_THRESHOLD}" \
+          PPV_SOURCE_WORKFLOW_RUN="${{ github.run_id }}" \
+          PPV_RPC_URL=https://api.devnet.solana.com \
+            node scripts/collect-deployment-evidence.mjs "${record}"
+
+          node scripts/verify-deployed-program.mjs "${record}"
+          echo "RECORD=${record}" >> "${GITHUB_ENV}"
+          echo
+          echo "Commit ${record} and delete deployments/release-candidates/${program}.json."
+          echo "Committing it retires the initial deployment for ${program}."
+
       - name: Upload public deployment evidence
         if: ${{ !inputs.verify_only }}
         uses: actions/upload-artifact@v4
         with:
           name: ppv-devnet-${{ inputs.program }}-evidence
-          path: deployments/devnet.json
+          path: |
+            deployments/devnet.json
+            deployments/evidence/*.json
           if-no-files-found: error
           retention-days: 30
 
