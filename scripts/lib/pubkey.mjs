@@ -99,3 +99,31 @@ export function isOnCurve(address) {
 export function isProgramDerived(address) {
   return isAddress(address) && !isOnCurve(address);
 }
+
+/**
+ * base58 for the one direction the chain readers need: raw account bytes back
+ * into an address. `decodeBase58` above is its inverse and the two are checked
+ * against each other, and against @solana/web3.js, in pubkey.test.mjs.
+ */
+export function encodeBase58(bytes) {
+  let zeros = 0;
+  while (zeros < bytes.length && bytes[zeros] === 0) zeros += 1;
+
+  const digits = [];
+  for (let i = zeros; i < bytes.length; i += 1) {
+    let carry = bytes[i];
+    for (let j = 0; j < digits.length; j += 1) {
+      carry += digits[j] << 8;
+      digits[j] = carry % 58;
+      carry = (carry / 58) | 0;
+    }
+    while (carry > 0) {
+      digits.push(carry % 58);
+      carry = (carry / 58) | 0;
+    }
+  }
+
+  let out = "1".repeat(zeros);
+  for (let i = digits.length - 1; i >= 0; i -= 1) out += ALPHABET[digits[i]];
+  return out;
+}

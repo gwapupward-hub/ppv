@@ -233,8 +233,38 @@ jobs:
 
       - name: Refuse an existing program address
         run: |
-          program_id="$(solana-keygen pubkey "target/deploy/${{ inputs.program }}-keypair.json")"
-          if solana program show "${program_id}" --url https://api.devnet.solana.com >/dev/null 2>&1; then
+          program="${{ inputs.program }}"
+          program_id="$(solana-keygen pubkey "target/deploy/${program}-keypair.json")"
+
+          # A program with a committed devnet release record has already had its
+          # initial deployment. This is checked before the chain, and off a file
+          # in the repository, so the refusal does not depend on an RPC call
+          # succeeding: PPV Core's initial deployment is complete and this
+          # workflow must never run against it again. A future change to a
+          # released program is an upgrade through Squads — see
+          # docs/ppv-core-upgrade-runbook.md — not a rerun of this workflow.
+          for record in deployments/evidence/*.json; do
+            [[ -f "${record}" ]] || continue
+            recorded="$(node -e "
+              const r = require('./' + process.argv[1]);
+              process.stdout.write(r.cluster === 'devnet' ? String(r.program) : '');
+            " "${record}")"
+            if [[ "${recorded}" == "${program}" ]]; then
+              echo "${program} has a committed devnet release record (${record})." >&2
+              echo "Its initial deployment is COMPLETE. Redeploying is invalid; use the upgrade path." >&2
+              exit 1
+            fi
+          done
+
+          # Then the chain, read without a signer so this cannot fail for the
+          # reason the post-deploy evidence step once did. An RPC error is not
+          # evidence that the address is free, so it fails closed.
+          state="$(node scripts/query-chain.mjs program "${program_id}" https://api.devnet.solana.com)" || {
+            echo "Could not read ${program_id} from devnet. Refusing to deploy on an unknown state." >&2
+            exit 1
+          }
+          exists="$(node -e "process.stdout.write(String(JSON.parse(process.argv[1]).exists))" "${state}")"
+          if [[ "${exists}" != "false" ]]; then
             echo "${program_id} already exists. This initial-deployment workflow will not upgrade it." >&2
             exit 1
           fi
@@ -385,17 +415,22 @@ jobs:
           fi
           program="${{ inputs.program }}"
           program_id="$(solana-keygen pubkey "target/deploy/${program}-keypair.json")"
-          show="$(solana program show "${program_id}" --url https://api.devnet.solana.com --output json)"
-          actual_authority="$(node -e "process.stdout.write(JSON.parse(process.argv[1]).authority)" "${show}")"
+
+          # Read through JSON-RPC, not the Solana CLI. The CLI expects a
+          # configured default signer even for read-only commands, and on a
+          # runner that has none it fails — which is how PPV Core's first
+          # deployment succeeded on chain and still reported failure, leaving
+          # the release with no evidence. Verification of public state must not
+          # depend on the ability to sign.
+          state="$(node scripts/query-chain.mjs program "${program_id}" https://api.devnet.solana.com)"
+          field() { node -e "process.stdout.write(String(JSON.parse(process.argv[1])[process.argv[2]] ?? ''))" "${state}" "$1"; }
+          actual_authority="$(field upgradeAuthority)"
           if [[ "${actual_authority}" != "${EXPECTED_AUTHORITY}" ]]; then
             echo "Authority handoff failed: expected ${EXPECTED_AUTHORITY}, got ${actual_authority}." >&2
             exit 1
           fi
 
-          account="$(solana account "${program_id}" --url https://api.devnet.solana.com --output json)"
-          executable="$(node -e "process.stdout.write(String(JSON.parse(process.argv[1]).account.executable))" "${account}")"
-          owner="$(node -e "process.stdout.write(JSON.parse(process.argv[1]).account.owner)" "${account}")"
-          if [[ "${executable}" != "true" || "${owner}" != "BPFLoaderUpgradeab1e11111111111111111111111" ]]; then
+          if [[ "$(field executable)" != "true" || "$(field owner)" != "BPFLoaderUpgradeab1e11111111111111111111111" ]]; then
             echo "Program account is not an executable upgradeable-loader program." >&2
             exit 1
           fi

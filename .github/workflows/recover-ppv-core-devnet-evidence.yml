@@ -1,14 +1,18 @@
 name: Recover PPV Core devnet evidence
 
-# One-time, read-only recovery for the PPV Core initial devnet deployment from
-# workflow run 34725816827. That run successfully deployed the program and
-# transferred upgrade authority to Squads, but the evidence-recording step
-# failed afterward because the Solana CLI config had no default signer.
+# Read-only recovery of the canonical evidence record for the PPV Core initial
+# devnet deployment (workflow run 34725816827). That run deployed the program
+# and transferred upgrade authority to Squads successfully, then failed in the
+# step that was supposed to write the evidence down: its post-deploy verifier
+# used a Solana CLI path that expects a default signer, and the GitHub runner
+# has none. The deployment is real; only the paperwork was lost.
 #
-# This workflow cannot deploy, upgrade, transfer authority, or use repository
-# signing secrets. It rebuilds the exact release commit, reads the live devnet
-# program, dumps the on-chain bytecode, compares hashes, verifies the recorded
-# deployment signature, and uploads a JSON evidence artifact.
+# This workflow rebuilds the exact release commit and reconstructs the record
+# from public chain state. It cannot deploy, upgrade, close a program, transfer
+# authority, or submit any transaction: it uses no repository secrets, no
+# keypair and no Solana CLI subcommand at all — every chain read is raw
+# JSON-RPC. The hard gate is the binary comparison: the rebuild must equal the
+# bytes the loader is holding, or the run fails and writes nothing.
 
 on:
   workflow_dispatch:
@@ -17,47 +21,82 @@ on:
         description: Type ppv_core to run read-only recovery verification
         required: true
         type: string
+  # The original failure was evidence tooling that no run had ever exercised, so
+  # a change to that tooling exercises it here, on the pull request that makes
+  # the change. Read-only, so this is safe to run automatically; the confirmation
+  # input exists for the manual path and is not required for a pull request.
+  pull_request:
+    paths:
+      - .github/workflows/recover-ppv-core-devnet-evidence.yml
+      - scripts/collect-deployment-evidence.mjs
+      - scripts/verify-deployed-program.mjs
+      - scripts/lib/rpc.mjs
+      - scripts/lib/pubkey.mjs
 
 permissions:
   contents: read
 
 concurrency:
-  group: recover-ppv-core-devnet-evidence
-  cancel-in-progress: false
+  group: recover-ppv-core-devnet-evidence-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   verify:
     name: Recover PPV Core devnet evidence
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     env:
-      RPC_URL: https://api.devnet.solana.com
-      PROGRAM: ppv_core
+      PPV_RPC_URL: https://api.devnet.solana.com
+      PPV_PROGRAM: ppv_core
       PROGRAM_ID: 9cWE41ZDNQChvFrRoVuPQDeoVLg46ACTiZRCZaBZzfwU
-      RELEASE_COMMIT: 861a8dfce9533f75494621b8a36e60e60447cc0c
-      DEPLOY_SIGNATURE: 3A1fMmAZiBfjKb9ijUW81KaqEyZqEtT7vha2Ms2hZanxhjcDaJn4wKJvEwSkDJBK3Co7eJnTyn6wvc2iXaYaAxAp
-      EXPECTED_AUTHORITY: B6tcsTrMCKTZV5vi3rRCnA3FMPeeWACSHuuTSz5XQgnX
-      EXPECTED_GENESIS: EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG
+      PPV_RELEASE_COMMIT: 861a8dfce9533f75494621b8a36e60e60447cc0c
+      PPV_DEPLOY_SIGNATURE: 3A1fMmAZiBfjKb9ijUW81KaqEyZqEtT7vha2Ms2hZanxhjcDaJn4wKJvEwSkDJBK3Co7eJnTyn6wvc2iXaYaAxAp
+      PPV_AUTHORITY_TRANSFER_SIGNATURE: 5TX9vvX5ktHE19mDZw5VXkNajZESrPxQZGqxQ26B5pzrLhuVPELTaB8KTsKXCUmpvNzv9FCj2JpHR8Re3jiuTwgj
+      PPV_UPGRADE_AUTHORITY_MEMBERS: 58kuGbxpvaamvYE44WYkyipBB6FVKt2qT9u3vAKtyKYV,2FFVcm9xJmUHG6zfo15ktzuGQTXACPG42iquGHe6faTN,BJmFM4k7Q32CiCYSdoYkAhXdD5Sk3BegMh2cbEAsgSwJ
+      PPV_UPGRADE_AUTHORITY_THRESHOLD: "2"
+      PPV_SOURCE_WORKFLOW_RUN: "34725816827"
 
     steps:
       - name: Confirm read-only recovery
+        if: github.event_name == 'workflow_dispatch'
         run: |
-          if [[ "${{ inputs.confirm }}" != "${PROGRAM}" ]]; then
-            echo "Confirmation must be exactly '${PROGRAM}'." >&2
+          if [[ "${{ inputs.confirm }}" != "${PPV_PROGRAM}" ]]; then
+            echo "Confirmation must be exactly '${PPV_PROGRAM}'." >&2
             exit 1
           fi
-          echo "Read-only recovery only. No deployment or authority mutation is permitted."
+          echo "Read-only recovery only. No deployment or authority mutation is possible here."
 
-      - name: Check out exact deployed release commit
+      # The release commit, not this branch: the record must describe the source
+      # that was actually deployed.
+      - name: Check out the exact deployed release commit
         uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_COMMIT }}
+          ref: ${{ env.PPV_RELEASE_COMMIT }}
           fetch-depth: 1
           persist-credentials: false
+          path: release
+
+      # The recovery tooling itself comes from the branch being run, so a fix to
+      # the verifier does not require rewriting release history.
+      - name: Check out the recovery tooling
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          path: tooling
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+
+      - uses: actions/cache/restore@v4
+        id: anchor-cache
+        with:
+          path: |
+            ~/.cache/solana
+            ~/.local/share/solana/install
+            ~/.cargo/bin/anchor
+          key: ppv-anchor-0.30.1-solana-1.18.17-${{ runner.os }}-v3
 
       - name: Install pinned Rust toolchains
         run: |
@@ -65,190 +104,77 @@ jobs:
           rustup toolchain install 1.79.0 --profile minimal
           rustup toolchain install nightly-2024-06-15 --profile minimal
 
-      - name: Install Solana CLI 1.18.17
+      - name: Install Solana platform tools 1.18.17
         run: |
-          sh -c "$(curl --proto '=https' --tlsv1.2 -sSfL https://release.anza.xyz/v1.18.17/install)"
-          echo "${HOME}/.local/share/solana/install/active_release/bin" >> "${GITHUB_PATH}"
+          solana_bin="${HOME}/.local/share/solana/install/active_release/bin"
+          if [[ ! -x "${solana_bin}/cargo-build-sbf" ]]; then
+            sh -c "$(curl --proto '=https' --tlsv1.2 -sSfL https://release.anza.xyz/v1.18.17/install)"
+          fi
+          echo "${solana_bin}" >> "${GITHUB_PATH}"
 
       - name: Install Anchor CLI 0.30.1
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes libudev-dev pkg-config
-          cargo +1.79.0 install \
-            --git https://github.com/solana-foundation/anchor \
-            --tag v0.30.1 anchor-cli --locked --force
+          if [[ ! -x "${HOME}/.cargo/bin/anchor" ]] || \
+             [[ "$("${HOME}/.cargo/bin/anchor" --version)" != "anchor-cli 0.30.1" ]]; then
+            sudo apt-get update
+            sudo apt-get install --yes libudev-dev pkg-config
+            cargo +1.79.0 install \
+              --git https://github.com/solana-foundation/anchor \
+              --tag v0.30.1 anchor-cli --locked --force
+          fi
+          "${HOME}/.cargo/bin/anchor" --version
 
-      - name: Configure read-only CLI compatibility signer
-        run: |
-          # Solana CLI 1.18.x can fail on otherwise read-only commands when its
-          # configured default signer path does not exist. Generate an unfunded,
-          # throwaway local keypair only to satisfy that CLI configuration bug.
-          # It is never used to sign or submit a transaction and is destroyed in
-          # the final cleanup step.
-          verifier_keypair="${RUNNER_TEMP}/ppv-readonly-verifier.json"
-          solana-keygen new --no-bip39-passphrase --silent --force \
-            -o "${verifier_keypair}" >/dev/null 2>&1
-          solana config set --url "${RPC_URL}" --keypair "${verifier_keypair}" >/dev/null
-          echo "verifier_keypair=${verifier_keypair}" >> "${GITHUB_ENV}"
+      - uses: actions/cache/save@v4
+        if: steps.anchor-cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            ~/.cache/solana
+            ~/.local/share/solana/install
+            ~/.cargo/bin/anchor
+          key: ppv-anchor-0.30.1-solana-1.18.17-${{ runner.os }}-v3
 
-      - name: Assert exact release source identity
+      - name: Assert the release source binds ppv_core to its permanent identity
+        working-directory: release
         run: |
           actual_commit="$(git rev-parse HEAD)"
-          [[ "${actual_commit}" == "${RELEASE_COMMIT}" ]] || {
-            echo "Checked out ${actual_commit}, expected ${RELEASE_COMMIT}." >&2
+          [[ "${actual_commit}" == "${PPV_RELEASE_COMMIT}" ]] || {
+            echo "Checked out ${actual_commit}, expected ${PPV_RELEASE_COMMIT}." >&2
             exit 1
           }
-          declared_id="$(sed -n 's/^declare_id!("\(.*\)");$/\1/p' "programs/${PROGRAM}/src/lib.rs")"
-          mapfile -t anchor_ids < <(sed -n "s/^${PROGRAM} = \"\(.*\)\"$/\1/p" Anchor.toml | sort -u)
+          declared_id="$(sed -n 's/^declare_id!("\(.*\)");$/\1/p' "programs/${PPV_PROGRAM}/src/lib.rs")"
+          mapfile -t anchor_ids < <(sed -n "s/^${PPV_PROGRAM} = \"\(.*\)\"$/\1/p" Anchor.toml | sort -u)
           if [[ "${declared_id}" != "${PROGRAM_ID}" || "${#anchor_ids[@]}" -ne 1 || "${anchor_ids[0]}" != "${PROGRAM_ID}" ]]; then
-            echo "Release source does not bind ${PROGRAM} to ${PROGRAM_ID}." >&2
+            echo "Release source does not bind ${PPV_PROGRAM} to ${PROGRAM_ID}." >&2
             exit 1
           fi
 
-      - name: Rebuild exact release artifact
+      - name: Rebuild the exact release artifact
+        working-directory: release
         run: |
           RUSTUP_TOOLCHAIN=nightly-2024-06-15 anchor build
-          idl_id="$(node -e "process.stdout.write(require('./target/idl/${PROGRAM}.json').address)")"
-          [[ "${idl_id}" == "${PROGRAM_ID}" ]] || {
-            echo "Built IDL names ${idl_id}, expected ${PROGRAM_ID}." >&2
-            exit 1
-          }
+          ls -l "target/deploy/${PPV_PROGRAM}.so" "target/idl/${PPV_PROGRAM}.json"
 
-      - name: Verify devnet identity and deployment signature
-        id: chain
-        run: |
-          genesis="$(
-            curl -fsS "${RPC_URL}" -X POST -H 'Content-Type: application/json' \
-              -d '{"jsonrpc":"2.0","id":1,"method":"getGenesisHash"}' \
-              | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);if(j.error||!j.result)process.exit(1);process.stdout.write(j.result)})'
-          )"
-          [[ "${genesis}" == "${EXPECTED_GENESIS}" ]] || {
-            echo "Devnet genesis ${genesis} does not match expected ${EXPECTED_GENESIS}." >&2
-            exit 1
-          }
-
-          sigs="$(
-            curl -fsS "${RPC_URL}" -X POST -H 'Content-Type: application/json' \
-              -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"getSignaturesForAddress\",\"params\":[\"${PROGRAM_ID}\",{\"limit\":20,\"commitment\":\"confirmed\"}]}"
-          )"
-          SIGS_JSON="${sigs}" node -e '
-            const j = JSON.parse(process.env.SIGS_JSON);
-            if (j.error || !Array.isArray(j.result)) throw new Error("Could not read program signatures");
-            const wanted = process.env.DEPLOY_SIGNATURE;
-            const found = j.result.find((x) => x.signature === wanted);
-            if (!found) throw new Error(`Deployment signature ${wanted} was not found on the program address`);
-            if (found.err !== null) throw new Error(`Deployment signature ${wanted} is recorded with an error`);
-            process.stdout.write(`deployment signature confirmed at slot ${found.slot}\n`);
-          '
-
-          echo "genesis=${genesis}" >> "${GITHUB_OUTPUT}"
-
-      - name: Verify live program and Squads authority
-        id: live
-        run: |
-          show="$(solana program show "${PROGRAM_ID}" --url "${RPC_URL}" --output json)"
-          authority="$(node -e "process.stdout.write(JSON.parse(process.argv[1]).authority || '')" "${show}")"
-          program_data="$(node -e "process.stdout.write(JSON.parse(process.argv[1]).programdataAddress || '')" "${show}")"
-          deploy_slot="$(node -e "process.stdout.write(String(JSON.parse(process.argv[1]).lastDeploySlot || ''))" "${show}")"
-          [[ "${authority}" == "${EXPECTED_AUTHORITY}" ]] || {
-            echo "Upgrade authority is ${authority}; expected Squads vault ${EXPECTED_AUTHORITY}." >&2
-            exit 1
-          }
-          [[ -n "${program_data}" && -n "${deploy_slot}" ]] || {
-            echo "Program metadata is incomplete." >&2
-            exit 1
-          }
-
-          account="$(solana account "${PROGRAM_ID}" --url "${RPC_URL}" --output json)"
-          owner="$(node -e "process.stdout.write(JSON.parse(process.argv[1]).account.owner)" "${account}")"
-          executable="$(node -e "process.stdout.write(String(JSON.parse(process.argv[1]).account.executable))" "${account}")"
-          [[ "${owner}" == "BPFLoaderUpgradeab1e11111111111111111111111" ]] || {
-            echo "Program owner is ${owner}, not the upgradeable BPF loader." >&2
-            exit 1
-          }
-          [[ "${executable}" == "true" ]] || {
-            echo "Program account is not executable." >&2
-            exit 1
-          }
-
-          echo "authority=${authority}" >> "${GITHUB_OUTPUT}"
-          echo "program_data=${program_data}" >> "${GITHUB_OUTPUT}"
-          echo "deploy_slot=${deploy_slot}" >> "${GITHUB_OUTPUT}"
-          echo "owner=${owner}" >> "${GITHUB_OUTPUT}"
-          echo "executable=${executable}" >> "${GITHUB_OUTPUT}"
-          echo "PPV Core is executable and controlled by the expected Squads vault."
-
-      - name: Compare release build with on-chain bytecode
-        id: binary
+      # The one step that decides whether this release can be closed: the
+      # rebuild's bytes against the bytes the loader is holding, plus the
+      # identity, custody and transaction checks around them.
+      - name: Reconstruct the canonical evidence record
+        env:
+          PPV_EVIDENCE_WORKFLOW_RUN: ${{ github.run_id }}
+          PPV_BUILD_DIR: release/target
         run: |
           mkdir -p evidence
-          solana program dump "${PROGRAM_ID}" evidence/ppv_core.onchain.so --url "${RPC_URL}"
-          built_hash="$(sha256sum "target/deploy/${PROGRAM}.so" | cut -d' ' -f1)"
-          onchain_hash="$(sha256sum evidence/ppv_core.onchain.so | cut -d' ' -f1)"
-          if [[ "${built_hash}" != "${onchain_hash}" ]]; then
-            echo "Binary mismatch: exact release rebuild ${built_hash}, on-chain ${onchain_hash}." >&2
-            exit 1
-          fi
-          idl_hash="$(sha256sum "target/idl/${PROGRAM}.json" | cut -d' ' -f1)"
-          echo "built_hash=${built_hash}" >> "${GITHUB_OUTPUT}"
-          echo "onchain_hash=${onchain_hash}" >> "${GITHUB_OUTPUT}"
-          echo "idl_hash=${idl_hash}" >> "${GITHUB_OUTPUT}"
-          echo "Exact release rebuild matches the live on-chain bytecode."
+          node tooling/scripts/collect-deployment-evidence.mjs \
+            "evidence/ppv-core-devnet-${PPV_RELEASE_COMMIT:0:7}.json"
 
-      - name: Write recovered public evidence
-        env:
-          GENESIS: ${{ steps.chain.outputs.genesis }}
-          AUTHORITY: ${{ steps.live.outputs.authority }}
-          PROGRAM_DATA: ${{ steps.live.outputs.program_data }}
-          DEPLOY_SLOT: ${{ steps.live.outputs.deploy_slot }}
-          OWNER: ${{ steps.live.outputs.owner }}
-          EXECUTABLE: ${{ steps.live.outputs.executable }}
-          BUILT_HASH: ${{ steps.binary.outputs.built_hash }}
-          ONCHAIN_HASH: ${{ steps.binary.outputs.onchain_hash }}
-          IDL_HASH: ${{ steps.binary.outputs.idl_hash }}
+      - name: Re-verify the written record through the public verifier
         run: |
-          node <<'NODE'
-          const fs = require('node:fs');
-          const e = process.env;
-          const evidence = {
-            cluster: 'devnet',
-            genesisHash: e.GENESIS,
-            program: e.PROGRAM,
-            programId: e.PROGRAM_ID,
-            programDataAddress: e.PROGRAM_DATA,
-            owner: e.OWNER,
-            executable: e.EXECUTABLE === 'true',
-            upgradeAuthority: e.AUTHORITY,
-            upgradeAuthorityKind: 'squads-multisig',
-            deploymentSignature: e.DEPLOY_SIGNATURE,
-            deployedSlot: Number(e.DEPLOY_SLOT),
-            gitCommit: e.RELEASE_COMMIT,
-            idlHash: `sha256:${e.IDL_HASH}`,
-            rebuiltBinaryHash: `sha256:${e.BUILT_HASH}`,
-            onChainBinaryHash: `sha256:${e.ONCHAIN_HASH}`,
-            binaryHashesMatch: e.BUILT_HASH === e.ONCHAIN_HASH,
-            toolchain: {
-              anchor: '0.30.1',
-              solana: '1.18.17',
-              rustHost: '1.85.1',
-              rustSbf: '1.75.0'
-            },
-            verificationMode: 'read-only-recovery',
-            verifiedAt: new Date().toISOString()
-          };
-          fs.writeFileSync('evidence/ppv-core-devnet-recovery.json', `${JSON.stringify(evidence, null, 2)}\n`);
-          NODE
-          cat evidence/ppv-core-devnet-recovery.json
+          node tooling/scripts/verify-deployed-program.mjs \
+            "evidence/ppv-core-devnet-${PPV_RELEASE_COMMIT:0:7}.json"
 
-      - name: Upload recovered deployment evidence
+      - name: Upload the recovered evidence record
         uses: actions/upload-artifact@v4
         with:
           name: ppv-core-devnet-recovered-evidence
-          path: evidence/ppv-core-devnet-recovery.json
+          path: evidence/*.json
           if-no-files-found: error
           retention-days: 90
-
-      - name: Destroy read-only compatibility signer
-        if: always()
-        run: |
-          rm -f "${verifier_keypair:-${RUNNER_TEMP}/ppv-readonly-verifier.json}"

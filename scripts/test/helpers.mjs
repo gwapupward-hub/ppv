@@ -1,8 +1,13 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { createServer } from "node:http";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { UPGRADEABLE_LOADER_ID } from "../lib/identity.mjs";
+import { decodeBase58 } from "../lib/pubkey.mjs";
+import { DEVNET_GENESIS } from "../lib/rpc.mjs";
 
 export const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 export const READINESS = join(REPO, "scripts", "verify-devnet-readiness.sh");
@@ -15,6 +20,8 @@ export const COMMERCE_ID = "GmRDoFuPrBrsxnvTX751WK5rLu14JXe4sgjh6vNwHzr3";
  * a vault PDA actually has. Fixture only; it is not the deployment vault.
  */
 export const VAULT_PDA = "3cFRkTFrpmNXetfLJka5q1owRffk1tjWVo8SDLPyWB7w";
+/** The real ProgramData address of the deployed devnet PPV Core. */
+export const CORE_PROGRAM_DATA = "FfEQrpiQSzxUErCBkXCukbt26JivKiExA6HswMpQkiSA";
 /** Real on-curve public keys — the shape an ordinary signer wallet has. */
 export const MEMBERS = [
   "55y7B46ZUAyeYaMFUPxHAg9UUcwrfZ2eZDFDabxinhjp",
@@ -148,7 +155,7 @@ echo "stub rustup: unexpected args: $*" >&2; exit 93`,
   return bin;
 }
 
-export function runReadiness({ repoRoot, args = [], env = {}, stubBin } = {}) {
+export function runReadiness({ repoRoot, args = [], env = {}, stubBin, rpcUrl } = {}) {
   const path = stubBin ? `${stubBin}:${process.env.PATH}` : process.env.PATH;
   const result = spawnSync("bash", [READINESS, ...args], {
     encoding: "utf8",
@@ -163,6 +170,9 @@ export function runReadiness({ repoRoot, args = [], env = {}, stubBin } = {}) {
       PPV_DEVNET_GENESIS_HASH: "",
       PPV_CORE_PROGRAM_KEYPAIR_PATH: "",
       PPV_COMMERCE_PROGRAM_KEYPAIR_PATH: "",
+      // Pointed at a stub endpoint by every chain-dependent test, so a test
+      // that reaches the real devnet is a bug rather than a flake.
+      PPV_READINESS_RPC_URL: rpcUrl ?? "http://127.0.0.1:1/unreachable-by-design",
       ...env,
     },
   });
@@ -177,5 +187,187 @@ export function goodDeploymentEnv(overrides = {}) {
     PPV_SQUADS_THRESHOLD: "2",
     PPV_DEVNET_GENESIS_HASH: "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
     ...overrides,
+  };
+}
+
+/**
+ * A deterministic Solana JSON-RPC transport.
+ *
+ * The verifier's network boundary is one injected `fetch`, so every chain case
+ * these tests care about — a missing program, the wrong loader, an authority
+ * that is not the vault, a binary that is not the release, the wrong cluster —
+ * is expressed as fixture data rather than as a devnet that has to be online
+ * and in the right state. No test here opens a socket to the internet, and a
+ * test that cannot reach devnet is therefore a real failure rather than noise.
+ *
+ * `accounts` maps address to `{ owner, executable, data }` where `data` is a
+ * Buffer. Anything not in the map is reported as a non-existent account, which
+ * is what the chain does.
+ */
+export function makeRpcTransport({ genesis = DEVNET_GENESIS, accounts = {}, signatures = {}, programAccounts = {} } = {}) {
+  const calls = [];
+  const transport = async (_endpoint, init) => {
+    const request = JSON.parse(init.body);
+    calls.push(request.method);
+    const respond = (result) => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ jsonrpc: "2.0", id: request.id, result }),
+    });
+
+    switch (request.method) {
+      case "getGenesisHash":
+        return respond(genesis);
+      case "getAccountInfo": {
+        const account = accounts[request.params[0]];
+        if (!account) return respond({ context: { slot: 1 }, value: null });
+        return respond({
+          context: { slot: 1 },
+          value: {
+            lamports: account.lamports ?? 1,
+            owner: account.owner,
+            executable: account.executable ?? false,
+            rentEpoch: 0,
+            data: [Buffer.from(account.data).toString("base64"), "base64"],
+          },
+        });
+      }
+      case "getProgramAccounts":
+        return respond(
+          (programAccounts[request.params[0]] ?? []).map(({ pubkey, account }) => ({
+            pubkey,
+            account: {
+              lamports: account.lamports ?? 1,
+              owner: account.owner ?? request.params[0],
+              executable: false,
+              rentEpoch: 0,
+              data: [Buffer.from(account.data).toString("base64"), "base64"],
+            },
+          })),
+        );
+      case "getSignatureStatuses":
+        return respond({
+          context: { slot: 1 },
+          value: request.params[0].map((signature) => signatures[signature] ?? null),
+        });
+      default:
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            jsonrpc: "2.0",
+            id: request.id,
+            error: { code: -32601, message: `stub rpc: unexpected method ${request.method}` },
+          }),
+        };
+    }
+  };
+  transport.calls = calls;
+  return transport;
+}
+
+/** The Program account the upgradeable loader writes: tag 2, then ProgramData. */
+export function programAccount(programDataAddress, { owner = UPGRADEABLE_LOADER_ID, executable = true } = {}) {
+  const data = Buffer.alloc(36);
+  data.writeUInt32LE(2, 0);
+  Buffer.from(decodeBase58(programDataAddress)).copy(data, 4);
+  return { owner, executable, data };
+}
+
+/**
+ * The ProgramData account: tag 3, the last-deploy slot, an Option<Pubkey>
+ * authority, then the ELF followed by the loader's zero padding.
+ */
+export function programDataAccount({ authority, slot = 497437304, binary = Buffer.alloc(0), padding = 0 }) {
+  const header = Buffer.alloc(45);
+  header.writeUInt32LE(3, 0);
+  header.writeBigUInt64LE(BigInt(slot), 4);
+  if (authority) {
+    header[12] = 1;
+    Buffer.from(decodeBase58(authority)).copy(header, 13);
+  }
+  return {
+    owner: UPGRADEABLE_LOADER_ID,
+    executable: false,
+    data: Buffer.concat([header, Buffer.from(binary), Buffer.alloc(padding)]),
+  };
+}
+
+/** A live devnet PPV Core, as the fixtures want it: correct in every respect. */
+export function deployedCoreFixture({
+  programId = CORE_ID,
+  programDataAddress = CORE_PROGRAM_DATA,
+  authority = VAULT_PDA,
+  binary = Buffer.from("ppv_core release artifact"),
+  padding = 16,
+  slot = 497437304,
+} = {}) {
+  return {
+    binary,
+    accounts: {
+      [programId]: programAccount(programDataAddress),
+      [programDataAddress]: programDataAccount({ authority, slot, binary, padding }),
+    },
+  };
+}
+
+/**
+ * The same stub, in a child process, for tests that run a shell script.
+ *
+ * `spawnSync` blocks this process's event loop, so an in-process server would
+ * never get to answer the script it is meant to be serving.
+ */
+export async function startRpcServerProcess(config) {
+  const fixture = join(mkdtempSync(join(tmpdir(), "ppv-rpc-fixture-")), "fixture.json");
+  const encode = (account) => ({ ...account, data: Buffer.from(account.data).toString("base64") });
+  writeFileSync(
+    fixture,
+    JSON.stringify({
+      ...config,
+      accounts: Object.fromEntries(
+        Object.entries(config.accounts ?? {}).map(([address, account]) => [address, encode(account)]),
+      ),
+      programAccounts: Object.fromEntries(
+        Object.entries(config.programAccounts ?? {}).map(([program, entries]) => [
+          program,
+          entries.map((entry) => ({ ...entry, account: encode(entry.account) })),
+        ]),
+      ),
+    }),
+  );
+
+  const child = spawn("node", [join(REPO, "scripts", "test", "rpc-server.mjs"), fixture], {
+    stdio: ["ignore", "pipe", "inherit"],
+  });
+  const url = await new Promise((resolve, reject) => {
+    let out = "";
+    child.stdout.on("data", (chunk) => {
+      out += chunk;
+      const newline = out.indexOf("\n");
+      if (newline !== -1) resolve(out.slice(0, newline).trim());
+    });
+    child.once("error", reject);
+    child.once("exit", (code) => reject(new Error(`stub rpc server exited with ${code}`)));
+  });
+  return { url, close: () => child.kill("SIGKILL") };
+}
+
+/** A serving JSON-RPC endpoint on loopback, for in-process async callers. */
+export async function startRpcServer(config) {
+  const transport = makeRpcTransport(config);
+  const server = createServer((request, response) => {
+    const chunks = [];
+    request.on("data", (chunk) => chunks.push(chunk));
+    request.on("end", async () => {
+      const stub = await transport("stub", { body: Buffer.concat(chunks).toString("utf8") });
+      const body = JSON.stringify(await stub.json());
+      response.writeHead(stub.status, { "content-type": "application/json" });
+      response.end(body);
+    });
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  return {
+    url: `http://127.0.0.1:${server.address().port}`,
+    close: () => new Promise((resolve) => server.close(resolve)),
   };
 }

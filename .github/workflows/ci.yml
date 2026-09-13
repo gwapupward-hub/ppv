@@ -4,6 +4,20 @@ on:
   push:
     branches: [main, "feat/**"]
   pull_request:
+  # The release-tier invariant gate is expensive enough that running it on every
+  # pull request would push the Anchor job past the point where anyone waits for
+  # it. It runs weekly and on demand instead, so the gate exists and is
+  # runnable before a release rather than being a paragraph in a document.
+  schedule:
+    - cron: "41 5 * * 1"
+  workflow_dispatch:
+    inputs:
+      invariant_tier:
+        description: Invariant budget to run (pr or release)
+        required: false
+        default: release
+        type: choice
+        options: [pr, release]
 
 permissions:
   contents: read
@@ -38,7 +52,9 @@ jobs:
       - run: cargo clippy --workspace --all-targets --locked
 
   anchor:
-    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    if: >-
+      github.event_name == 'pull_request' || github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
     name: Anchor local validator
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -110,10 +126,16 @@ jobs:
         run: npm run test:f1
       # The security-invariant gate runs only after deterministic correctness is
       # established: a property harness pointed at a program whose fixed tests
-      # are already red reports noise, not findings. Budget is the PR tier —
-      # 100 sequences of up to 20 actions across three fixed seeds, with a
-      # floor of 2,000 attempted operations asserted by the suite itself.
+      # are already red reports noise, not findings.
+      #
+      # Budget defaults to the PR tier — 100 sequences of up to 20 actions
+      # across three fixed seeds, with a floor of 2,000 attempted operations
+      # asserted by the suite itself. A scheduled or dispatched run raises it to
+      # the release budget: 200 sequences of up to 32 actions across five seeds,
+      # floor 12,000.
       - name: Security invariants (PPV-P1..P10, property-based)
-        run: npm run test:invariants:pr
+        env:
+          TIER: ${{ inputs.invariant_tier || (github.event_name == 'schedule' && 'release') || 'pr' }}
+        run: npm run "test:invariants:${TIER}"
       - name: Assert the build did not rewrite the lockfile
         run: git diff --exit-code -- Cargo.lock

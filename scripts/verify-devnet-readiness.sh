@@ -26,7 +26,8 @@ set -euo pipefail
 #   PPV_REPO_ROOT                      tree to inspect (tests point this at a fixture)
 
 repo_root="${PPV_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/lib" && pwd)"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+lib_dir="${script_dir}/lib"
 
 mode="deployment-grade"
 case "${1:-}" in
@@ -325,12 +326,13 @@ if [[ "${mode}" == "deployment-grade" ]]; then
   section "Devnet"
 
   expected_genesis="${PPV_DEVNET_GENESIS_HASH:-}"
+  # Chain reads go through JSON-RPC rather than the Solana CLI. The CLI wants a
+  # configured default signer even for read-only commands, so a preflight built
+  # on it fails on exactly the machines that most need to run it.
   if [[ -z "${expected_genesis}" ]]; then
     fail "PPV_DEVNET_GENESIS_HASH is not set, so the target cluster cannot be pinned"
-  elif ! command -v solana >/dev/null 2>&1; then
-    fail "solana CLI unavailable — cannot confirm the RPC is devnet"
   else
-    actual_genesis="$(solana genesis-hash --url "${rpc_url}" 2>/dev/null || true)"
+    actual_genesis="$(node "${script_dir}/query-chain.mjs" genesis "${rpc_url}" 2>/dev/null || true)"
     if [[ -z "${actual_genesis}" ]]; then
       fail "could not read a genesis hash from ${rpc_url}"
     elif [[ "${actual_genesis}" != "${expected_genesis}" ]]; then
@@ -339,14 +341,40 @@ if [[ "${mode}" == "deployment-grade" ]]; then
       pass "${rpc_url} is the configured devnet cluster"
     fi
 
-    # Existing addresses are reported, never overwritten. This workflow deploys
-    # initial programs only; an occupied address means stop and look, not push.
+    # An occupied address is only a problem for a program whose initial
+    # deployment has not happened. A program with a committed devnet release
+    # record is *supposed* to be occupied — PPV Core is — and treating that as a
+    # failure would make this preflight permanently red and block the release of
+    # every other program. Released means: verify it, do not redeploy it.
     for entry in "ppv_core:${CORE_ID}" "ppv_commerce:${COMMERCE_ID}"; do
       program="${entry%%:*}"
       program_id="${entry##*:}"
-      if solana program show "${program_id}" --url "${rpc_url}" >/dev/null 2>&1; then
-        authority="$(solana program show "${program_id}" --url "${rpc_url}" --output json 2>/dev/null \
-          | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{process.stdout.write(JSON.parse(s).authority||'')}catch{process.stdout.write('')}})" || true)"
+
+      released=""
+      for record in "${repo_root}"/deployments/evidence/*.json; do
+        [[ -f "${record}" ]] || continue
+        recorded="$(node -e "
+          const r = require(process.argv[1]);
+          process.stdout.write(r.cluster === 'devnet' ? String(r.program) : '');
+        " "${record}" 2>/dev/null || true)"
+        [[ "${recorded}" == "${program}" ]] && released="${record}"
+      done
+
+      state="$(node "${script_dir}/query-chain.mjs" program "${program_id}" "${rpc_url}" 2>/dev/null || true)"
+      if [[ -z "${state}" ]]; then
+        fail "${program}: could not read ${program_id} from ${rpc_url}"
+        continue
+      fi
+      occupied="$(node -e "process.stdout.write(String(JSON.parse(process.argv[1]).exists))" "${state}")"
+      authority="$(node -e "process.stdout.write(String(JSON.parse(process.argv[1]).upgradeAuthority ?? ''))" "${state}")"
+
+      if [[ -n "${released}" ]]; then
+        if [[ "${occupied}" != "true" ]]; then
+          fail "${program} has a release record (${released}) but no program at ${program_id}"
+        else
+          pass "${program} is already released at ${program_id} (authority ${authority:-unknown}) — verify, never redeploy"
+        fi
+      elif [[ "${occupied}" == "true" ]]; then
         fail "${program} already exists at ${program_id} (authority ${authority:-unknown}) — initial deployment must not overwrite it"
       else
         pass "${program} address ${program_id} is unoccupied and ready for initial deployment"
