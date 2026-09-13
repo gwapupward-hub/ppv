@@ -17,9 +17,10 @@ import {
   decodeCommerceAgreementAccount,
   decodeCoreProofAccount,
   decodeEventForProgram,
+  encodeBase58,
   hashDocumentV1,
 } from "@gwap/ppv-sdk";
-import { extractPpvEvents } from "@gwap/ppv-indexer";
+import { extractPpvEvents, type RpcTransaction } from "@gwap/ppv-indexer";
 
 /**
  * PPV Core ↔ Commerce, as one protocol history.
@@ -81,7 +82,10 @@ async function fund(connection: Connection, who: PublicKey): Promise<void> {
 }
 
 /** The raw transaction shape the indexer reads, straight from the RPC. */
-async function fetchTransaction(connection: Connection, signature: string): Promise<any> {
+async function fetchTransaction(
+  connection: Connection,
+  signature: string,
+): Promise<RpcTransaction> {
   for (let attempt = 0; attempt < 40; attempt += 1) {
     const tx = await connection.getTransaction(signature, {
       commitment: "confirmed",
@@ -101,6 +105,13 @@ async function fetchTransaction(connection: Connection, signature: string): Prom
               .keySegments()
               .flat()
               .map((key) => key.toBase58()),
+            // Carried through rather than stubbed: the extractor must be given
+            // the real top-level instructions to be trusted when it ignores them.
+            instructions: tx.transaction.message.compiledInstructions.map((ix) => ({
+              programIdIndex: ix.programIdIndex,
+              accounts: ix.accountKeyIndexes,
+              data: encodeBase58(ix.data),
+            })),
           },
         },
         meta: {
@@ -448,7 +459,7 @@ describe("PPV Core ↔ Commerce integration", () => {
     // And at the decoder: Commerce event bytes decoded as Core throw rather
     // than returning a plausible-looking event of the wrong kind.
     const tx = await fetchTransaction(connection, createSignature);
-    const inner = tx.meta.innerInstructions[0].instructions[0];
+    const inner = tx.meta!.innerInstructions![0]!.instructions[0]!;
     const { decodeBase58 } = await import("@gwap/ppv-sdk");
     assert.throws(
       () => decodeEventForProgram("ppv_core", decodeBase58(inner.data)),
@@ -465,7 +476,7 @@ describe("PPV Core ↔ Commerce integration", () => {
     const transactions = await Promise.all(signatures.map((s) => fetchTransaction(connection, s)));
 
     /** The whole history, from transactions alone — no database, no local state. */
-    const reconstruct = (txs: any[]) => {
+    const reconstruct = (txs: RpcTransaction[]) => {
       const events = txs.flatMap((tx) => extractPpvEvents(tx, { programs }));
       // Deduplicated on the chain coordinates that identify an event, so a
       // duplicate delivery of the same transaction cannot double-count.
@@ -534,7 +545,10 @@ describe("PPV Core ↔ Commerce integration", () => {
     // A failed transaction committed nothing, so it is not history and must
     // produce no events — whatever its instructions claimed.
     const tx = await fetchTransaction(connection, createSignature);
-    const failed = { ...tx, meta: { ...tx.meta, err: { InstructionError: [0, "Custom"] } } };
+    const failed: RpcTransaction = {
+      ...tx,
+      meta: { ...tx.meta!, err: { InstructionError: [0, "Custom"] } },
+    };
     assert.deepEqual(extractPpvEvents(failed, { programs }), []);
   });
 
@@ -559,9 +573,9 @@ describe("PPV Core ↔ Commerce integration", () => {
     assert.notEqual(authorityIndex, -1, "the event authority must appear in the account keys");
     keys[authorityIndex] = Keypair.generate().publicKey.toBase58();
 
-    const tampered = {
+    const tampered: RpcTransaction = {
       ...tx,
-      transaction: { ...tx.transaction, message: { accountKeys: keys } },
+      transaction: { ...tx.transaction, message: { ...tx.transaction.message, accountKeys: keys } },
     };
     assert.deepEqual(extractPpvEvents(tampered, { programs }), []);
   });

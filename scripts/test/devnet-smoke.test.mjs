@@ -345,6 +345,7 @@ import { tmpdir } from "node:os";
 import {
   LIFECYCLE_COVERAGE,
   checkDeployedBinary,
+  coverageLabel,
   releasedPrograms,
   runCoreReadPhase,
   runSdkTargetingPhase,
@@ -468,22 +469,51 @@ test("coverage never reports a devnet claim for something only a validator prove
   const classes = new Set(LIFECYCLE_COVERAGE.map((entry) => entry.coverage));
   assert.deepEqual(
     [...classes].sort(),
-    ["live", "need-commerce", "need-escrow", "need-wallet", "validator"],
+    ["live", "need-wallet", "validator"],
     "every step must declare exactly one of the known coverage classes",
   );
-  // Everything that needs escrow or commerce must say so rather than being
-  // folded into a general "not covered" bucket.
   for (const entry of LIFECYCLE_COVERAGE) {
     assert.ok(entry.how.length > 0, `${entry.step} must say how it is covered`);
-    if (entry.coverage === "need-escrow") assert.match(entry.how, /escrow/);
-    if (entry.coverage === "need-commerce") assert.match(entry.how, /commerce/);
-  }
-  // Nothing that touches custody may claim to be live-verified in this release.
-  for (const entry of LIFECYCLE_COVERAGE) {
-    if (/fund|settle|refund|milestone|dispute|approval|bounty/.test(entry.step)) {
-      assert.equal(entry.coverage, "need-escrow", `${entry.step} must not claim live coverage`);
+    if (entry.requires) {
+      assert.match(entry.requires, /^ppv_(core|commerce|escrow)$/, `${entry.step} requires a program`);
     }
   }
+  // Nothing that touches custody may be reported without escrow being live.
+  for (const entry of LIFECYCLE_COVERAGE) {
+    if (/fund|settle|refund|milestone|dispute|approval|bounty/.test(entry.step)) {
+      assert.equal(entry.requires, "ppv_escrow", `${entry.step} must depend on escrow`);
+    }
+  }
+});
+
+test("a step's label follows what is released, so it cannot go stale", () => {
+  // The failure this prevents: a row still reading NOT TESTABLE UNTIL COMMERCE
+  // in the sprint that deployed Commerce, because the table was hand-written.
+  const coreOnly = new Set(["ppv_core"]);
+  const both = new Set(["ppv_core", "ppv_commerce"]);
+
+  const commerceStep = LIFECYCLE_COVERAGE.find((e) => e.step === "ppv_commerce permanent identity");
+  assert.equal(coverageLabel(commerceStep, coreOnly), "NOT TESTABLE UNTIL COMMERCE");
+  assert.equal(coverageLabel(commerceStep, both), "LIVE VERIFIED");
+
+  // Once Commerce is released, nothing may still claim to be waiting for it.
+  const labels = LIFECYCLE_COVERAGE.map((entry) => coverageLabel(entry, both));
+  assert.equal(
+    labels.filter((label) => label.includes("UNTIL COMMERCE")).length,
+    0,
+    "no step may remain untestable-until-commerce once Commerce is released",
+  );
+
+  // Escrow is not released in this sprint, and its steps must keep saying so.
+  const escrowSteps = LIFECYCLE_COVERAGE.filter((entry) => entry.requires === "ppv_escrow");
+  assert.ok(escrowSteps.length > 0);
+  for (const entry of escrowSteps) {
+    assert.equal(coverageLabel(entry, both), "NOT TESTABLE UNTIL ESCROW");
+  }
+
+  // A funded-wallet step is reported as not run, never as verified.
+  const walletStep = LIFECYCLE_COVERAGE.find((e) => e.coverage === "need-wallet");
+  assert.match(coverageLabel(walletStep, both), /NOT RUN — REQUIRES FUNDED DEVNET TEST WALLET/);
 });
 
 test("the deployed bytes are checked against the release record, not assumed", async () => {

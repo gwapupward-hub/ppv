@@ -58,37 +58,71 @@ const ENCODER = new TextEncoder();
  */
 export const LIFECYCLE_COVERAGE = [
   { step: "devnet cluster identity", coverage: "live", how: "getGenesisHash equals the devnet genesis" },
-  { step: "ppv_core permanent identity", coverage: "live", how: "program account at the permanent id" },
-  { step: "ppv_core executable + loader owner", coverage: "live", how: "account flags and owner read from chain" },
-  { step: "ppv_core ProgramData", coverage: "live", how: "resolved from the Program account and read" },
-  { step: "ppv_core Squads upgrade authority", coverage: "live", how: "ProgramData authority equals the vault" },
-  { step: "ppv_core deployed bytes", coverage: "live", how: "live ProgramData bytes hashed and compared to the release record" },
-  { step: "ppv_core account layout", coverage: "live", how: "ProofRecord discriminator and layout over live program accounts" },
-  { step: "SDK PDA derivation for ppv_core", coverage: "live", how: "proof PDAs derived under the permanent Core id" },
-  { step: "SDK ppv_core instruction targeting", coverage: "live", how: "built instructions address the permanent Core id" },
-  { step: "proof creation", coverage: "need-wallet", how: "ppv_core create_proof; needs PPV_SMOKE_WALLET" },
-  { step: "proof revocation", coverage: "need-wallet", how: "ppv_core revoke_proof; needs PPV_SMOKE_WALLET" },
-  { step: "contract / proof binding", coverage: "validator", how: "canonical hash vs on-chain content and terms hashes" },
+
+  { step: "ppv_core permanent identity", requires: "ppv_core", coverage: "live", how: "program account at the permanent id" },
+  { step: "ppv_core executable + loader owner", requires: "ppv_core", coverage: "live", how: "account flags and owner read from chain" },
+  { step: "ppv_core ProgramData", requires: "ppv_core", coverage: "live", how: "resolved from the Program account and read" },
+  { step: "ppv_core Squads upgrade authority", requires: "ppv_core", coverage: "live", how: "ProgramData authority equals the vault" },
+  { step: "ppv_core deployed bytes", requires: "ppv_core", coverage: "live", how: "live ProgramData bytes hashed and compared to the release record" },
+  { step: "ppv_core account layout", requires: "ppv_core", coverage: "live", how: "ProofRecord discriminator and layout over live program accounts" },
+  { step: "SDK PDA derivation for ppv_core", requires: "ppv_core", coverage: "live", how: "proof PDAs derived under the permanent Core id" },
+  { step: "SDK ppv_core instruction targeting", requires: "ppv_core", coverage: "live", how: "built instructions address the permanent Core id" },
+  { step: "proof creation", requires: "ppv_core", coverage: "need-wallet", how: "ppv_core create_proof; needs PPV_SMOKE_WALLET" },
+  { step: "proof revocation", requires: "ppv_core", coverage: "need-wallet", how: "ppv_core revoke_proof; needs PPV_SMOKE_WALLET" },
+
+  { step: "ppv_commerce permanent identity", requires: "ppv_commerce", coverage: "live", how: "program account at the permanent id" },
+  { step: "ppv_commerce executable + loader owner", requires: "ppv_commerce", coverage: "live", how: "account flags and owner read from chain" },
+  { step: "ppv_commerce ProgramData", requires: "ppv_commerce", coverage: "live", how: "resolved from the Program account and read" },
+  { step: "ppv_commerce Squads upgrade authority", requires: "ppv_commerce", coverage: "live", how: "ProgramData authority equals the vault" },
+  { step: "ppv_commerce deployed bytes", requires: "ppv_commerce", coverage: "live", how: "live ProgramData bytes hashed and compared to the release record" },
+  { step: "ppv_commerce account layout", requires: "ppv_commerce", coverage: "live", how: "Agreement discriminator and layout over live program accounts" },
+  { step: "SDK PDA derivation for ppv_commerce", requires: "ppv_commerce", coverage: "live", how: "agreement PDAs derived under the permanent Commerce id" },
+  { step: "SDK ppv_commerce instruction targeting", requires: "ppv_commerce", coverage: "live", how: "built instructions address the permanent Commerce id" },
+  { step: "agreement creation", requires: "ppv_commerce", coverage: "need-wallet", how: "ppv_commerce create_agreement; needs PPV_SMOKE_WALLET" },
+  { step: "independent two-party acceptance", requires: "ppv_commerce", coverage: "need-wallet", how: "two ppv_commerce sign_agreement transactions from distinct wallets" },
+  { step: "cancellation", requires: "ppv_commerce", coverage: "need-wallet", how: "ppv_commerce cancel_agreement; needs PPV_SMOKE_WALLET" },
+
+  { step: "Core/Commerce identity separation", coverage: "live", how: "distinct permanent ids, distinct loader-owned accounts, distinct event authorities" },
+  { step: "cross-program account decoding separation", coverage: "validator", how: "each decoder refuses the other program's bytes" },
+  { step: "cross-program event attribution", coverage: "validator", how: "extractPpvEvents attributes by emitting program, not by discriminator" },
+  { step: "canonical terms-hash binding", coverage: "validator", how: "canonical hash vs the executed agreement's committed terms hash" },
+  { step: "Core proof bound to a Commerce agreement", coverage: "validator", how: "proof content hash equals the agreement terms hash, context names the agreement" },
+  { step: "combined history reconstruction", coverage: "validator", how: "SDK/indexer rebuild agreement and proof history from transactions alone" },
+  { step: "idempotent and order-independent replay", coverage: "validator", how: "duplicate and reversed delivery reconstruct the same history" },
   { step: "normalized reputation event", coverage: "validator", how: "SDK normalizeChainEvent over the emitted events" },
   { step: "receipt / credential derivation", coverage: "validator", how: "SDK receipts and seal state from those events" },
-  { step: "agreement creation", coverage: "need-commerce", how: "ppv_commerce create_agreement" },
-  { step: "cancellation", coverage: "need-commerce", how: "ppv_commerce cancel_agreement" },
-  { step: "funding", coverage: "need-escrow", how: "requires ppv_escrow custody" },
-  { step: "approval", coverage: "need-escrow", how: "requires ppv_escrow approve_proof" },
-  { step: "milestone release", coverage: "need-escrow", how: "requires ppv_escrow milestones" },
-  { step: "settlement", coverage: "need-escrow", how: "requires ppv_escrow settle" },
-  { step: "refund", coverage: "need-escrow", how: "requires ppv_escrow refund" },
-  { step: "concession / dispute", coverage: "need-escrow", how: "requires ppv_escrow disputes" },
-  { step: "bounty counterparty selection", coverage: "need-escrow", how: "requires ppv_escrow bounties" },
+
+  { step: "funding", requires: "ppv_escrow", coverage: "live", how: "requires ppv_escrow custody" },
+  { step: "approval", requires: "ppv_escrow", coverage: "live", how: "requires ppv_escrow approve_proof" },
+  { step: "milestone release", requires: "ppv_escrow", coverage: "live", how: "requires ppv_escrow milestones" },
+  { step: "settlement", requires: "ppv_escrow", coverage: "live", how: "requires ppv_escrow settle" },
+  { step: "refund", requires: "ppv_escrow", coverage: "live", how: "requires ppv_escrow refund" },
+  { step: "concession / dispute", requires: "ppv_escrow", coverage: "live", how: "requires ppv_escrow disputes" },
+  { step: "bounty counterparty selection", requires: "ppv_escrow", coverage: "live", how: "requires ppv_escrow bounties" },
 ];
 
 const COVERAGE_LABELS = Object.freeze({
   live: "LIVE VERIFIED",
   validator: "LOCAL-VALIDATOR VERIFIED",
-  "need-escrow": "NOT TESTABLE UNTIL ESCROW",
-  "need-commerce": "NOT TESTABLE UNTIL COMMERCE",
-  "need-wallet": "NOT RUN — NEEDS A FUNDED DEVNET WALLET",
+  "need-wallet": "NOT RUN — REQUIRES FUNDED DEVNET TEST WALLET",
 });
+
+/**
+ * What a step's coverage actually is, given which programs are released.
+ *
+ * Derived rather than written down. A step that needs a program nobody has
+ * deployed is "not testable until" that program, no matter what it would prove
+ * once the program exists — and the moment the program's release record lands,
+ * the same row starts telling the truth about a live check without anyone
+ * editing this file. A hand-maintained table is exactly how a stale
+ * "NOT TESTABLE UNTIL COMMERCE" survives the sprint that deployed Commerce.
+ */
+export function coverageLabel(entry, releasedPrograms) {
+  if (entry.requires && !releasedPrograms.has(entry.requires)) {
+    return `NOT TESTABLE UNTIL ${entry.requires.replace("ppv_", "").toUpperCase()}`;
+  }
+  return COVERAGE_LABELS[entry.coverage] ?? entry.coverage;
+}
 
 export class SmokeFailure extends Error {
   constructor(message) {
@@ -292,6 +326,118 @@ export async function runCoreReadPhase(client, programId = PERMANENT_PROGRAM_IDS
 }
 
 /**
+ * Live reads of the accounts ppv_commerce owns.
+ *
+ * Same shape as the ppv_core read phase and for the same reason: the program's
+ * own account space, read back and decoded through the declared layout. An
+ * agreement that exists and does not decode is a layout problem; none existing
+ * yet is a fact about devnet.
+ */
+export async function runCommerceReadPhase(client, programId = PERMANENT_PROGRAM_IDS.ppv_commerce) {
+  process.stdout.write("\nppv_commerce account reads\n");
+  const { COMMERCE_AGREEMENT_DISCRIMINATOR, decodeCommerceAgreementAccount } = await import(
+    "@gwap/ppv-sdk"
+  );
+
+  const accounts = await client.call("getProgramAccounts", [
+    programId,
+    {
+      encoding: "base64",
+      commitment: "confirmed",
+      filters: [{ memcmp: { offset: 0, bytes: encodeBase58(COMMERCE_AGREEMENT_DISCRIMINATOR) } }],
+    },
+  ]);
+
+  const agreements = [];
+  for (const entry of accounts ?? []) {
+    const bytes = Buffer.from(entry.account.data[0], "base64");
+    try {
+      agreements.push({ address: entry.pubkey, ...decodeCommerceAgreementAccount(bytes) });
+    } catch (error) {
+      record(`ppv_commerce: agreement ${entry.pubkey} decodes`, false, error.message);
+      throw new SmokeFailure(
+        `live ppv_commerce account ${entry.pubkey} does not decode: ${error.message}`,
+      );
+    }
+  }
+  record(
+    "ppv_commerce: live program accounts read and decoded",
+    true,
+    agreements.length === 0
+      ? "no Agreement accounts exist on devnet yet"
+      : `${agreements.length} Agreement account(s), all decoded`,
+  );
+
+  // Every executed agreement must carry two distinct accepting signers. This is
+  // the property that makes an executed agreement mean something, checked
+  // against whatever devnet actually holds rather than against a fixture.
+  for (const agreement of agreements) {
+    if (agreement.state !== "Executed") continue;
+    if (!agreement.signatureA || !agreement.signatureB) {
+      throw new SmokeFailure(`executed agreement ${agreement.address} is missing a signature`);
+    }
+    if (agreement.signatureA.signer === agreement.signatureB.signer) {
+      throw new SmokeFailure(
+        `SECURITY: executed agreement ${agreement.address} was accepted twice by ${agreement.signatureA.signer}`,
+      );
+    }
+    if (
+      agreement.signatureA.termsHashSigned !== agreement.termsHash ||
+      agreement.signatureB.termsHashSigned !== agreement.termsHash
+    ) {
+      throw new SmokeFailure(
+        `SECURITY: executed agreement ${agreement.address} has a signature on different terms`,
+      );
+    }
+  }
+  const executed = agreements.filter((a) => a.state === "Executed").length;
+  if (executed > 0) {
+    record(
+      "ppv_commerce: every executed agreement has two distinct signers on the same terms",
+      true,
+      `${executed} executed`,
+    );
+  }
+  return agreements;
+}
+
+/**
+ * That the two programs are separable on chain, not only in the decoders.
+ *
+ * Distinct permanent ids, and distinct `__event_authority` PDAs — the accounts
+ * that make an event CPI attributable. If these ever coincided, every
+ * cross-program separation property downstream would be decoration.
+ */
+export async function runSeparationPhase(encodeBase58Sdk) {
+  process.stdout.write("\nCore / Commerce separation\n");
+  const { PublicKey } = await import("@solana/web3.js");
+  const seed = new TextEncoder().encode("__event_authority");
+
+  const core = PERMANENT_PROGRAM_IDS.ppv_core;
+  const commerce = PERMANENT_PROGRAM_IDS.ppv_commerce;
+  if (core === commerce) throw new SmokeFailure("the two permanent program ids are identical");
+  record("permanent program ids are distinct", true, `${core} / ${commerce}`);
+
+  const authorityOf = (id) =>
+    PublicKey.findProgramAddressSync([seed], new PublicKey(id))[0].toBase58();
+  const coreAuthority = authorityOf(core);
+  const commerceAuthority = authorityOf(commerce);
+  if (coreAuthority === commerceAuthority) {
+    throw new SmokeFailure("both programs derive the same event authority");
+  }
+  record("event authorities are distinct", true, `${coreAuthority} / ${commerceAuthority}`);
+
+  const { COMMERCE_AGREEMENT_DISCRIMINATOR } = await import("@gwap/ppv-sdk");
+  const coreDisc = PROOF_RECORD_DISCRIMINATOR.toString("hex");
+  const commerceDisc = Buffer.from(COMMERCE_AGREEMENT_DISCRIMINATOR).toString("hex");
+  if (coreDisc === commerceDisc) {
+    throw new SmokeFailure("ProofRecord and Agreement share an account discriminator");
+  }
+  record("account discriminators are distinct", true, `${coreDisc} / ${commerceDisc}`);
+  return { coreAuthority, commerceAuthority };
+}
+
+/**
  * The SDK's view of ppv_core, checked against the permanent identity.
  *
  * Derivation and instruction targeting are deterministic, so this needs no
@@ -337,11 +483,53 @@ export async function runSdkTargetingPhase(programId = PERMANENT_PROGRAM_IDS.ppv
   return { proof: proof.toBase58(), programId };
 }
 
-export function reportCoverage(notReleased = []) {
+/** The same check for ppv_commerce: derivation and targeting under its own id. */
+export async function runCommerceTargetingPhase(programId = PERMANENT_PROGRAM_IDS.ppv_commerce) {
+  process.stdout.write("\nSDK targeting — ppv_commerce\n");
+  const { agreementAddress, createAgreementInstruction, devnetFixtures, instructionDiscriminator } =
+    await import("./devnet-lifecycle.mjs");
+  const { Keypair } = await import("@solana/web3.js");
+
+  const fixtures = devnetFixtures();
+  const partyA = Keypair.generate().publicKey;
+  const partyB = Keypair.generate().publicKey;
+  const agreement = agreementAddress(partyA, fixtures.agreementId);
+  const instruction = createAgreementInstruction({
+    partyA,
+    partyB,
+    agreementId: fixtures.agreementId,
+    contentHash: fixtures.contentHash,
+    termsHash: fixtures.termsHash,
+    expiresAt: Math.floor(Date.now() / 1000) + 3600,
+  });
+
+  if (instruction.programId.toBase58() !== programId) {
+    throw new SmokeFailure(
+      `SDK create_agreement targets ${instruction.programId.toBase58()}, not the permanent ${programId}`,
+    );
+  }
+  record("ppv_commerce: SDK instruction targets the permanent program id", true, programId);
+
+  const derived = instruction.keys[1].pubkey.toBase58();
+  if (derived !== agreement.toBase58()) {
+    throw new SmokeFailure(`agreement PDA disagrees with the instruction account: ${derived}`);
+  }
+  record("ppv_commerce: agreement PDA derives under the permanent program id", true, derived);
+
+  const discriminator = instruction.data.subarray(0, 8);
+  if (!discriminator.equals(instructionDiscriminator("create_agreement"))) {
+    throw new SmokeFailure("create_agreement discriminator is not Anchor's for that instruction name");
+  }
+  record("ppv_commerce: instruction discriminator is Anchor's for create_agreement", true);
+  return { agreement: agreement.toBase58(), programId };
+}
+
+export function reportCoverage(notReleased = [], released = []) {
   process.stdout.write("\nCoverage — what this run actually verified\n");
-  const width = Math.max(...Object.values(COVERAGE_LABELS).map((l) => l.length));
-  for (const entry of LIFECYCLE_COVERAGE) {
-    const label = COVERAGE_LABELS[entry.coverage] ?? entry.coverage;
+  const releasedSet = new Set(released);
+  const rows = LIFECYCLE_COVERAGE.map((entry) => [coverageLabel(entry, releasedSet), entry]);
+  const width = Math.max(...rows.map(([label]) => label.length));
+  for (const [label, entry] of rows) {
     process.stdout.write(`  ${label.padEnd(width)}  ${entry.step} — ${entry.how}\n`);
   }
   for (const name of notReleased) {
@@ -373,8 +561,13 @@ async function main() {
   }
   await runCoreReadPhase(client);
   await runSdkTargetingPhase();
+  if (released.ppv_commerce) {
+    await runCommerceReadPhase(client);
+    await runCommerceTargetingPhase();
+  }
+  await runSeparationPhase(encodeBase58Sdk);
 
-  reportCoverage(notReleased);
+  reportCoverage(notReleased, Object.keys(released));
 
   if (identityOnly) {
     process.stdout.write("\nLive Core verification passed. No transaction was sent (--identity-only).\n");
