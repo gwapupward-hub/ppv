@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   ESCROW_AGREEMENT_ACCOUNT_DISCRIMINATOR,
@@ -195,4 +198,46 @@ test("an agreement account is not decoded as a proof", () => {
     () => decodeProofAccount(encodeAgreementAccount(FIXTURE)),
     /not a ppv_escrow Proof account/,
   );
+});
+
+/**
+ * Why the strict trailing-bytes check is correct *here* and was a bug in
+ * `ppv_commerce`.
+ *
+ * Borsh encodes `Option::None` as one tag byte, while Anchor's `INIT_SPACE`
+ * reserves room for the tag *and* the payload. An account with an `Option`
+ * field is therefore shorter on the wire than the space it occupies, and its
+ * tail is never written — so a decoder requiring nothing to remain rejects
+ * every account that is not fully populated. That is exactly what made every
+ * pending Commerce agreement undecodable until Sprint 2 fixed it.
+ *
+ * No `ppv_escrow` account has an `Option` field. Every one of them is fixed
+ * width, borsh fills the allocation exactly, and `remaining !== 0` is the right
+ * check. This test pins the premise rather than the conclusion: add an `Option`
+ * to an escrow account and it fails here, before the decoder starts refusing
+ * real accounts on chain.
+ */
+test("no ppv_escrow account has an Option field, which is what makes the strict decoder correct", () => {
+  const root = fileURLToPath(new URL("../../programs/ppv_escrow/src/state/", import.meta.url));
+  const accounts = ["agreement.rs", "milestone.rs", "proof.rs"];
+
+  for (const file of accounts) {
+    const source = readFileSync(join(root, file), "utf8");
+    // The `#[account]` struct only — helper types and test fixtures below it
+    // are free to use anything.
+    const struct = source.match(/#\[account\]\s*#\[derive\(InitSpace\)\]\s*pub struct \w+ \{([\s\S]*?)\n\}/);
+    assert.ok(struct, `${file} declares no #[account] struct`);
+    assert.ok(
+      !/\bOption</.test(struct[1]),
+      `${file} has an Option field: the SDK's strict trailing-bytes check will ` +
+        `reject every account whose Option is None, exactly as it did for ppv_commerce`,
+    );
+  }
+
+  // And the decoders really are strict, so the premise above is load-bearing.
+  const decoder = readFileSync(
+    fileURLToPath(new URL("../src/escrow/accounts.ts", import.meta.url)),
+    "utf8",
+  );
+  assert.match(decoder, /reader\.remaining !== 0/);
 });
