@@ -110,6 +110,25 @@ test("the property suite emits the coverage the aggregator sums", () => {
   assert.match(suite, /after\(function \(\) \{[\s\S]*?PPV_INVARIANT_COVERAGE_OUT/);
 });
 
+test("the destination the generator favours depends on the instruction", () => {
+  // A settlement pays the seller and a refund pays the buyer. One canonical
+  // destination for every kind makes the correct destination for the other a
+  // one-in-fourteen draw: the first release run of the extended suite produced
+  // 151 settlements and 8 refunds from the same 15,337 operations. Eight
+  // successes clear a coverage floor and prove very little about PPV-D3/D4.
+  const generators = readFileSync(
+    join(REPO, "tests", "invariants", "generators.ts"),
+    "utf8",
+  );
+  assert.match(generators, /function destinationArbitrary\(kind: ActionKind\)/);
+  assert.match(generators, /kind === "refund" \? "buyer" : "seller"/);
+  // The account variant must be drawn per kind, or the kind cannot inform it.
+  assert.match(generators, /kindArbitrary\.chain\(\(kind\)/);
+  // And the wrong-destination attack must still be generated: the weighting
+  // moved, the option set did not.
+  assert.match(generators, /\.filter\(\(ref\) => ref !== canonical\)/);
+});
+
 test("the PR tier spends the adversarial budget the docs claim", () => {
   const tier = GATE.split(/^\s+pr\)$/m)[1]?.split(/;;/)[0] ?? "";
   assert.match(tier, /PPV_INVARIANT_SEQUENCES:=100\b/, "PR tier must run 100 sequences");

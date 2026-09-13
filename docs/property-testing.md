@@ -193,6 +193,31 @@ this document:
  "postTerminalAttempts":6180,"sequences":1000}
 ```
 
+### What a coverage floor does not tell you
+
+When disputes and refunds joined the model, the first release run produced:
+
+```json
+{"fundings":456,"completions":204,"settlements":151,"cancellations":239,
+ "refunds":8,"disputes":260,"resolutions":100}
+```
+
+Every floor passed. Eight successful refunds out of 15,337 operations is still
+close to no evidence about `PPV-D3` and `PPV-D4`.
+
+The cause was in the generator rather than in the program: `destination` was
+weighted ten-to-one toward the seller's account, which is the canonical
+destination for a settlement and the *wrong* one for a refund. A refund
+therefore succeeded only on the roughly one draw in fourteen that picked the
+buyer. The fix is `destinationArbitrary(kind)` — the favoured destination is
+chosen per instruction, the deviations are unchanged, and the wrong-destination
+attack on a refund is still generated.
+
+The lesson generalises past this one weight. A floor of "greater than zero"
+catches a family that vanished; it does not catch one that is present and
+barely exercised. When a family's success count is an order of magnitude below
+its siblings', the generator is the first place to look.
+
 About 10% of generated actions are accepted and about 36% present a correctly
 formed account in the wrong relationship — the balance the generator weights
 exist to hold: deep enough to reach `Settled` inside the budget, adversarial
