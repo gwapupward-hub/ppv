@@ -1,5 +1,6 @@
 import * as anchor from "@coral-xyz/anchor";
 import assert from "node:assert/strict";
+import { writeFileSync } from "node:fs";
 import * as fc from "fast-check";
 
 import type { GeneratedAction } from "./actions";
@@ -28,6 +29,12 @@ import { emptyCoverage, InvariantRunner } from "./runner";
  *   PPV_INVARIANT_SEED             one seed, for replaying a counterexample
  *   PPV_INVARIANT_PATH             fast-check shrink path, for exact replay
  *   PPV_INVARIANT_MIN_OPERATIONS   floor this execution must clear
+ *   PPV_INVARIANT_COVERAGE_OUT     file to write this execution's coverage to
+ *
+ * One execution is not necessarily one gate. A local validator degrades under
+ * sustained load, so the release tier runs one seed per validator and sums the
+ * coverage files afterwards; `scripts/verify-invariants.sh` owns that loop and
+ * asserts the tier's full floor across it.
  */
 
 function envInt(name: string, fallback: number): number {
@@ -173,5 +180,21 @@ describe("PPV protocol invariants (property-based)", function () {
       "no wrong-relationship account was ever refused — PPV-P9 was never exercised",
     );
     console.log(`    coverage: ${JSON.stringify(coverage)}`);
+  });
+
+  // Written whatever the outcome, so an aggregate over several executions
+  // counts what actually ran rather than what was supposed to. A gate that
+  // loses the losing run's numbers cannot report its own budget honestly.
+  after(function () {
+    const out = process.env.PPV_INVARIANT_COVERAGE_OUT?.trim();
+    if (!out) return;
+    writeFileSync(
+      out,
+      JSON.stringify(
+        { ...coverage, config: { sequences: SEQUENCES, actions: ACTIONS, seeds: SEEDS } },
+        null,
+        2,
+      ),
+    );
   });
 });

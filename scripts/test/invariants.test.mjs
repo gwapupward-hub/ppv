@@ -67,6 +67,49 @@ test("the gate runs against a real local validator, never a mock", () => {
   assert.doesNotMatch(GATE, /--skip-deploy/);
 });
 
+test("each seed gets its own validator, and none is reused", () => {
+  // The release budget killed a single shared validator part way through: it
+  // kept answering RPC and refused every transaction with "Blockhash not
+  // found", so two seeds attempted zero operations. Restarting per seed is
+  // what makes the budget spendable; nothing about the budget changed.
+  assert.match(GATE, /for seed in "\$\{run_seeds\[@\]\}"/);
+  assert.match(GATE, /start_validator "\$\{ledger\}"/);
+  assert.match(GATE, /stop_validator/);
+  assert.match(GATE, /ledger="\$\{workdir\}\/test-ledger-\$\{seed\}"/);
+  // A per-seed ledger that is never removed reintroduces the disk growth the
+  // restart exists to avoid.
+  assert.match(GATE, /rm -rf "\$\{ledger\}"/);
+});
+
+test("the run's budget is asserted over every seed, not per process", () => {
+  // No single execution can assert a floor it only spends a fifth of.
+  assert.match(GATE, /PPV_INVARIANT_COVERAGE_OUT="\$\{coverage_dir\}\/\$\{seed\}\.json"/);
+  assert.match(
+    GATE,
+    /node scripts\/sum-invariant-coverage\.mjs[\s\\]+"\$\{coverage_dir\}" "\$\{PPV_INVARIANT_MIN_OPERATIONS\}" "\$\{run_seeds\[@\]\}"/,
+  );
+  // The aggregator must run before the green line, or the line means nothing.
+  assert.ok(
+    GATE.indexOf("sum-invariant-coverage.mjs") < GATE.indexOf("SECURITY_INVARIANTS_GREEN"),
+    "the budget is summed after the gate already declared itself green",
+  );
+});
+
+test("a dead validator is diagnosed rather than reported as a protocol failure", () => {
+  assert.match(GATE, /dump_validator_state "\$\{ledger\}"/);
+  assert.match(GATE, /validator\.log/);
+});
+
+test("the property suite emits the coverage the aggregator sums", () => {
+  const suite = readFileSync(
+    join(REPO, "tests", "invariants", "protocol.invariant.ts"),
+    "utf8",
+  );
+  assert.match(suite, /PPV_INVARIANT_COVERAGE_OUT/);
+  // In `after`, so a failing seed still reports what it spent.
+  assert.match(suite, /after\(function \(\) \{[\s\S]*?PPV_INVARIANT_COVERAGE_OUT/);
+});
+
 test("the PR tier spends the adversarial budget the docs claim", () => {
   const tier = GATE.split(/^\s+pr\)$/m)[1]?.split(/;;/)[0] ?? "";
   assert.match(tier, /PPV_INVARIANT_SEQUENCES:=100\b/, "PR tier must run 100 sequences");

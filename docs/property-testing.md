@@ -139,10 +139,33 @@ PPV_INVARIANT_SEED=20260912 npm run test:invariants:seed   # replay
 Sequence length is *generated*, not fixed, because a counterexample has to be
 able to shrink toward the shortest sequence that still violates the property.
 A generated sequence therefore averages about half its maximum. The budget is
-consequently stated and enforced as **total attempted operations**: the suite
+consequently stated and enforced as **total attempted operations**: the gate
 counts what it actually ran and fails if it did not clear the floor. The PR tier
 runs three seeds so that the 2,000-operation minimum is cleared with margin
 rather than by luck.
+
+### One validator per seed
+
+The gate runs each seed against its own `solana-test-validator`, resetting the
+ledger between seeds, and sums the per-seed coverage afterwards
+(`scripts/sum-invariant-coverage.mjs`) to assert the tier's floor.
+
+This is not a budget concession — same seeds, same sequence count, same sequence
+length, same floor. It exists because a single validator instance does not
+survive the release budget everywhere the gate runs. On a GitHub-hosted runner,
+one instance took roughly 7,500 transactions over about ten minutes and then
+stayed up, kept answering RPC, and rejected every subsequent transaction with
+`Blockhash not found` — so the two seeds that had not yet started attempted zero
+operations. The PR budget finishes below that ceiling, which is why the release
+tier was the first to find it. The warm-machine numbers below were measured
+before the split and are unchanged by it.
+
+Because the budget is now spent across several processes, no single one can
+assert it, and the summing step is therefore part of the gate rather than a
+report: it fails if the total falls below the floor, if a state the invariants
+are about was never reached, **or if any seed produced no coverage file at all**.
+That last case is the one that matters — a seed that never ran is exactly what a
+sum over the files that happen to exist would otherwise hide.
 
 Every knob is overridable:
 
