@@ -53,10 +53,13 @@ schedule and to `workflow_dispatch` on the CI workflow, and **has not been run
 in this sprint** — run it deliberately before the deployment rather than relying
 on the PR budget.
 
-**Multisig — READY.** The vault is a real off-curve PDA holding a 2-of-3
-threshold, and it is already proven in production: it holds PPV Core's upgrade
-authority on devnet today. The deploy workflow refuses an on-curve authority and
-refuses a threshold below two, before it hands anything over.
+**Multisig — READY.** The vault is a real off-curve address — a program-derived
+address, not a wallet any single key can sign for — and it is already proven in
+practice: it holds PPV Core's upgrade authority on devnet today. The deploy
+workflow refuses an on-curve authority and refuses a threshold below two before
+it hands anything over. The 2-of-3 threshold itself is taken from configuration
+rather than decoded from the multisig account; see the corresponding limitation
+in [ppv-core-devnet-v1.md](ppv-core-devnet-v1.md).
 
 **Program address — READY.** Read live from devnet at 2026-09-13T05:42:55Z
 ([run 34740973693](https://github.com/gwapupward-hub/ppv/actions/runs/34740973693)):

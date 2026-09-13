@@ -140,5 +140,14 @@ can.
   because doing so requires a funded wallet this release process does not hold.
 - There is no on-chain IDL account. The interface is pinned by `idlHash` in the
   record, not published to the chain.
+- **The 2-of-3 threshold is not read from the Squads multisig account.** What is
+  verified on chain is that the live upgrade authority is
+  `B6tcsTrMCKTZV5vi3rRCnA3FMPeeWACSHuuTSz5XQgnX`, and that this address is off
+  the ed25519 curve — so it is a program-derived address and not a wallet any
+  single key can sign for. The threshold and the member list are recorded from
+  configuration; the repository's tooling refuses to record or hand authority to
+  a threshold below two, but it does not decode `ESFGq4U2XjMtVTigLPtp4bkx9cpSVmTw39YW84wKts33`
+  to confirm the multisig's own state. Decoding Squads account layout is a
+  separate piece of work and is deliberately not guessed at here.
 - Upgrades are documented, not automated. `docs/ppv-core-upgrade-runbook.md` is
   a procedure to follow, and a future sprint owns automating it.
