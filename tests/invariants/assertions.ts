@@ -334,15 +334,32 @@ export function assertInvariants(ctx: CheckContext): void {
   if (pre.agreement.exists && post.agreement.milestonesSettled < pre.agreement.milestonesSettled) {
     fail("PPV-M3", "the settled-tranche count went backwards", ctx);
   }
-  // PPV-M5 — a milestone contract is Settled exactly when every tranche is.
+  // PPV-M5 — terminal compatibility, stated in the direction that can actually
+  // be violated: releasing every tranche must finish the agreement.
+  //
+  // The converse is *not* an invariant, and asserting it was a mistake this
+  // suite caught on its first release run. A milestone contract can reach
+  // `Settled` with every tranche still pending, by dispute concession: the
+  // buyer concedes, `resolve_dispute` pays the whole remaining balance to the
+  // seller, and the agreement terminates. That is the mirror image of a refund
+  // on a milestone contract, which returns the tranches nobody earned and is
+  // documented behaviour — and it is safe for the same reason, because
+  // `require_milestone_active` demands `Funded` and a terminal agreement can
+  // never release another tranche.
+  //
+  // What the custody claim actually needs is elsewhere and already asserted: a
+  // settled agreement has paid out exactly `amount` (PPV-P3 above), and the
+  // total conserves (PPV-P1). "Every tranche settled" was a proxy for those,
+  // and a wrong one.
   if (
     post.agreement.agreementType === "milestoneContract" &&
-    post.agreement.state === "settled" &&
-    post.agreement.milestonesSettled !== post.agreement.milestoneCount
+    post.agreement.milestoneCount > 0 &&
+    post.agreement.milestonesSettled === post.agreement.milestoneCount &&
+    post.agreement.state !== "settled"
   ) {
     fail(
       "PPV-M5",
-      `a settled milestone contract released ${post.agreement.milestonesSettled} of ${post.agreement.milestoneCount} tranches`,
+      `every one of ${post.agreement.milestoneCount} tranches is released but the agreement is ${post.agreement.state}`,
       ctx,
     );
   }
