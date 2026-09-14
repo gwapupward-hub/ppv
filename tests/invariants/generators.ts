@@ -174,13 +174,23 @@ function kindArbitrary(flavour: AgreementFlavour): fc.Arbitrary<ActionKind> {
 }
 
 /**
- * Which tranche an instruction names. `foreign` is a real milestone of a
- * different contract: the wrong-relationship attack PPV-M4 and PPV-P9 refuse.
+ * Which tranche an instruction names.
+ *
+ * Both `first` and `second` are the agreement's own tranches, so neither is a
+ * deviation and they are drawn evenly; `foreign` — a real milestone of a
+ * different contract — is the wrong-relationship attack PPV-M4 and PPV-P9
+ * refuse, and is the only rare one.
+ *
+ * This was `weighted("first", "second", "foreign")`, which gave the second
+ * tranche the same one-in-twelve share as the foreign account and left it
+ * barely attacked. That skew is what let two property mutations survive
+ * qualification: re-releasing a tranche only fits inside the remaining balance
+ * when the *smaller* one was released first, and the smaller one is the second.
  */
-const milestoneArbitrary: fc.Arbitrary<MilestoneRef> = weighted(
-  "first" as const,
-  "second" as const,
-  "foreign" as const,
+const milestoneArbitrary: fc.Arbitrary<MilestoneRef> = fc.oneof(
+  { arbitrary: fc.constant<MilestoneRef>("first"), weight: CANONICAL_WEIGHT / 2 },
+  { arbitrary: fc.constant<MilestoneRef>("second"), weight: CANONICAL_WEIGHT / 2 },
+  { arbitrary: fc.constant<MilestoneRef>("foreign"), weight: DEVIATION_WEIGHT },
 );
 
 /**
@@ -271,7 +281,10 @@ function actionArbitrary(flavour: AgreementFlavour): fc.Arbitrary<GeneratedActio
  * model prediction and the same assertions as a random one; the prefix decides
  * what is attempted, never what is true.
  */
-function canonicalPrefix(flavour: AgreementFlavour): GeneratedAction[] {
+function canonicalPrefix(
+  flavour: AgreementFlavour,
+  order: readonly [MilestoneRef, MilestoneRef],
+): GeneratedAction[] {
   const accounts = (milestone: MilestoneRef = "first"): AccountVariant => ({
     agreement: "canonical",
     mint: "canonical",
@@ -297,18 +310,30 @@ function canonicalPrefix(flavour: AgreementFlavour): GeneratedAction[] {
       // The winner first: a bounty may be named one while open or funded, and
       // naming it first is what makes the rest of the lifecycle legal.
       return [act("selectWinner"), act("fund"), act("complete"), act("settle")];
-    case "milestone":
+    case "milestone": {
+      // Tranches are released in a generated order, not always smallest-last.
+      //
+      // Nothing in the program sequences them — each has its own approval, and
+      // RR-2 records that as deliberate — so releasing the second before the
+      // first is a legal schedule and an attack class the spec names. It also
+      // reaches a state the fixed order never did: with the smaller tranche
+      // released first, the larger balance still owed makes a *repeat* release
+      // fit inside `remaining()`, which is the only way a missing
+      // single-release guard becomes observable rather than being masked by
+      // the custody cap.
+      const [a, b] = order;
       return [
         act("createMilestone", "first"),
         act("createMilestone", "second"),
         act("fund"),
-        act("submitMilestone", "first"),
-        act("approveMilestone", "first"),
-        act("settleMilestone", "first"),
-        act("submitMilestone", "second"),
-        act("approveMilestone", "second"),
-        act("settleMilestone", "second"),
+        act("submitMilestone", a),
+        act("approveMilestone", a),
+        act("settleMilestone", a),
+        act("submitMilestone", b),
+        act("approveMilestone", b),
+        act("settleMilestone", b),
       ];
+    }
   }
 }
 
@@ -327,20 +352,36 @@ function canonicalPrefix(flavour: AgreementFlavour): GeneratedAction[] {
  * simplification to an ordinary escrow is the clearest one to read.
  */
 export function scenarioArbitrary(maxActions: number): fc.Arbitrary<Scenario> {
-  return fc.constantFrom(...AGREEMENT_FLAVOURS).chain((flavour) => {
-    const prefix = canonicalPrefix(flavour);
-    return fc
+  const orders: ReadonlyArray<readonly [MilestoneRef, MilestoneRef]> = [
+    ["first", "second"],
+    ["second", "first"],
+  ];
+  return fc.constantFrom(...AGREEMENT_FLAVOURS).chain((flavour) =>
+    fc
       .record({
-        prefixLength: fc.nat({ max: prefix.length }),
+        order: fc.constantFrom(...orders),
+        // Uniform over the lifecycle, not `fc.nat`, which is biased toward
+        // small values: with it, long prefixes were rare and the deep states
+        // — a tranche approved, one tranche released with balance still owed —
+        // were under-sampled by the very run meant to reach them. Measured at
+        // three affordable repeat releases in two hundred sequences, against
+        // nine expected. `constantFrom` still shrinks toward its first entry,
+        // so a counterexample minimizes to the shortest setup as before.
+        prefixLength: fc.constantFrom(
+          ...Array.from({ length: canonicalPrefix(flavour, orders[0]).length + 1 }, (_, i) => i),
+        ),
         tail: fc.array(actionArbitrary(flavour), {
           minLength: 1,
           maxLength: maxActions,
           size: "max",
         }),
       })
-      .map(({ prefixLength, tail }) => ({
+      .map(({ order, prefixLength, tail }) => ({
         flavour,
-        actions: [...prefix.slice(0, prefixLength), ...tail].slice(0, maxActions),
-      }));
-  });
+        actions: [...canonicalPrefix(flavour, order).slice(0, prefixLength), ...tail].slice(
+          0,
+          maxActions,
+        ),
+      })),
+  );
 }

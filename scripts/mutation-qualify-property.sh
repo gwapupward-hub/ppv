@@ -42,7 +42,22 @@ fi
 # NO for the suite, so this is deliberately larger than a PR-tier run per seed.
 # It is not a release budget and does not pretend to be: its job is to reach
 # one specific broken state, not to qualify a release.
-: "${PPV_MUTATION_SEQUENCES:=90}"
+#
+# Measured rather than guessed. Two of these mutations are only observable in
+# narrow windows — a repeat release that fits inside the balance still owed, a
+# wrong-destination release while a tranche is approved — and at 90 sequences
+# the generator produced one such window in the whole run. The counts, over two
+# seeds:
+#
+#    90 sequences   affordable repeats  7    wrong-destination releases   1
+#   200 sequences   affordable repeats 16    wrong-destination releases   4
+#   300 sequences   affordable repeats 20    wrong-destination releases  11
+#
+# 300 buys roughly a two-fold margin on the scarcer of the two.
+# `tests/invariants/reachability.test.ts` asserts those counts at this shape,
+# so a generator change that closes a window fails locally in milliseconds
+# rather than here in forty minutes.
+: "${PPV_MUTATION_SEQUENCES:=300}"
 : "${PPV_MUTATION_ACTIONS:=28}"
 : "${PPV_MUTATION_SEEDS:=20260912,20260913}"
 

@@ -60,6 +60,11 @@ type Tally = {
   unassignedPayoutAttempts: number;
   foreignMilestoneAttempts: number;
   duplicateReleaseAttempts: number;
+  /** A repeat release that would fit inside the balance still owed. */
+  affordableRepeatReleases: number;
+  /** A release aimed at an account the seller does not own. */
+  wrongDestinationReleaseAttempts: number;
+  secondTrancheActions: number;
   postTerminalAttempts: number;
   accepted: number;
   refused: number;
@@ -87,9 +92,31 @@ function walk(scenario: Scenario, tally: Tally): void {
     ) {
       tally.unassignedPayoutAttempts += 1;
     }
+    if (action.accounts.milestone === "second" && isMilestoneKind(action)) {
+      tally.secondTrancheActions += 1;
+    }
     if (action.kind === "settleMilestone" && action.accounts.milestone !== "foreign") {
       const slot = action.accounts.milestone === "second" ? 1 : 0;
-      if (model.milestones[slot].state === "settled") tally.duplicateReleaseAttempts += 1;
+      const tranche = model.milestones[slot];
+      if (tranche.state === "settled") {
+        tally.duplicateReleaseAttempts += 1;
+        // The one that matters. A repeat release of a tranche larger than the
+        // balance still owed is refused by the custody cap whatever the
+        // single-release guard does, so it cannot show that guard is missing.
+        if (
+          model.state === "funded" &&
+          tranche.allocation <= model.amount - model.releasedTotal
+        ) {
+          tally.affordableRepeatReleases += 1;
+        }
+      }
+      if (
+        model.state === "funded" &&
+        tranche.state === "approved" &&
+        action.accounts.destination !== "seller"
+      ) {
+        tally.wrongDestinationReleaseAttempts += 1;
+      }
     }
 
     if (!predict(model, action).succeeds) {
@@ -121,6 +148,11 @@ function isMilestoneKind(action: GeneratedAction): boolean {
   );
 }
 
+/** The mutation harness's shape: two seeds, so the counts are comparable. */
+const MUTATION_SEEDS = [20260912, 20260913];
+const MUTATION_SEQUENCES = 300;
+const MUTATION_ACTIONS = 28;
+
 function sample(seed: number, runs: number, actions: number): Tally {
   const tally: Tally = {
     sequences: { escrow: 0, milestone: 0, bounty: 0 },
@@ -132,6 +164,9 @@ function sample(seed: number, runs: number, actions: number): Tally {
     unassignedPayoutAttempts: 0,
     foreignMilestoneAttempts: 0,
     duplicateReleaseAttempts: 0,
+    affordableRepeatReleases: 0,
+    wrongDestinationReleaseAttempts: 0,
+    secondTrancheActions: 0,
     postTerminalAttempts: 0,
     accepted: 0,
     refused: 0,
@@ -200,5 +235,51 @@ test("most of the run is still an attack", () => {
   assert.ok(
     tally.postTerminalAttempts > 0 && tally.duplicateReleaseAttempts > 0,
     `terminal and duplicate-release attacks must both occur: ${JSON.stringify(tally)}`,
+  );
+});
+
+function sampleAll(seeds: number[], runs: number, actions: number): Tally {
+  const merged = sample(seeds[0], runs, actions);
+  for (const seed of seeds.slice(1)) {
+    const next = sample(seed, runs, actions);
+    for (const key of Object.keys(merged) as Array<keyof Tally>) {
+      if (key === "sequences") {
+        for (const flavour of ["escrow", "milestone", "bounty"] as const) {
+          merged.sequences[flavour] += next.sequences[flavour];
+        }
+      } else {
+        (merged[key] as number) += next[key] as number;
+      }
+    }
+  }
+  return merged;
+}
+
+test("the attacks that mutation qualification depends on are actually produced", () => {
+  // Two property mutations survived their first qualification run, and the
+  // reason was here rather than in the assertions: the suite was not producing
+  // the states in which those defects are observable.
+  //
+  // A repeat release only shows a missing single-release guard when the tranche
+  // fits inside the balance still owed — otherwise the custody cap refuses it
+  // first and the mutation is masked. A wrong-destination release only shows a
+  // missing recipient constraint while a tranche is approved and the agreement
+  // is still funded. Both are counted here so the gap cannot return quietly.
+  // Sampled at the mutation harness's own shape, so this predicts that run
+  // rather than merely resembling it.
+  const tally = sampleAll(MUTATION_SEEDS, MUTATION_SEQUENCES, MUTATION_ACTIONS);
+  assert.ok(
+    tally.affordableRepeatReleases >= 10,
+    `only ${tally.affordableRepeatReleases} affordable repeat releases: ${JSON.stringify(tally)}`,
+  );
+  assert.ok(
+    tally.wrongDestinationReleaseAttempts >= 5,
+    `only ${tally.wrongDestinationReleaseAttempts} wrong-destination releases: ${JSON.stringify(tally)}`,
+  );
+  // And the second tranche must be attacked comparably to the first, which it
+  // was not while it shared the foreign account's one-in-twelve weight.
+  assert.ok(
+    tally.secondTrancheActions >= 500,
+    `the second tranche was named only ${tally.secondTrancheActions} times`,
   );
 });
