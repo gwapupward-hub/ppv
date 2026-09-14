@@ -54,8 +54,33 @@ The custody gate requires Escrow's upgrade authority to be a Squads multisig
 (`B6tcsTrMCKTZV5vi3rRCnA3FMPeeWACSHuuTSz5XQgnX`), so that compromising that
 governance cannot reach the vault.
 
-Create it with at least a 2-of-N threshold, then prove it satisfies policy
-before it is given authority over anything:
+Create it with at least a 2-of-N threshold. `scripts/create-escrow-custody-multisig.mjs`
+is the ceremony, and it is split so that its one irreversible step is a separate,
+deliberate act:
+
+```bash
+export PPV_CUSTODY_CREATE_KEY=~/ppv-custody-createkey-keypair.json  # a path, never a key
+node scripts/create-escrow-custody-multisig.mjs --preflight         # prove and derive
+node scripts/create-escrow-custody-multisig.mjs --execute           # create it
+```
+
+`--preflight` requires the cluster's genesis hash to equal devnet's exactly,
+requires the Squads V4 program to be present and executable, derives the multisig
+and vault-0 addresses through the SDK's own PDA helpers, runs the offline safety
+checks, and stops. It creates nothing. No argument, and any argument other than
+`--execute`, also creates nothing.
+
+`--execute` needs a funding signer at the path in `PPV_OPERATOR_KEYPAIR`, and
+reuses the `createKey` written during preflight — so the multisig is created at
+the address that was actually reviewed, not a fresh one. Neither variable ever
+holds key material; both hold paths, and the script prints only public
+addresses. After confirmation it reads the account back from the cluster and
+compares the threshold, the member set and every permission mask against what
+was intended, because a confirmed signature says a transaction landed, not that
+it created what was meant.
+
+Then prove the result satisfies policy before it is given authority over
+anything:
 
 ```bash
 PPV_RPC_URL=https://api.devnet.solana.com \
@@ -73,6 +98,14 @@ It also refuses **shared signers** — members who also govern the non-custodial
 programs — because two multisigs at different addresses held by the same people
 fall to one compromise of those people. If that is a deliberate, accepted
 arrangement, pass `--allow-shared-signers` and say so in the release record.
+
+The signers it compares against are in `NON_CUSTODY_MEMBERS`. That list is the
+whole check: while it was empty the check passed for every configuration,
+including one held entirely by the people who already govern Core and Commerce.
+It now carries the three signers Core and Commerce were released under, and
+`scripts/test/custody-governance.test.mjs` asserts both that it is populated and
+that it agrees with `scripts/verify-devnet-release-approval.mjs`, so it cannot
+quietly empty again.
 
 Expected output: `PPV_CUSTODY_GOVERNANCE_VALID`. Anything else: **stop.**
 
