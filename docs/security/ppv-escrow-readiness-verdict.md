@@ -92,16 +92,22 @@ any kind. **PPV ESCROW DEPLOYED: NO. PPV ESCROW CUSTODY GATE: CLOSED.**
 ### `7BECot7zFqH2oCxTu9uLmmwvzQSBtxWro47jMa2MqUdR` is a build/local placeholder
 
 It is **not** an approved permanent deployment identity and must never be
-represented as one. It appears only in `declare_id!` and
-`[programs.localnet]`, so the workspace builds and the local validator suites
-run. No permanent `ppv_escrow` identity exists, and no `ppv_escrow` keypair
-exists anywhere in this repository — which is the safest state an unreleased
-identity can be in, because a key that does not exist cannot leak and an address
-that is not claimed cannot be occupied by accident.
+represented as one.
 
-Creating one is a deliberate ceremony belonging to a future deployment sprint.
-It was explicitly out of scope for Sprint 3 and for this closeout. Tracked as
-**RR-12**.
+**Superseded in Sprint 4 (RR-12 CLOSED).** The permanent `ppv_escrow` identity
+is now `7U1bCHQcr8Jg6J8G69JGaAWCRtsrZB1RYx4zo1sNEVF4`, and the placeholder above
+has been removed from `declare_id!`, from both `Anchor.toml` sections and from
+every deploy path. It survives only as `ESCROW_PLACEHOLDER_ID` in
+`scripts/lib/identity.mjs`, because naming the address that must never be
+deployed is what lets the checks against it stay expressible.
+
+No `ppv_escrow` keypair exists anywhere in this repository. The permanent
+keypair lives in the `PPV_ESCROW_PROGRAM_KEYPAIR` repository secret, and only
+the public address appears in any document, log or record.
+
+**Having an identity is not being deployed.** `ppv_escrow` is absent from
+`DEVNET_DEPLOYED_PROGRAMS`, and the custody gate remains closed on its
+remaining requirements — an independent security review (**RR-13**) among them.
 
 ### PPV-X1, PPV-X2 and PPV-X3 are NOT APPLICABLE — they do not pass
 

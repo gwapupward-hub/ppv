@@ -1,6 +1,11 @@
 # PPV Escrow residual-risk register
 
 **Readiness verdict: PPV ESCROW DEVNET DEPLOYMENT READINESS: GO** (Sprint 3.1).
+**RR-11** and **RR-12** were closed in Sprint 4 by the custody ceremony and the
+identity freeze. **RR-13** (no independent security review) is untouched and
+still blocks the custody gate, and **RR-4** (Escrow has no binding to Commerce)
+is unchanged — there is no on-chain Commerce↔Escrow binding today.
+
 **RR-1** and **RR-8**, the two entries that blocked Sprint 3's verdict, are
 CLOSED with the evidence recorded below. Nothing else changed severity. See
 [ppv-escrow-readiness-verdict.md](ppv-escrow-readiness-verdict.md) for the full
@@ -251,7 +256,7 @@ them, and either can end it unilaterally in the other's favour at any time.
 
 ## DEFERRED
 
-### RR-11 — A dedicated custody multisig does not exist
+### RR-11 — A dedicated custody multisig does not exist — **CLOSED**
 
 The custody gate requires Escrow's upgrade authority to be held by a multisig
 **separate** from the non-custodial programs, so compromising one cannot reach
@@ -271,16 +276,36 @@ addresses held by the same people fall to one compromise of those people, so
 "separate" is a claim about people as well as addresses. The override exists and
 has to be taken deliberately.
 
-*Closure condition:* a multisig exists on devnet, the verifier prints
-`PPV_CUSTODY_GOVERNANCE_VALID` against it, and `ESCROW_CUSTODY_GOVERNANCE` in
-`scripts/lib/identity.mjs` records it. Step 2 of
-[the release runbook](../ppv-escrow-release-runbook.md).
+*Closed in Sprint 4.* The ceremony ran on devnet and produced a dedicated
+Squads V4 2-of-3:
 
-*Why it is still open:* creating it requires funded wallets held by the people
-who will hold the threshold. That is a decision about who governs custody, not
-a task an agent can perform.
+| | |
+| --- | --- |
+| Multisig | `GEE6nE9xN4GsHGo8QHvyqNLH7eM7yLBrtFtfsmH9ip46` |
+| Vault (index 0) | `FD2spnsMVgsuddPSRWAe3ee4DMbgDx5ivpvVfvKcNrLE` |
+| Threshold | 2-of-3 |
+| Permissions | Initiate + Vote + Execute (mask 7) each |
+| Creation tx | `PAr6UEy3Am4HDjZFLwWKCiG3jVMh2pE9vCfKxAq3SACyFs9wwheGCwLDRV57kE7GHZPyCJEqQBJByR1574spqR5` |
 
-### RR-12 — No permanent Escrow identity exists
+`verify-custody-governance.mjs` prints `PPV_CUSTODY_GOVERNANCE_VALID` against
+it, and `ESCROW_CUSTODY_GOVERNANCE` in `scripts/lib/identity.mjs` records it as
+the single source every gate reads.
+
+**The approved exception.** One custody signer is intentionally shared with
+Core/Commerce governance (`BJmFM4k7Q32CiCYSdoYkAhXdD5Sk3BegMh2cbEAsgSwJ`). The
+other two custody signers are distinct. This exception is approved for **devnet
+only**. The verifier still refuses this member set by default; the exception is
+taken per run with `--allow-shared-signers`, never by changing the policy, and
+`scripts/test/custody-governance.test.mjs` asserts both halves so it cannot
+become the default. One shared key cannot reach a 2-of-3 threshold alone — that
+arithmetic is what makes one overlap tolerable and a second one not.
+
+*What this does not close:* the vault holds nothing. Escrow is not deployed and
+no upgrade authority has been transferred to it, so this is governance that
+exists and is verified, not governance that is yet exercising anything. RR-13
+is untouched.
+
+### RR-12 — No permanent Escrow identity exists — **CLOSED**
 
 `ppv_escrow` carries a build-only placeholder
 (`7BECot7zFqH2oCxTu9uLmmwvzQSBtxWro47jMa2MqUdR`), present only in
@@ -301,15 +326,22 @@ record must all agree. A half-entered freeze cannot be committed — setting the
 constant alone fails, changing `declare_id!` alone fails, and setting the
 constant to the placeholder fails.
 
-*Closure condition:* step 1 and step 3 of
-[the release runbook](../ppv-escrow-release-runbook.md).
+*Closed in Sprint 4.* The permanent identity is
+`7U1bCHQcr8Jg6J8G69JGaAWCRtsrZB1RYx4zo1sNEVF4`. The keypair was generated
+outside this repository and stored as the `PPV_ESCROW_PROGRAM_KEYPAIR`
+repository secret through the approved workflow; no key material is committed,
+printed or reachable from here, and only the public address appears anywhere.
 
-*Why it is still open:* generating the keypair produces permanent key material
-whose only legitimate home is the `PPV_ESCROW_PROGRAM_KEYPAIR` repository
-secret. An agent that generated it would have nowhere to put it — printing or
-committing it is forbidden, and this session cannot write repository secrets —
-so generating it would mean creating a key that must immediately be destroyed or
-leaked. Not generating it is strictly safer.
+The freeze is all-or-nothing and covers `ESCROW_PERMANENT_ID`, `declare_id!`,
+both `Anchor.toml` sections, `PERMANENT_PROGRAM_IDS`, `UNRELEASED_PROGRAMS` and
+`ESCROW_CUSTODY_GOVERNANCE`. `scripts/test/escrow-identity.test.mjs` and
+`scripts/test/custody-gate.test.mjs` enforce that every source names exactly
+this id, that the build-only placeholder is gone from every identity and deploy
+path, and that governance exists alongside the identity — an id without
+governance is a program that can be deployed and then cannot be safely governed.
+
+*What this does not close:* having an identity is not having a deployment. The
+custody gate stays closed on its remaining requirements, RR-13 among them.
 
 ### RR-13 — No independent security review
 

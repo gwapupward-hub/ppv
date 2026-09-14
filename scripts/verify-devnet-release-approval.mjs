@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 const PERMANENT_PROGRAM_IDS = Object.freeze({
   ppv_core: "9cWE41ZDNQChvFrRoVuPQDeoVLg46ACTiZRCZaBZzfwU",
   ppv_commerce: "GmRDoFuPrBrsxnvTX751WK5rLu14JXe4sgjh6vNwHzr3",
+  ppv_escrow: "7U1bCHQcr8Jg6J8G69JGaAWCRtsrZB1RYx4zo1sNEVF4",
 });
 
 const EXPECTED_SQUADS_VAULT_PDA = "B6tcsTrMCKTZV5vi3rRCnA3FMPeeWACSHuuTSz5XQgnX";
@@ -15,12 +16,45 @@ const EXPECTED_SQUADS_MEMBERS = Object.freeze([
   "BJmFM4k7Q32CiCYSdoYkAhXdD5Sk3BegMh2cbEAsgSwJ",
 ].sort());
 
-const DEFAULT_POLICY = Object.freeze({
+/**
+ * `ppv_escrow` is governed by a different multisig than Core and Commerce, and
+ * that is the entire point of the custody gate: a release approved by the
+ * non-custodial signers must not be accepted as an approval for the program
+ * that holds value.
+ *
+ * So the approval policy is per program rather than global. Approving an escrow
+ * release requires two of the *custody* members, against the custody vault —
+ * approvals from the Core/Commerce set are refused here even though those
+ * signers are perfectly legitimate for Core and Commerce.
+ */
+const EXPECTED_CUSTODY_VAULT_PDA = "FD2spnsMVgsuddPSRWAe3ee4DMbgDx5ivpvVfvKcNrLE";
+
+const EXPECTED_CUSTODY_MEMBERS = Object.freeze([
+  "HDkMBufpYfm1LN6apVkeV3aA2dhMk57PmBujwJ4j4Ecx",
+  "5y12g4GKbba3k6WDUyZT8eUfeBdboxxGrjkdjM4kX2Wo",
+  "BJmFM4k7Q32CiCYSdoYkAhXdD5Sk3BegMh2cbEAsgSwJ",
+].sort());
+
+const NON_CUSTODY_POLICY = Object.freeze({
   programIds: PERMANENT_PROGRAM_IDS,
   squadsVaultPda: EXPECTED_SQUADS_VAULT_PDA,
   squadsMembers: EXPECTED_SQUADS_MEMBERS,
   squadsThreshold: "2",
 });
+
+const CUSTODY_POLICY = Object.freeze({
+  programIds: PERMANENT_PROGRAM_IDS,
+  squadsVaultPda: EXPECTED_CUSTODY_VAULT_PDA,
+  squadsMembers: EXPECTED_CUSTODY_MEMBERS,
+  squadsThreshold: "2",
+});
+
+/** The governance a given program is released under. */
+export function policyFor(program) {
+  return program === "ppv_escrow" ? CUSTODY_POLICY : NON_CUSTODY_POLICY;
+}
+
+const DEFAULT_POLICY = NON_CUSTODY_POLICY;
 
 function fail(message) {
   throw new Error(message);
@@ -190,7 +224,7 @@ function main() {
     approval2Key: process.env.PPV_RELEASE_APPROVER_2,
     approval2Signature: process.env.PPV_RELEASE_SIGNATURE_2,
     actualCommit: checkedOutCommit(),
-  });
+  }, policyFor(process.env.PPV_RELEASE_PROGRAM));
 
   console.log("PPV devnet release approval verified.");
   console.log(`program=${result.program}`);

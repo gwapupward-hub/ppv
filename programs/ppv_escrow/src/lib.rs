@@ -26,9 +26,16 @@ pub use constants::*;
 pub use instructions::*;
 pub use state::{AgreementState, AgreementType, DisputeOutcome, MilestoneState, ProofStatus};
 
-// Build-only placeholder. Run `anchor keys sync` with controlled program
-// keypairs before deployment and commit the resulting deployment manifest.
-declare_id!("7BECot7zFqH2oCxTu9uLmmwvzQSBtxWro47jMa2MqUdR");
+// PERMANENT PROTOCOL IDENTITY — frozen in Sprint 4.
+//
+// Every PPV account address derives from this program id, so replacing it does
+// not migrate anything: it creates a second protocol universe in which every
+// existing agreement, proof and PDA resolves to nothing.
+//
+// Do NOT run `anchor keys sync`. It rewrites this line from whatever keypair
+// happens to be in target/deploy, which on any machine that has run a local
+// build is a throwaway key.
+declare_id!("7U1bCHQcr8Jg6J8G69JGaAWCRtsrZB1RYx4zo1sNEVF4");
 
 #[program]
 pub mod ppv_escrow {

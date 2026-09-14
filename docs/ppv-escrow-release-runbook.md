@@ -135,9 +135,33 @@ quietly empty again.
 
 Expected output: `PPV_CUSTODY_GOVERNANCE_VALID`. Anything else: **stop.**
 
-## Step 3 — the identity and governance freeze
+## Step 3 — the identity and governance freeze — **DONE (Sprint 4)**
 
-One commit, containing all of it:
+The freeze is committed. The public facts it recorded:
+
+| | |
+| --- | --- |
+| `ESCROW_PERMANENT_ID` | `7U1bCHQcr8Jg6J8G69JGaAWCRtsrZB1RYx4zo1sNEVF4` |
+| Custody multisig | `GEE6nE9xN4GsHGo8QHvyqNLH7eM7yLBrtFtfsmH9ip46` |
+| Custody vault (index 0) | `FD2spnsMVgsuddPSRWAe3ee4DMbgDx5ivpvVfvKcNrLE` |
+| Threshold | 2-of-3 |
+| Members | `HDkMBufpYfm1LN6apVkeV3aA2dhMk57PmBujwJ4j4Ecx`, `5y12g4GKbba3k6WDUyZT8eUfeBdboxxGrjkdjM4kX2Wo`, `BJmFM4k7Q32CiCYSdoYkAhXdD5Sk3BegMh2cbEAsgSwJ` |
+| Permissions | Initiate + Vote + Execute (mask 7) each |
+| Creation tx | `PAr6UEy3Am4HDjZFLwWKCiG3jVMh2pE9vCfKxAq3SACyFs9wwheGCwLDRV57kE7GHZPyCJEqQBJByR1574spqR5` |
+| Network | devnet |
+
+The vault is the **intended future** upgrade authority. **No authority has been
+transferred and escrow is not deployed** — `ppv_escrow` is absent from
+`DEVNET_DEPLOYED_PROGRAMS` for exactly that reason, and the custody gate is
+closed on its remaining requirements.
+
+One thing this freeze changed that is worth stating plainly: the custody gate
+used to be enforced by escrow's *absence* from every deployment path, and it is
+now enforced by *checks*. See
+[deployment-gates.md](deployment-gates.md#custody-gate--ppv_escrow) for what
+that buys and what it costs.
+
+What the commit contained:
 
 1. `scripts/lib/identity.mjs` — set `ESCROW_PERMANENT_ID` to the public address
    from step 1, set `ESCROW_CUSTODY_GOVERNANCE` to the vault, threshold and
@@ -156,6 +180,15 @@ One commit, containing all of it:
 setting the constant without `declare_id!` fails, changing `declare_id!` without
 the constant fails, and setting the constant to the placeholder fails. A
 half-entered freeze cannot be committed.
+
+`scripts/test/escrow-freeze-tampering.test.mjs` proves that enforcement is real
+rather than self-confirming. It copies the repository, mutates exactly one
+source — the program id, `Anchor.toml`, `declare_id!`, the multisig, the vault,
+the threshold, a removed member, a duplicated member, a second shared signer, a
+removed workflow check, the exception documentation — and requires the suite to
+go red for each. A check that reads a value and compares it to itself passes in
+every world, including the one where someone changed both; these tests are what
+distinguish the two.
 
 ## Step 4 — release candidate and full qualification
 
