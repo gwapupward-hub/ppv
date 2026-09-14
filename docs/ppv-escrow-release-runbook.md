@@ -99,6 +99,32 @@ programs — because two multisigs at different addresses held by the same peopl
 fall to one compromise of those people. If that is a deliberate, accepted
 arrangement, pass `--allow-shared-signers` and say so in the release record.
 
+### Approved exception — one shared signer, devnet only
+
+The devnet custody set overlaps the Core/Commerce governance by exactly one
+signer, and this is deliberate:
+
+- **One custody signer is intentionally shared with Core/Commerce governance:**
+  `BJmFM4k7Q32CiCYSdoYkAhXdD5Sk3BegMh2cbEAsgSwJ`.
+- **The other two custody signers are distinct:**
+  `HDkMBufpYfm1LN6apVkeV3aA2dhMk57PmBujwJ4j4Ecx` and
+  `5y12g4GKbba3k6WDUyZT8eUfeBdboxxGrjkdjM4kX2Wo`.
+- **This exception is approved for devnet only.** It is not carried to mainnet,
+  and it is not a precedent for a second shared signer.
+
+What makes one overlap tolerable is arithmetic, not goodwill: at a 2-of-3
+threshold, one shared key cannot reach the threshold by itself, so compromising
+everyone who governs Core and Commerce still does not move the custody vault. A
+*second* shared signer would end that property, which is why the verifier counts
+them rather than checking for a name it recognises.
+
+The approval is expressed per run, by passing `--allow-shared-signers`, and
+never by changing the policy. `verify-custody-governance.mjs` still refuses this
+exact member set by default, and
+`scripts/test/custody-governance.test.mjs` asserts both halves — that it is
+refused without the override and accepted with it — so the exception cannot
+quietly become the default and be inherited by a mainnet ceremony.
+
 The signers it compares against are in `NON_CUSTODY_MEMBERS`. That list is the
 whole check: while it was empty the check passed for every configuration,
 including one held entirely by the people who already govern Core and Commerce.

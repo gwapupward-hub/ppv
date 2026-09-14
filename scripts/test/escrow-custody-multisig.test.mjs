@@ -553,3 +553,145 @@ test("this ceremony creates governance and transfers no authority", () => {
   assert.doesNotMatch(source, /setUpgradeAuthority|BpfLoaderUpgradeable|upgradeAuthority\s*:/);
   assert.doesNotMatch(source, /ESCROW_PERMANENT_ID/);
 });
+
+/* ------------------------------------- requirements added in the RR-11 pass */
+
+test("the permission mask is derived from the SDK, not written into the output", () => {
+  const createKey = Keypair.generate();
+  const { multisigPda, vaultPda } = deriveAddresses(createKey.publicKey);
+  const summary = formatSummary({
+    genesisHash: DEVNET_GENESIS,
+    multisigPda: multisigPda.toBase58(),
+    vaultPda: vaultPda.toBase58(),
+    createKeyPublic: createKey.publicKey.toBase58(),
+  });
+  assert.match(summary, /^MEMBER_PERMISSIONS=Initiate\+Vote\+Execute$/m);
+  assert.match(summary, new RegExp(`^PERMISSION_MASK=${multisig.types.Permissions.all().mask}$`, "m"));
+  // The reported mask is whatever the installed SDK computes. It happens to be
+  // 7 today; the assertion is that the two agree, not that it is 7.
+  assert.equal(custodyPermissions().mask, 7);
+  assert.match(summary, /^SQUADS_PROGRAM_ID=SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf$/m);
+});
+
+test("a missing createKey path is rejected in every mode, not just execute", async () => {
+  // An ephemeral createKey derives a multisig address that can never be
+  // created once the session is gone, so preflight must refuse it too rather
+  // than print a PDA the operator might take as authoritative.
+  assert.throws(
+    () => resolveCreateKey("preflight", { env: {} }),
+    (error) => {
+      assert.ok(error instanceof CeremonyError);
+      assert.match(error.message, /PPV_CUSTODY_CREATE_KEY is not set/);
+      return true;
+    },
+  );
+  assert.throws(() => resolveCreateKey("execute", { env: {} }), /PPV_CUSTODY_CREATE_KEY is not set/);
+
+  await assert.rejects(
+    () =>
+      main({
+        argv: ["--preflight"],
+        out: { write: () => {} },
+        env: {},
+        connectionFactory: () => stubConnection(),
+      }),
+    /PPV_CUSTODY_CREATE_KEY is not set/,
+  );
+});
+
+test("--execute reruns the cluster and program validation", async () => {
+  const path = join(scratchDir(), "createkey-keypair.json");
+  const dir = scratchDir();
+  const operatorPath = join(dir, "operator-keypair.json");
+  writeFileSync(operatorPath, JSON.stringify(Array.from(Keypair.generate().secretKey)));
+  const env = { PPV_CUSTODY_CREATE_KEY: path, PPV_OPERATOR_KEYPAIR: operatorPath };
+
+  // Fix the createKey the way a real preflight would, so the failures below
+  // are the cluster checks rather than a missing key.
+  await main({
+    argv: ["--preflight"],
+    out: { write: () => {} },
+    env,
+    connectionFactory: () => stubConnection(),
+  });
+
+  // A wrong cluster stops --execute exactly as it stops --preflight. Passing
+  // preflight earlier buys nothing: the checks are re-run against whatever
+  // cluster --execute actually reaches.
+  await assert.rejects(
+    () =>
+      main({
+        argv: ["--execute"],
+        out: { write: () => {} },
+        env,
+        connectionFactory: () => stubConnection({ genesisHash: MAINNET_GENESIS }),
+      }),
+    /STOP — WRONG CLUSTER/,
+  );
+
+  await assert.rejects(
+    () =>
+      main({
+        argv: ["--execute"],
+        out: { write: () => {} },
+        env,
+        connectionFactory: () => stubConnection({ squadsAccount: null }),
+      }),
+    /does not exist/,
+  );
+
+  await assert.rejects(
+    () =>
+      main({
+        argv: ["--execute"],
+        out: { write: () => {} },
+        env,
+        connectionFactory: () => stubConnection({ squadsAccount: { executable: false } }),
+      }),
+    /not executable/,
+  );
+});
+
+test("no secret material reaches stdout or stderr on a full preflight run", async () => {
+  const path = join(scratchDir(), "createkey-keypair.json");
+  let captured = "";
+  const sink = { write: (text) => (captured += text) };
+
+  await main({
+    argv: ["--preflight"],
+    out: sink,
+    env: { PPV_CUSTODY_CREATE_KEY: path },
+    connectionFactory: () => stubConnection(),
+  });
+
+  // The createKey the run actually persisted, read back from disk — so this
+  // checks the real secret, not a stand-in.
+  const secretKey = Uint8Array.from(JSON.parse(readFileSync(path, "utf8")));
+  const createKey = Keypair.fromSecretKey(secretKey);
+
+  for (const [label, encoding] of [
+    ["json array", JSON.stringify(Array.from(secretKey))],
+    ["bare array", Array.from(secretKey).join(",")],
+    ["base64", Buffer.from(secretKey).toString("base64")],
+    ["hex", Buffer.from(secretKey).toString("hex")],
+    ["first 32 bytes hex", Buffer.from(secretKey.slice(0, 32)).toString("hex")],
+  ]) {
+    assert.ok(!captured.includes(encoding), `the createKey leaked to output as ${label}`);
+  }
+  // Any long run of numbers in the output would be a key whatever it was called.
+  assert.doesNotMatch(captured, /(\d+,){60,}\d+/);
+  assert.ok(captured.includes(createKey.publicKey.toBase58()), "the public key must be reported");
+  assert.match(captured, /^CREATE_KEY_PUBLIC=/m);
+  assert.match(captured, /^EXPECTED_CUSTODY_MULTISIG=/m);
+  assert.match(captured, /^EXPECTED_CUSTODY_VAULT=/m);
+});
+
+test("the error raised when a createKey path is missing names no key material", () => {
+  try {
+    resolveCreateKey("execute", { env: {} });
+    assert.fail("a missing createKey path was accepted");
+  } catch (error) {
+    assert.doesNotMatch(error.message, /(\d+,){10,}\d+/);
+    assert.match(error.message, /path/);
+  }
+});

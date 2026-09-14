@@ -305,13 +305,16 @@ export function resolveCreateKey(mode, { env = process.env, fs = { existsSync, r
   const path = env.PPV_CUSTODY_CREATE_KEY;
 
   if (!path) {
-    if (mayBroadcast(mode)) {
-      throw new CeremonyError(
-        "PPV_CUSTODY_CREATE_KEY is not set. --execute requires the createKey file reviewed during " +
-          "--preflight, so that the multisig is created at the address the operator approved.",
-      );
-    }
-    return { keypair: Keypair.generate(), persisted: false, path: null };
+    throw new CeremonyError(
+      "PPV_CUSTODY_CREATE_KEY is not set. It must hold the *path* to the ceremony createKey file, " +
+        "never the key itself.\n" +
+        "The createKey has to outlive --preflight: it is what the multisig address derives from, so " +
+        "a key generated fresh in each process derives a different address every run and the address " +
+        "an operator reviewed could never be the one created. Generating one inside an ephemeral CI " +
+        "or session and printing its PDA as authoritative is the same mistake with extra steps.\n" +
+        "Set it to a path on the operator machine (ending in -keypair.json, which .gitignore " +
+        "excludes) and re-run.",
+    );
   }
 
   const full = resolve(path);
@@ -359,12 +362,16 @@ export function formatSummary({
   const lines = [
     "NETWORK=devnet",
     `GENESIS_HASH=${genesisHash}`,
-    `SQUADS_PROGRAM_ID=${SQUADS_V4_PROGRAM_ID}`,
+    `SQUADS_PROGRAM_ID=${multisig.PROGRAM_ID.toBase58()}`,
     `THRESHOLD=${threshold}`,
   ];
   members.forEach((member, index) => lines.push(`MEMBER_${index + 1}=${member}`));
   lines.push(
-    `MEMBER_PERMISSIONS=Initiate+Vote+Execute (mask ${custodyPermissions().mask})`,
+    "MEMBER_PERMISSIONS=Initiate+Vote+Execute",
+    // Derived from the SDK's own constants, never a literal: the mask is
+    // whatever the installed program means by these three permissions, so a
+    // change upstream shows up here instead of being papered over by a 7.
+    `PERMISSION_MASK=${custodyPermissions().mask}`,
     `TIME_LOCK=${CUSTODY_TIME_LOCK}`,
     `VAULT_INDEX=${CUSTODY_VAULT_INDEX}`,
     `CREATE_KEY_PUBLIC=${createKeyPublic}`,
@@ -482,15 +489,6 @@ export async function main({
     return { ok: false, mode, broadcast: false, failures };
   }
 
-  if (!createKey.persisted) {
-    out.write(
-      "\nNOTE: PPV_CUSTODY_CREATE_KEY is not set, so the createKey above is ephemeral and the\n" +
-        "derived addresses are PROVISIONAL — a later run derives different ones. Set\n" +
-        "PPV_CUSTODY_CREATE_KEY to a path (ending in -keypair.json, which .gitignore excludes)\n" +
-        "and re-run --preflight to fix the addresses before authorizing --execute.\n",
-    );
-  }
-
   if (!mayBroadcast(mode)) {
     out.write(
       "\nPREFLIGHT ONLY — no transaction was built or sent.\n" +
@@ -558,9 +556,11 @@ export async function main({
   out.write(
     [
       "",
-      `CUSTODY_CREATION_TX=${signature}`,
+      "NETWORK=devnet",
       `CUSTODY_MULTISIG=${multisigAddress}`,
       `CUSTODY_VAULT=${vaultAddress}`,
+      `CUSTODY_THRESHOLD=${CUSTODY_THRESHOLD}`,
+      `CUSTODY_CREATION_TX=${signature}`,
       `ONCHAIN_THRESHOLD_VERIFIED=${onChain.thresholdOk ? "yes" : "no"}`,
       `ONCHAIN_MEMBERS_VERIFIED=${onChain.membersOk ? "yes" : "no"}`,
       `ONCHAIN_PERMISSIONS_VERIFIED=${onChain.permissionsOk ? "yes" : "no"}`,

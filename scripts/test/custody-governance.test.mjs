@@ -239,3 +239,83 @@ test("the non-custodial members match the governance Core and Commerce were rele
     "the custody verifier and the release-approval policy disagree about who governs Core and Commerce",
   );
 });
+
+/**
+ * The devnet custody ceremony's real member set.
+ *
+ * One of its three signers, `BJmFM4k7…`, also governs Core and Commerce. That
+ * overlap is deliberate and approved **for devnet only**, and the way it stays
+ * an exception rather than becoming the rule is that the verifier keeps
+ * refusing it by default: the approval is expressed at the call site, per run,
+ * by `--allow-shared-signers`, and never by softening the policy itself.
+ *
+ * So the pair of tests below is the actual guarantee. If the first one ever
+ * starts passing without the override, the exception has silently become the
+ * default and a mainnet ceremony inherits it.
+ */
+const DEVNET_CUSTODY_MEMBERS = [
+  "HDkMBufpYfm1LN6apVkeV3aA2dhMk57PmBujwJ4j4Ecx",
+  "5y12g4GKbba3k6WDUyZT8eUfeBdboxxGrjkdjM4kX2Wo",
+  "BJmFM4k7Q32CiCYSdoYkAhXdD5Sk3BegMh2cbEAsgSwJ",
+];
+
+const SHARED_SIGNER = "BJmFM4k7Q32CiCYSdoYkAhXdD5Sk3BegMh2cbEAsgSwJ";
+
+test("the devnet custody set is refused by default, naming the one shared signer", () => {
+  const failures = checkPolicy({
+    multisig: CUSTODY_MULTISIG,
+    vault: CUSTODY_VAULT,
+    threshold: 2,
+    members: [...DEVNET_CUSTODY_MEMBERS],
+  });
+
+  const shared = failures.filter((failure) => failure.includes(SHARED_SIGNER));
+  assert.equal(shared.length, 1, "the shared signer was not reported exactly once");
+  assert.match(shared[0], /1 member\(s\) also govern the non-custodial programs/);
+  assert.match(shared[0], /--allow-shared-signers/);
+
+  // The overlap must be the *only* thing wrong. If this set failed for some
+  // other reason too, granting the override would let that second problem
+  // through unnoticed.
+  assert.deepEqual(
+    failures.filter((failure) => !failure.includes(SHARED_SIGNER)),
+    [],
+    "the devnet custody set fails policy for reasons beyond the approved overlap",
+  );
+});
+
+test("the approved overlap passes only with the deliberate override", () => {
+  const accepted = checkPolicy({
+    multisig: CUSTODY_MULTISIG,
+    vault: CUSTODY_VAULT,
+    threshold: 2,
+    members: [...DEVNET_CUSTODY_MEMBERS],
+    allowSharedSigners: true,
+  });
+  assert.deepEqual(accepted, []);
+});
+
+test("exactly one custody signer overlaps; the other two are independent", () => {
+  const overlap = DEVNET_CUSTODY_MEMBERS.filter((member) =>
+    NON_CUSTODY_MEMBERS.includes(member),
+  );
+  assert.deepEqual(overlap, [SHARED_SIGNER]);
+  // Two independent signers is what keeps the custody multisig from falling to
+  // a single compromise of the Core/Commerce signers: they cannot reach a
+  // 2-of-3 threshold with one shared key alone.
+  assert.equal(DEVNET_CUSTODY_MEMBERS.length - overlap.length, 2);
+  assert.ok(overlap.length < 2, "shared signers alone must not satisfy the threshold");
+});
+
+test("the override is scoped to the run, not baked into the policy", () => {
+  // A second, otherwise-identical configuration with two shared signers is
+  // still refused with the override absent — the override is not a mode the
+  // verifier can be left in.
+  const twoShared = checkPolicy({
+    multisig: CUSTODY_MULTISIG,
+    vault: CUSTODY_VAULT,
+    threshold: 2,
+    members: [NON_CUSTODY_MEMBERS[0], NON_CUSTODY_MEMBERS[1], DEVNET_CUSTODY_MEMBERS[0]],
+  });
+  assert.ok(twoShared.some((failure) => failure.includes("2 member(s) also govern")));
+});
