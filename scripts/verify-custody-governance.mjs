@@ -31,8 +31,23 @@ import { DEVNET_GENESIS, MAINNET_GENESIS, rpc } from "./lib/rpc.mjs";
  */
 export const NON_CUSTODY_VAULT = "B6tcsTrMCKTZV5vi3rRCnA3FMPeeWACSHuuTSz5XQgnX";
 
-/** Members of that vault, so signer overlap can be reported rather than guessed. */
-export const NON_CUSTODY_MEMBERS = Object.freeze([]);
+/**
+ * Members of that vault, so signer overlap can be reported rather than guessed.
+ *
+ * An empty list here is not "no overlap" — it is a check that passes because it
+ * was never given anything to compare against, which is the failure mode this
+ * verifier exists to prevent. These are the three signers the Core and Commerce
+ * releases were approved under, and they are duplicated from
+ * `scripts/verify-devnet-release-approval.mjs` deliberately: the two lists are
+ * asserted equal in `scripts/test/custody-governance.test.mjs`, so a change to
+ * the non-custodial governance that is not mirrored here fails the suite rather
+ * than silently turning the shared-signer check back off.
+ */
+export const NON_CUSTODY_MEMBERS = Object.freeze([
+  "58kuGbxpvaamvYE44WYkyipBB6FVKt2qT9u3vAKtyKYV",
+  "2FFVcm9xJmUHG6zfo15ktzuGQTXACPG42iquGHe6faTN",
+  "BJmFM4k7Q32CiCYSdoYkAhXdD5Sk3BegMh2cbEAsgSwJ",
+]);
 
 export class GovernanceFailure extends Error {}
 
