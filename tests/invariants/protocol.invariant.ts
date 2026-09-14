@@ -7,7 +7,7 @@ import type { GeneratedAction } from "./actions";
 import { describeAction } from "./actions";
 import { InvariantViolation } from "./assertions";
 import { buildFixture, type Fixture } from "./fixture";
-import { sequenceArbitrary } from "./generators";
+import { scenarioArbitrary } from "./generators";
 import { emptyCoverage, InvariantRunner } from "./runner";
 
 /**
@@ -107,8 +107,8 @@ describe("PPV protocol invariants (property-based)", function () {
       const before = coverage.attempted;
       try {
         await fc.assert(
-          fc.asyncProperty(sequenceArbitrary(ACTIONS), async (sequence) => {
-            await runner.runSequence(seed, sequence, coverage);
+          fc.asyncProperty(scenarioArbitrary(ACTIONS), async (scenario) => {
+            await runner.runSequence(seed, scenario, coverage);
           }),
           {
             seed,
@@ -122,7 +122,10 @@ describe("PPV protocol invariants (property-based)", function () {
               const cause: unknown = (out as { errorInstance?: unknown }).errorInstance;
               const detail =
                 cause instanceof InvariantViolation ? cause.message : String(out.error ?? cause);
-              const minimized = (out.counterexample?.[0] ?? []) as GeneratedAction[];
+              const scenario = out.counterexample?.[0] as
+                | { flavour: string; actions: GeneratedAction[] }
+                | undefined;
+              const minimized = scenario?.actions ?? [];
               throw new Error(
                 [
                   "",
@@ -132,6 +135,7 @@ describe("PPV protocol invariants (property-based)", function () {
                   `  replay          : PPV_INVARIANT_SEED=${seed} PPV_INVARIANT_PATH=${out.counterexamplePath} npm run test:invariants:seed`,
                   `  runs executed   : ${out.numRuns}`,
                   `  shrinks applied : ${out.numShrinks}`,
+                  `  agreement type  : ${scenario?.flavour ?? "unknown"}`,
                   `  minimized to    : ${minimized.length} action(s)`,
                   ...minimized.map((action, index) => `    [${index}] ${describeAction(action)}`),
                   detail,
@@ -193,6 +197,38 @@ describe("PPV protocol invariants (property-based)", function () {
     assert.ok(
       coverage.resolutions > 0,
       "no dispute was ever resolved — PPV-D5 was never exercised",
+    );
+    // RR-1's closure condition, stated as a gate rather than as a claim.
+    //
+    // A milestone or bounty action kind that exists in the generator and is
+    // never selected closes nothing: the point of adding them was that those
+    // lifecycles be *reached*. Each floor below names a thing the run has to
+    // have actually done, and the two release floors ask for more than one
+    // occurrence because a single accidental success is not coverage either.
+    assert.ok(
+      coverage.milestoneSequences > 0 && coverage.bountySequences > 0,
+      `not every agreement type was generated (escrow ${coverage.escrowSequences}, ` +
+        `milestone ${coverage.milestoneSequences}, bounty ${coverage.bountySequences})`,
+    );
+    assert.ok(
+      coverage.milestonesScheduled > 0,
+      "no milestone was ever scheduled — PPV-M1 was never exercised",
+    );
+    assert.ok(
+      coverage.milestoneReleases > 0,
+      "no milestone was ever released — PPV-M2, PPV-M3 and PPV-M4 were never exercised",
+    );
+    assert.ok(
+      coverage.milestoneForeignAccountAttempts > 0,
+      "no foreign milestone account was ever presented — PPV-M4 was never attacked",
+    );
+    assert.ok(
+      coverage.winnerSelections > 0,
+      "no bounty winner was ever named — PPV-B1 was never exercised",
+    );
+    assert.ok(
+      coverage.bountyUnassignedPayoutAttempts > 0,
+      "no payout was ever attempted on an unclaimed bounty — PPV-B3 was never attacked",
     );
     console.log(`    coverage: ${JSON.stringify(coverage)}`);
   });

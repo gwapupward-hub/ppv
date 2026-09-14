@@ -131,10 +131,90 @@ test("the destination the generator favours depends on the instruction", () => {
   assert.match(generators, /function destinationArbitrary\(kind: ActionKind\)/);
   assert.match(generators, /kind === "refund" \? "buyer" : "seller"/);
   // The account variant must be drawn per kind, or the kind cannot inform it.
-  assert.match(generators, /kindArbitrary\.chain\(\(kind\)/);
+  assert.match(generators, /kindArbitrary\(flavour\)\.chain\(\(kind\)/);
   // And the wrong-destination attack must still be generated: the weighting
   // moved, the option set did not.
   assert.match(generators, /\.filter\(\(ref\) => ref !== canonical\)/);
+});
+
+test("every agreement type is generated, with its own lifecycle weighted", () => {
+  // RR-1: a milestone or bounty action kind that exists and is never selected
+  // closes nothing. The weights are per flavour so each lifecycle is walked
+  // inside a generated sequence rather than merely being reachable.
+  const generators = readFileSync(
+    join(REPO, "tests", "invariants", "generators.ts"),
+    "utf8",
+  );
+  assert.match(generators, /KIND_WEIGHTS: Record<AgreementFlavour/);
+  for (const flavour of ["escrow", "milestone", "bounty"]) {
+    assert.ok(
+      new RegExp(`^  ${flavour}: \\{`, "m").test(generators),
+      `the generator has no weights for ${flavour}`,
+    );
+  }
+  assert.match(generators, /export function scenarioArbitrary/);
+  assert.match(generators, /constantFrom\(\.\.\.AGREEMENT_FLAVOURS\)/);
+
+  // And the suite must refuse a run that did not reach them.
+  const suite = readFileSync(
+    join(REPO, "tests", "invariants", "protocol.invariant.ts"),
+    "utf8",
+  );
+  for (const floor of [
+    "milestonesScheduled",
+    "milestoneReleases",
+    "milestoneForeignAccountAttempts",
+    "winnerSelections",
+    "bountyUnassignedPayoutAttempts",
+  ]) {
+    assert.ok(
+      suite.includes(`coverage.${floor} > 0`),
+      `the suite has no coverage floor for ${floor}`,
+    );
+  }
+});
+
+test("the randomized property suite is itself mutation-qualified", () => {
+  // RR-8. The host-model qualification proves nothing about the layer that
+  // attacks real custody against a real validator, and that is the layer a
+  // milestone or bounty defect would have to be caught by.
+  const script = readFileSync(join(REPO, "scripts", "mutation-qualify-property.sh"), "utf8");
+
+  // Only the property suite may run, or a deterministic test could be what
+  // "detected" the mutation.
+  assert.match(script, /PPV_ANCHOR_TEST_GLOB="tests\/invariants\/\*\*\/\*\.invariant\.ts"/);
+
+  // The required classes: custody conservation, destination binding, and
+  // lifecycle finality for both milestones and bounties.
+  for (const mutation of [
+    "milestone-double-release",
+    "milestone-recipient",
+    "milestone-overpay",
+    "bounty-winner-replacement",
+  ]) {
+    assert.ok(script.includes(mutation), `no ${mutation} mutation`);
+  }
+
+  // A mutation that does not compile, or a validator that never started, is a
+  // broken mutation rather than a detection.
+  assert.match(script, /MUTATION DID NOT COMPILE — not a qualification/);
+  assert.match(script, /validator did not start; this is not a result/);
+
+  // The suite must be green again afterwards, or "it detected the mutation"
+  // could just mean "it fails on everything".
+  assert.match(script, /clean rerun \(no mutation\)/);
+  assert.match(script, /CLEAN PROPERTY SUITE FAILED after reverting every mutation/);
+
+  // And no mutation may survive into the tree.
+  assert.match(script, /SECURITY: a mutation was left in the working tree/);
+});
+
+test("CI runs the property mutation qualification as its own job", () => {
+  assert.match(CI, /^  property-mutation:$/m);
+  assert.match(CI, /\.\/scripts\/mutation-qualify-property\.sh/);
+  // The job must prove the tree is clean after it, independently of the
+  // script's own trap.
+  assert.match(CI, /git diff --exit-code -- programs\//);
 });
 
 test("the PR tier spends the adversarial budget the docs claim", () => {

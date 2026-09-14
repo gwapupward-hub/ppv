@@ -72,9 +72,11 @@ deliberately absent from `[programs.devnet]` in `Anchor.toml`, from
 so no existing path can deploy it by accident.
 
 **Readiness verdict:
-[PPV ESCROW DEVNET DEPLOYMENT READINESS: NO-GO](security/ppv-escrow-readiness-verdict.md)**
-(Sprint 3). The custody gate below is closed independently of that verdict, and
-a GO would not open it.
+[PPV ESCROW DEVNET DEPLOYMENT READINESS: GO](security/ppv-escrow-readiness-verdict.md)**
+(Sprint 3.1). That GO authorises a separately controlled deployment sprint and
+nothing else. **The custody gate below is closed independently of it and a GO
+does not open it** — the requirements here, including an independent security
+review and a separate multisig, are unmet and unchanged.
 
 The program's instruction surface, its real state graph, and its token-program
 scope are documented in

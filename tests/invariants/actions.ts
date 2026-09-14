@@ -14,6 +14,24 @@ import type { PublicKey } from "@solana/web3.js";
 export type Actor = "buyer" | "seller" | "attacker";
 
 /**
+ * Which kind of agreement the sequence attacks.
+ *
+ * Chosen once per sequence rather than per action, because an agreement's type
+ * is fixed at initialization and the lifecycles genuinely differ: a milestone
+ * contract never reaches `Completed`, and a bounty is the only type that may
+ * exist without a payee. Generating a flavour per sequence keeps one agreement
+ * per sequence — which is what makes conservation measurable and a
+ * counterexample readable — while letting the whole action space apply to each.
+ */
+export type AgreementFlavour = "escrow" | "milestone" | "bounty";
+
+export const AGREEMENT_FLAVOURS: readonly AgreementFlavour[] = [
+  "escrow",
+  "milestone",
+  "bounty",
+];
+
+/**
  * Which agreement account the instruction is pointed at.
  *
  * `unrelated` is a real, correctly-initialized agreement between two wallets
@@ -36,6 +54,40 @@ export type VaultRef = "canonical" | "otherAgreement" | "fake";
 
 /** The PDA asked to sign the vault transfer (PPV-P5). */
 export type AuthorityRef = "canonical" | "otherAgreement";
+
+/**
+ * Which milestone account the instruction carries.
+ *
+ * `first` and `second` are this agreement's own tranches. `foreign` is a real
+ * milestone of a different milestone contract — correctly formed, wrong
+ * relationship, and the account substitution that PPV-M4 and PPV-P9 exist to
+ * refuse. There is no "fake" here because a milestone is an Anchor account
+ * with a discriminator: a non-PDA fails on deserialization rather than on
+ * relationship, which tests Anchor and not this program.
+ */
+export type MilestoneRef = "first" | "second" | "foreign";
+
+export const MILESTONE_SLOTS = ["first", "second"] as const;
+
+/**
+ * A generated milestone allocation.
+ *
+ * `planned` takes the next tranche of a schedule that sums to exactly the
+ * agreement amount, because `fund` refuses a milestone contract whose
+ * schedule does not — so a generator that only ever produced arbitrary amounts
+ * would never fund one, and the whole lifecycle would be unreachable.
+ * `oversized` and `zero` are the two allocations the program must refuse.
+ */
+export type MilestoneAmountRef = "planned" | "oversized" | "zero";
+
+/**
+ * Who a bounty sponsor names as winner. `creator` is the sponsor itself, which
+ * the program refuses; naming the attacker is deliberately not generated,
+ * because a payee that is the attacker would make "the canonical destination"
+ * mean something different for the rest of the sequence and the model would be
+ * describing two protocols at once.
+ */
+export type WinnerRef = "seller" | "creator";
 
 /**
  * A token account by role. `outsider` is the correct mint owned by a wallet
@@ -64,8 +116,10 @@ export type AccountVariant = {
   vaultAuthority: AuthorityRef;
   /** `fund`'s debit side. */
   source: TokenAccountRef;
-  /** `settle`'s credit side. */
+  /** The credit side of every payout. */
   destination: TokenAccountRef;
+  /** Which milestone the milestone instructions carry. */
+  milestone: MilestoneRef;
 };
 
 export type ActionKind =
@@ -75,16 +129,36 @@ export type ActionKind =
   | "cancel"
   | "refund"
   | "dispute"
-  | "resolve";
+  | "resolve"
+  | "createMilestone"
+  | "submitMilestone"
+  | "approveMilestone"
+  | "rejectMilestone"
+  | "settleMilestone"
+  | "selectWinner";
+
+type Common = { actor: Actor; accounts: AccountVariant };
 
 export type GeneratedAction =
-  | { kind: "fund"; actor: Actor; accounts: AccountVariant }
-  | { kind: "complete"; actor: Actor; accounts: AccountVariant }
-  | { kind: "settle"; actor: Actor; accounts: AccountVariant }
-  | { kind: "cancel"; actor: Actor; accounts: AccountVariant }
-  | { kind: "refund"; actor: Actor; accounts: AccountVariant }
-  | { kind: "dispute"; actor: Actor; accounts: AccountVariant }
-  | { kind: "resolve"; actor: Actor; accounts: AccountVariant };
+  | ({ kind: "fund" } & Common)
+  | ({ kind: "complete" } & Common)
+  | ({ kind: "settle" } & Common)
+  | ({ kind: "cancel" } & Common)
+  | ({ kind: "refund" } & Common)
+  | ({ kind: "dispute" } & Common)
+  | ({ kind: "resolve" } & Common)
+  | ({ kind: "createMilestone"; amount: MilestoneAmountRef } & Common)
+  | ({ kind: "submitMilestone" } & Common)
+  | ({ kind: "approveMilestone" } & Common)
+  | ({ kind: "rejectMilestone" } & Common)
+  | ({ kind: "settleMilestone" } & Common)
+  | ({ kind: "selectWinner"; winner: WinnerRef } & Common);
+
+/** One sequence: the agreement it attacks, and what it does to it. */
+export type Scenario = {
+  flavour: AgreementFlavour;
+  actions: GeneratedAction[];
+};
 
 /** Which accounts an instruction actually reads, for compact reporting. */
 const RELEVANT: Record<ActionKind, Array<keyof AccountVariant>> = {
@@ -95,18 +169,33 @@ const RELEVANT: Record<ActionKind, Array<keyof AccountVariant>> = {
   refund: ["agreement", "mint", "vault", "vaultAuthority", "destination"],
   dispute: ["agreement"],
   resolve: ["agreement", "mint", "vault", "vaultAuthority", "destination"],
+  createMilestone: ["agreement"],
+  submitMilestone: ["agreement", "milestone"],
+  approveMilestone: ["agreement", "milestone"],
+  rejectMilestone: ["agreement", "milestone"],
+  settleMilestone: [
+    "agreement",
+    "milestone",
+    "mint",
+    "vault",
+    "vaultAuthority",
+    "destination",
+  ],
+  selectWinner: ["agreement"],
 };
 
 /**
  * A one-line rendering of an action, used in counterexample reports. Only the
  * accounts the instruction takes are printed, so a minimized sequence reads as
- * the attack it is rather than as six fields of noise.
+ * the attack it is rather than as seven fields of noise.
  */
 export function describeAction(action: GeneratedAction): string {
   const deviations = RELEVANT[action.kind]
     .map((field) => [field, action.accounts[field]] as const)
     .filter(([field, value]) => value !== canonicalValue(action.kind, field))
     .map(([field, value]) => `${field}=${value}`);
+  if (action.kind === "createMilestone") deviations.unshift(`amount=${action.amount}`);
+  if (action.kind === "selectWinner") deviations.unshift(`winner=${action.winner}`);
   const suffix = deviations.length === 0 ? "canonical" : deviations.join(" ");
   return `${action.kind}(${action.actor}) [${suffix}]`;
 }
@@ -114,13 +203,13 @@ export function describeAction(action: GeneratedAction): string {
 /**
  * The value of each variant field that names the agreement's own accounts.
  *
- * `destination` depends on the instruction, because the three payout paths do
- * not pay the same party: settlement pays the seller, a refund pays the buyer,
- * and a dispute resolution pays whichever party the *other* one conceded to —
- * so neither of its two legal destinations is more canonical than the other.
- * Calling the seller's account "the canonical destination" for a refund would
- * classify every legitimate refund as an attack and quietly inflate the
- * wrong-relationship coverage counter.
+ * `destination` depends on the instruction, because the payout paths do not
+ * pay the same party: settlement and milestone release pay the seller, a
+ * refund pays the buyer, and a dispute resolution pays whichever party the
+ * *other* one conceded to — so neither of its two legal destinations is more
+ * canonical than the other. Calling the seller's account "the canonical
+ * destination" for a refund would classify every legitimate refund as an
+ * attack and quietly inflate the wrong-relationship coverage counter.
  */
 function canonicalValue(kind: ActionKind, field: keyof AccountVariant): string {
   switch (field) {
@@ -128,6 +217,8 @@ function canonicalValue(kind: ActionKind, field: keyof AccountVariant): string {
       return "buyer";
     case "destination":
       return kind === "refund" ? "buyer" : "seller";
+    case "milestone":
+      return "first";
     default:
       return "canonical";
   }
@@ -149,9 +240,12 @@ export function isCanonicallyAddressed(action: GeneratedAction): boolean {
         .every((field) => action.accounts[field] === canonicalValue(action.kind, field))
     );
   }
-  return RELEVANT[action.kind].every(
-    (field) => action.accounts[field] === canonicalValue(action.kind, field),
-  );
+  // Either of this agreement's own tranches is a canonical milestone; only a
+  // foreign one is a wrong relationship.
+  return RELEVANT[action.kind].every((field) => {
+    if (field === "milestone") return action.accounts.milestone !== "foreign";
+    return action.accounts[field] === canonicalValue(action.kind, field);
+  });
 }
 
 export type ActionResult = {

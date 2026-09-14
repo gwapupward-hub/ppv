@@ -33,6 +33,20 @@ function coverage(attempted) {
     resolutions: 2,
     postTerminalAttempts: 6,
     sequences: 100,
+    escrowSequences: 40,
+    milestoneSequences: 30,
+    bountySequences: 30,
+    milestoneActions: 120,
+    milestonesScheduled: 20,
+    milestoneReleases: 8,
+    milestoneDuplicateReleaseAttempts: 5,
+    milestoneForeignAccountAttempts: 9,
+    milestonePostTerminalAttempts: 4,
+    bountyActions: 90,
+    winnerSelections: 12,
+    winnerReplacementAttempts: 7,
+    bountyPayouts: 6,
+    bountyUnassignedPayoutAttempts: 11,
   };
 }
 
@@ -95,6 +109,22 @@ describe("sum-invariant-coverage", () => {
     const result = run(dir, "8000", "10");
     assert.equal(result.status, 1);
     assert.match(result.stderr, /no dispute was ever opened/);
+  });
+
+  test("fails when a lifecycle exists in the generator but was never reached", () => {
+    // RR-1's failure mode exactly: the action kinds are present, nothing ever
+    // selected them, and every older floor still passes.
+    const neverReleased = { ...coverage(9000), milestoneReleases: 0 };
+    writeFileSync(join(dir, "11.json"), JSON.stringify(neverReleased));
+    const result = run(dir, "8000", "11");
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /no milestone was ever released/);
+
+    const noBounties = { ...coverage(9000), bountySequences: 0 };
+    writeFileSync(join(dir, "12.json"), JSON.stringify(noBounties));
+    const second = run(dir, "8000", "12");
+    assert.equal(second.status, 1);
+    assert.match(second.stderr, /no bounty was ever generated/);
   });
 
   test("refuses a non-positive floor rather than passing everything", () => {

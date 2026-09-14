@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -30,27 +30,103 @@ const SPRINT2 = read("docs", "releases", "ppv-escrow-readiness-assessment.md");
 const PLACEHOLDER = "7BECot7zFqH2oCxTu9uLmmwvzQSBtxWro47jMa2MqUdR";
 const SQUADS_VAULT = "B6tcsTrMCKTZV5vi3rRCnA3FMPeeWACSHuuTSz5XQgnX";
 
-test("the verdict is NO-GO, and says so before it says anything else", () => {
-  assert.match(VERDICT, /^# PPV ESCROW DEVNET DEPLOYMENT READINESS: NO-GO$/m);
+test("the verdict is GO, and says so before it says anything else", () => {
+  assert.match(VERDICT, /^# PPV ESCROW DEVNET DEPLOYMENT READINESS: GO$/m);
   // The opposite string must not appear anywhere: a document containing both
   // is a document nobody can act on.
   assert.doesNotMatch(
     VERDICT,
-    /DEVNET DEPLOYMENT READINESS: GO/,
-    "the verdict document also contains a GO",
+    /DEVNET DEPLOYMENT READINESS: NO-GO/,
+    "the verdict document also contains a NO-GO",
   );
 });
 
-test("both blockers are named, and both are marked as blocking in the register", () => {
-  assert.match(VERDICT, /### Blocker 1 — milestones and bounties are not modelled under randomized adversarial execution/);
-  assert.match(VERDICT, /### Blocker 2 — the randomized layer is not mutation-qualified/);
-  assert.match(VERDICT, /Tracked as \*\*RR-1\*\*/);
-  assert.match(VERDICT, /Tracked as \*\*RR-8\*\*/);
+test("the GO is bounded: qualification is not permission to deploy", () => {
+  // The failure this guards is a GO read as a deploy button. Three
+  // prerequisites are open and none of them is code.
+  assert.match(VERDICT, /## What this GO means, and what it does not/);
+  assert.match(VERDICT, /separately controlled\*{0,2} deployment sprint/);
+  assert.match(VERDICT, /SECURITY QUALIFICATION GO is not READY TO DEPLOY/);
+  for (const prerequisite of ["RR-11", "RR-12", "RR-13"]) {
+    assert.ok(
+      VERDICT.includes(prerequisite),
+      `the verdict does not name ${prerequisite} as a deployment prerequisite`,
+    );
+  }
+});
 
-  // And the register agrees, so the two documents cannot drift apart.
-  assert.match(REGISTER, /### RR-1 — .*— \*\*BLOCKS GO\*\*/);
-  assert.match(REGISTER, /### RR-8 — .*— \*\*BLOCKS GO\*\*/);
-  assert.match(REGISTER, /NO-GO/);
+test("neither former blocker may quietly reappear as blocking", () => {
+  // RR-1 and RR-8 are closed with evidence. If either is ever marked BLOCKS GO
+  // again, the verdict above is stale and must not stay GO.
+  assert.match(REGISTER, /### RR-1 — .*— \*\*CLOSED\*\*/);
+  assert.match(REGISTER, /### RR-8 — .*— \*\*CLOSED\*\*/);
+  assert.doesNotMatch(
+    REGISTER,
+    /BLOCKS GO/,
+    "a residual risk is marked BLOCKS GO while the verdict says GO",
+  );
+  assert.match(REGISTER, /READINESS: GO/);
+});
+
+test("the evidence that closed each blocker is recorded, not just the outcome", () => {
+  // A CLOSED with no numbers behind it is an assertion, not evidence.
+  // RR-1: every lifecycle must show randomized counts.
+  for (const counter of [
+    "milestoneSequences",
+    "bountySequences",
+    "milestoneReleases",
+    "winnerSelections",
+    "bountyUnassignedPayoutAttempts",
+  ]) {
+    assert.ok(REGISTER.includes(counter), `RR-1 records no ${counter} count`);
+  }
+  // RR-8: every mutation must name its class and its seed.
+  assert.match(REGISTER, /mutation-qualify-property\.sh/);
+  for (const cls of [
+    "milestone lifecycle finality",
+    "destination binding",
+    "custody conservation",
+    "bounty lifecycle finality",
+  ]) {
+    assert.ok(REGISTER.includes(cls), `RR-8 records no ${cls} mutation`);
+  }
+  // And the harnesses that produce that evidence must still exist.
+  for (const script of ["mutation-qualify-property.sh", "mutation-qualify.sh"]) {
+    assert.ok(
+      existsSync(join(REPO, "scripts", script)),
+      `${script} is gone, but the verdict cites it`,
+    );
+  }
+  assert.ok(
+    existsSync(join(REPO, "tests", "invariants", "reachability.test.ts")),
+    "the reachability guard is gone, but RR-1 cites it",
+  );
+});
+
+test("the randomized suite still carries the lifecycles that closed RR-1", () => {
+  // The closure is only true while the actions exist and the floors demand
+  // them. Deleting either turns the GO into a claim about nothing.
+  const actions = read("tests", "invariants", "actions.ts");
+  for (const kind of [
+    "createMilestone",
+    "submitMilestone",
+    "approveMilestone",
+    "rejectMilestone",
+    "settleMilestone",
+    "selectWinner",
+  ]) {
+    assert.ok(actions.includes(kind), `the property suite lost the ${kind} action`);
+  }
+  const suite = read("tests", "invariants", "protocol.invariant.ts");
+  for (const floor of [
+    "milestonesScheduled",
+    "milestoneReleases",
+    "milestoneForeignAccountAttempts",
+    "winnerSelections",
+    "bountyUnassignedPayoutAttempts",
+  ]) {
+    assert.ok(suite.includes(`coverage.${floor} > 0`), `the suite lost the ${floor} floor`);
+  }
 });
 
 test("the placeholder id is never represented as an approved permanent identity", () => {
@@ -104,12 +180,17 @@ test("escrow is recorded as undeployed with the custody gate closed", () => {
   assert.match(VERDICT, /\*\*PPV ESCROW DEPLOYED: NO\. PPV ESCROW CUSTODY GATE: CLOSED\.\*\*/);
   // The gate document must point at the verdict, or an operator reading the
   // gates never learns one was issued.
-  assert.match(GATES, /PPV ESCROW DEVNET DEPLOYMENT READINESS: NO-GO/);
+  assert.match(GATES, /PPV ESCROW DEVNET DEPLOYMENT READINESS: GO/);
+  // The gate is closed independently of the verdict, and must say so.
+  assert.match(GATES, /a GO\s*\n?does not open it/);
   assert.match(GATES, /security\/ppv-escrow-readiness-verdict\.md/);
 });
 
 test("the matrix does not read as a verdict, and Sprint 2's GO is marked superseded", () => {
-  assert.match(MATRIX, /readiness verdict is\s*\n?\[\*\*NO-GO\*\*\]/);
+  assert.match(MATRIX, /readiness verdict is\s*\n?\[\*\*GO\*\*\]/);
+  // And the matrix must say what the GO is bounded to, so a reader who starts
+  // there does not conclude the program is deployable.
+  assert.match(MATRIX, /separately controlled deployment sprint and nothing else/);
   // Sprint 2 answered "should the next sprint be a security sprint", and its
   // GO must not be mistaken for a deployment-readiness verdict.
   assert.match(SPRINT2, /> \*\*Superseded in part\.\*\*/);

@@ -36,7 +36,20 @@ export type InvariantId =
   | "PPV-D2"
   | "PPV-D3"
   | "PPV-D4"
-  | "PPV-D5";
+  | "PPV-D5"
+  // Milestone and bounty invariants. A milestone contract reaches `Settled` by
+  // a route that shares no guard with the ordinary path, and a bounty is the
+  // only agreement whose payee is not fixed at creation — so both need claims
+  // of their own rather than a PPV-P* that happens to cover them.
+  | "PPV-M1"
+  | "PPV-M2"
+  | "PPV-M3"
+  | "PPV-M5"
+  | "PPV-B1"
+  | "PPV-B2";
+
+/** `Pubkey::default()` — the field a bounty holds until a winner is named. */
+const UNASSIGNED_PAYEE = "11111111111111111111111111111111";
 
 export type CheckContext = {
   seed: number;
@@ -208,12 +221,43 @@ export function assertInvariants(ctx: CheckContext): void {
     fail("PPV-P2", "the agreement account disappeared", ctx);
   }
 
-  // PPV-P6 — for an ordinary escrow the parties are fixed at initialization.
+  // PPV-P6 — the creator is fixed at initialization, always.
   if (post.agreement.creator !== ctx.initial.buyer) {
     fail("PPV-P6", "the agreement's creator changed", ctx);
   }
-  if (post.agreement.counterparty !== ctx.initial.seller) {
-    fail("PPV-P6", "the agreement's counterparty changed", ctx);
+
+  // PPV-P6 / PPV-B1 — the payee is fixed too, with exactly one exception: a
+  // bounty may be named a winner once, from unassigned. That single transition
+  // is the whole reason a bounty may exist without a payee, and forbidding
+  // every other change to the field is what keeps it safe. Written as two
+  // rules rather than one comparison against the initial value, because "it
+  // never changed" is false for a bounty and "it may change" is false for
+  // everything else.
+  if (post.agreement.counterparty !== pre.agreement.counterparty) {
+    if (pre.agreement.exists && pre.agreement.counterparty !== UNASSIGNED_PAYEE) {
+      fail(
+        "PPV-B1",
+        `the payee was replaced: ${pre.agreement.counterparty} -> ${post.agreement.counterparty}`,
+        ctx,
+      );
+    }
+    if (post.agreement.counterparty !== ctx.initial.seller) {
+      fail(
+        "PPV-B1",
+        `the payee was assigned to ${post.agreement.counterparty}, which is not the seller`,
+        ctx,
+      );
+    }
+    if (!result.succeeded) {
+      fail("PPV-P8", "a refused action assigned the payee", ctx);
+    }
+  }
+  if (
+    post.agreement.counterparty === pre.agreement.counterparty &&
+    ctx.model.flavour !== "bounty" &&
+    post.agreement.counterparty !== ctx.initial.seller
+  ) {
+    fail("PPV-P6", "the agreement's counterparty is not the party it was created with", ctx);
   }
 
   // PPV-P7 — the mint is fixed forever.
@@ -257,6 +301,73 @@ export function assertInvariants(ctx: CheckContext): void {
       `settled total ${post.agreement.settledTotal} exceeds the escrowed amount ${post.agreement.amount}`,
       ctx,
     );
+  }
+
+  // PPV-M1 — a schedule may never promise more than the escrow will hold.
+  if (post.agreement.milestoneTotal > post.agreement.amount) {
+    fail(
+      "PPV-M1",
+      `the schedule promises ${post.agreement.milestoneTotal} of ${post.agreement.amount}`,
+      ctx,
+    );
+  }
+  // PPV-M2 — released never exceeds funded. Stated over the chain's own
+  // counter rather than over the model, so it holds even if the model is the
+  // thing that is wrong.
+  if (post.agreement.settledTotal > post.agreement.milestoneTotal &&
+      post.agreement.agreementType === "milestoneContract") {
+    fail(
+      "PPV-M2",
+      `released ${post.agreement.settledTotal} against a schedule of ${post.agreement.milestoneTotal}`,
+      ctx,
+    );
+  }
+  // PPV-M3 — a tranche releases at most once, so the settled count can never
+  // exceed the number that exist, and can only ever go up.
+  if (post.agreement.milestonesSettled > post.agreement.milestoneCount) {
+    fail(
+      "PPV-M3",
+      `${post.agreement.milestonesSettled} tranches settled of ${post.agreement.milestoneCount}`,
+      ctx,
+    );
+  }
+  if (pre.agreement.exists && post.agreement.milestonesSettled < pre.agreement.milestonesSettled) {
+    fail("PPV-M3", "the settled-tranche count went backwards", ctx);
+  }
+  // PPV-M5 — terminal compatibility, stated in the direction that can actually
+  // be violated: releasing every tranche must finish the agreement.
+  //
+  // The converse is *not* an invariant, and asserting it was a mistake this
+  // suite caught on its first release run. A milestone contract can reach
+  // `Settled` with every tranche still pending, by dispute concession: the
+  // buyer concedes, `resolve_dispute` pays the whole remaining balance to the
+  // seller, and the agreement terminates. That is the mirror image of a refund
+  // on a milestone contract, which returns the tranches nobody earned and is
+  // documented behaviour — and it is safe for the same reason, because
+  // `require_milestone_active` demands `Funded` and a terminal agreement can
+  // never release another tranche.
+  //
+  // What the custody claim actually needs is elsewhere and already asserted: a
+  // settled agreement has paid out exactly `amount` (PPV-P3 above), and the
+  // total conserves (PPV-P1). "Every tranche settled" was a proxy for those,
+  // and a wrong one.
+  if (
+    post.agreement.agreementType === "milestoneContract" &&
+    post.agreement.milestoneCount > 0 &&
+    post.agreement.milestonesSettled === post.agreement.milestoneCount &&
+    post.agreement.state !== "settled"
+  ) {
+    fail(
+      "PPV-M5",
+      `every one of ${post.agreement.milestoneCount} tranches is released but the agreement is ${post.agreement.state}`,
+      ctx,
+    );
+  }
+  // PPV-B2 — a bounty pays once. `settlementCount` counts every path that
+  // credits the seller, so this is the same statement as PPV-P3 made where a
+  // bounty-specific report is more useful than a generic one.
+  if (ctx.model.flavour === "bounty" && ctx.settlementCount > 1) {
+    fail("PPV-B2", `the bounty paid ${ctx.settlementCount} times`, ctx);
   }
   // A refunded agreement paid out everything the vault still owed, by the same
   // rule and for the same reason as a settled one: the money is gone and the
