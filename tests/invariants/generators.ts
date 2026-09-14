@@ -250,25 +250,97 @@ function actionArbitrary(flavour: AgreementFlavour): fc.Arbitrary<GeneratedActio
 }
 
 /**
- * A bounded sequence against one agreement of one flavour.
+ * The canonical lifecycle of each flavour, in order.
  *
- * `minLength: 1` keeps shrinking from producing the empty sequence, which
- * proves nothing and is never the counterexample anyone wants. `size: "max"`
- * makes generation aim at the budget rather than at fast-check's default small
- * arrays — without it a "twenty action" budget spends about seven. Length still
- * shrinks all the way back to one.
+ * Directed setup, then randomized attack. A pure random walk reaches shallow
+ * states and stops: releasing a milestone tranche needs six specific actions in
+ * order — schedule, schedule, fund, submit, approve, release — each with the
+ * right actor and canonical accounts. At the weights above each step lands with
+ * probability 0.04 to 0.12 per slot, so the expected sequence length to reach
+ * one release is about 47 actions against a budget of 32. The first release run
+ * of this suite scheduled tranches and released none, across two hundred
+ * sequences.
  *
- * The flavour is generated with the sequence rather than fixed per run, so a
+ * So a generated scenario walks a *generated prefix* of this list and then
+ * attacks whatever state that reached. The prefix length is generated too and
+ * shrinks toward zero, so a counterexample minimizes to the shortest setup that
+ * still breaks the property, and a zero-length prefix is the old pure random
+ * walk — which is still generated, and still finds what it always found.
+ *
+ * Nothing here is assumed to succeed. Every prefix action goes through the same
+ * model prediction and the same assertions as a random one; the prefix decides
+ * what is attempted, never what is true.
+ */
+function canonicalPrefix(flavour: AgreementFlavour): GeneratedAction[] {
+  const accounts = (milestone: MilestoneRef = "first"): AccountVariant => ({
+    agreement: "canonical",
+    mint: "canonical",
+    vault: "canonical",
+    vaultAuthority: "canonical",
+    source: "buyer",
+    destination: "seller",
+    milestone,
+  });
+  const act = (kind: ActionKind, milestone: MilestoneRef = "first"): GeneratedAction =>
+    ({
+      kind,
+      actor: EXPECTED_ACTOR[kind],
+      accounts: accounts(milestone),
+      amount: "planned",
+      winner: "seller",
+    }) as GeneratedAction;
+
+  switch (flavour) {
+    case "escrow":
+      return [act("fund"), act("complete"), act("settle")];
+    case "bounty":
+      // The winner first: a bounty may be named one while open or funded, and
+      // naming it first is what makes the rest of the lifecycle legal.
+      return [act("selectWinner"), act("fund"), act("complete"), act("settle")];
+    case "milestone":
+      return [
+        act("createMilestone", "first"),
+        act("createMilestone", "second"),
+        act("fund"),
+        act("submitMilestone", "first"),
+        act("approveMilestone", "first"),
+        act("settleMilestone", "first"),
+        act("submitMilestone", "second"),
+        act("approveMilestone", "second"),
+        act("settleMilestone", "second"),
+      ];
+  }
+}
+
+/**
+ * A bounded scenario: one agreement of one flavour, a generated amount of its
+ * canonical lifecycle, and a randomized attack on whatever that reached.
+ *
+ * `minLength: 1` on the tail keeps shrinking from producing a sequence that
+ * only walks the happy path, which proves nothing. `size: "max"` makes
+ * generation aim at the budget rather than at fast-check's default small
+ * arrays — without it a "twenty action" budget spends about seven.
+ *
+ * The flavour is generated with the scenario rather than fixed per run, so a
  * single seed attacks all three lifecycles. `escrow` is listed first because
  * fast-check shrinks toward it, and a counterexample that survives
  * simplification to an ordinary escrow is the clearest one to read.
  */
 export function scenarioArbitrary(maxActions: number): fc.Arbitrary<Scenario> {
-  return fc
-    .constantFrom(...AGREEMENT_FLAVOURS)
-    .chain((flavour) =>
-      fc
-        .array(actionArbitrary(flavour), { minLength: 1, maxLength: maxActions, size: "max" })
-        .map((actions) => ({ flavour, actions })),
-    );
+  return fc.constantFrom(...AGREEMENT_FLAVOURS).chain((flavour) => {
+    const prefix = canonicalPrefix(flavour);
+    return fc
+      .record({
+        prefixLength: fc.nat({ max: prefix.length }),
+        tail: fc.array(actionArbitrary(flavour), {
+          minLength: 1,
+          maxLength: maxActions,
+          size: "max",
+        }),
+      })
+      .map(({ prefixLength, tail }) => ({
+        flavour,
+        actions: [...prefix.slice(0, prefixLength), ...tail].slice(0, maxActions),
+      }));
+  });
 }
