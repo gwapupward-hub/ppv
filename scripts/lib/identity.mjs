@@ -28,6 +28,36 @@ export const PROGRAM_NAMES = Object.freeze(Object.keys(PERMANENT_PROGRAM_IDS));
  */
 export const UNRELEASED_PROGRAMS = Object.freeze(["ppv_escrow"]);
 
+/**
+ * The permanent `ppv_escrow` identity, once the ceremony has produced one.
+ *
+ * `null` means it does not exist yet, which is a fact about the world rather
+ * than a placeholder to fill in casually: no keypair has been generated, so
+ * none can leak and no address can be occupied by accident. The build-only id
+ * in `declare_id!` is not this and must never be recorded as if it were.
+ *
+ * Setting this is the identity freeze. Every check in
+ * `scripts/test/escrow-identity.test.mjs` switches from "escrow is unreleased
+ * everywhere" to "every source names exactly this id", so the two states are
+ * both enforced and neither can be half-entered. Set it only from the public
+ * address the ceremony derives, and in the same commit as the `declare_id!`
+ * and `Anchor.toml` changes.
+ */
+export const ESCROW_PERMANENT_ID = null;
+
+/** The build-only id `ppv_escrow` carries until the ceremony replaces it. */
+export const ESCROW_PLACEHOLDER_ID = "7BECot7zFqH2oCxTu9uLmmwvzQSBtxWro47jMa2MqUdR";
+
+/**
+ * The custody governance `ppv_escrow` will be released under, once it exists.
+ *
+ * `null` for the same reason: a dedicated multisig separate from the one
+ * governing the non-custodial programs has not been created. Recording a
+ * placeholder here would let a release be assembled against governance nobody
+ * holds.
+ */
+export const ESCROW_CUSTODY_GOVERNANCE = null;
+
 /** The BPF upgradeable loader. A program owned by anything else is not one. */
 export const UPGRADEABLE_LOADER_ID = "BPFLoaderUpgradeab1e11111111111111111111111";
 

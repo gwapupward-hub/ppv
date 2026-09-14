@@ -168,18 +168,32 @@ instruction surface and the real state graph are in
 ## What a deployment sprint must still do
 
 Nothing in the residual-risk register blocks this GO. Three entries block a
-*deployment*, and each is an operator task rather than an engineering one:
+*deployment*, and each is an operator task rather than an engineering one. The
+ceremony is written out step by step in
+[the release runbook](../ppv-escrow-release-runbook.md).
 
 1. **RR-12** — generate the permanent `ppv_escrow` identity, in the same kind of
-   ceremony that produced Core's and Commerce's. No keypair exists today, which
-   is the safest state an unreleased identity can be in.
-2. **RR-11** — create the separate custody multisig, so that compromising the
-   non-custodial programs' vault cannot reach Escrow's. New keys, new holders,
-   new threshold policy, and real lead time.
+   ceremony that produced Core's and Commerce's, and freeze it across every
+   identity source in one commit. No keypair exists today, which is the safest
+   state an unreleased identity can be in.
+   `scripts/test/escrow-identity.test.mjs` enforces both states and refuses a
+   half-entered transition.
+2. **RR-11** — create the dedicated custody multisig, so that compromising the
+   non-custodial programs' governance cannot reach Escrow's vault.
+   `scripts/verify-custody-governance.mjs` proves a configuration satisfies
+   policy before it is given authority over anything, from public facts alone.
 3. **RR-13** — obtain an independent security review of the custody path. Two
    sprints of self-review found three custody-relevant defects, which is
    evidence that the surface rewards attention, not a substitute for someone
    else attacking it.
 
-Then, and only then, the deployment itself: binary provenance, the Squads
-authority handoff, and live validation.
+Then the deployment itself: one initial deploy at the permanent address,
+immediate authority transfer to the custody vault, binary provenance proved by
+byte-equal hashes, a frozen evidence record, live custody validation, and only
+then the custody gate.
+
+`ppv_escrow` is deliberately absent from `[programs.devnet]`, from the deploy
+workflow's program choices and from `record-deployment.sh`, and stays absent
+until the identity freeze. Wiring a deploy path before a permanent identity
+exists would create a button pointing at the build-only placeholder — an address
+nobody chose, on the one program that holds value.

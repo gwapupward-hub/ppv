@@ -251,16 +251,34 @@ them, and either can end it unilaterally in the other's favour at any time.
 
 ## DEFERRED
 
-### RR-11 — A second, independent upgrade multisig does not exist
+### RR-11 — A dedicated custody multisig does not exist
 
 The custody gate requires Escrow's upgrade authority to be held by a multisig
 **separate** from the non-custodial programs, so compromising one cannot reach
 the other. There is one Squads 2-of-3 vault today
 (`B6tcsTrMCKTZV5vi3rRCnA3FMPeeWACSHuuTSz5XQgnX`), holding Core and Commerce.
 
-This is a prerequisite for deployment with real lead time — new keys, new
-holders, new threshold policy — and it is not something a code sprint can
-produce.
+*Unchanged in severity, now closeable.* Sprint 4 added
+`scripts/verify-custody-governance.mjs`, which proves a proposed custody
+multisig satisfies policy **before** it is given authority over anything, using
+only public facts — no key material, so anyone can run it, before the ceremony
+and after. It refuses a threshold of one, duplicate members, a vault on the
+ed25519 curve, a vault or multisig among its own members, and the non-custodial
+vault reused as the custody vault.
+
+It also refuses **shared signers** by default. Two multisigs at different
+addresses held by the same people fall to one compromise of those people, so
+"separate" is a claim about people as well as addresses. The override exists and
+has to be taken deliberately.
+
+*Closure condition:* a multisig exists on devnet, the verifier prints
+`PPV_CUSTODY_GOVERNANCE_VALID` against it, and `ESCROW_CUSTODY_GOVERNANCE` in
+`scripts/lib/identity.mjs` records it. Step 2 of
+[the release runbook](../ppv-escrow-release-runbook.md).
+
+*Why it is still open:* creating it requires funded wallets held by the people
+who will hold the threshold. That is a decision about who governs custody, not
+a task an agent can perform.
 
 ### RR-12 — No permanent Escrow identity exists
 
@@ -270,9 +288,28 @@ produce.
 `scripts/lib/identity.mjs` names escrow unreleased explicitly rather than
 omitting it.
 
-This is the safest state an unreleased identity can be in: no keypair exists,
-so none can leak and no address can be occupied by accident. Generating one is
-a deliberate ceremony belonging to the deployment sprint.
+This is the safest state an unreleased identity can be in: no keypair exists, so
+none can leak and no address can be occupied by accident.
+
+*Unchanged in severity, now closeable.* `ESCROW_PERMANENT_ID` and
+`ESCROW_CUSTODY_GOVERNANCE` are `null` in the identity table, and
+`scripts/test/escrow-identity.test.mjs` enforces **both** states: while the id is
+`null`, escrow must be unreleased everywhere and the placeholder must not appear
+in any release record or deploy path; once it is set, `declare_id!`,
+`Anchor.toml` (both sections), the permanent-identity table and the governance
+record must all agree. A half-entered freeze cannot be committed — setting the
+constant alone fails, changing `declare_id!` alone fails, and setting the
+constant to the placeholder fails.
+
+*Closure condition:* step 1 and step 3 of
+[the release runbook](../ppv-escrow-release-runbook.md).
+
+*Why it is still open:* generating the keypair produces permanent key material
+whose only legitimate home is the `PPV_ESCROW_PROGRAM_KEYPAIR` repository
+secret. An agent that generated it would have nowhere to put it — printing or
+committing it is forbidden, and this session cannot write repository secrets —
+so generating it would mean creating a key that must immediately be destroyed or
+leaked. Not generating it is strictly safer.
 
 ### RR-13 — No independent security review
 
