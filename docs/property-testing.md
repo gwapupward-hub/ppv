@@ -218,182 +218,73 @@ catches a family that vanished; it does not catch one that is present and
 barely exercised. When a family's success count is an order of magnitude below
 its siblings', the generator is the first place to look.
 
-About 10% of generated actions are accepted and about 36% present a correctly
-formed account in the wrong relationship — the balance the generator weights
-exist to hold: deep enough to reach `Settled` inside the budget, adversarial
-enough that most of the run is an attack.
+### And what a floor of "greater than zero" cannot catch at all
 
-## Coverage floors
+When milestones and bounties joined the model, the first release run failed a
+floor outright: tranches scheduled, none released. Reaching a release needs six
+ordered actions — schedule, schedule, fund, submit, approve, release — each with
+the right actor and canonical accounts, and at the weights in use each step
+landed with probability 0.04 to 0.12 per slot. The expected sequence length to
+reach one release was about 47 actions against a budget of 32: reachable in
+principle, unreachable in practice.
 
-A property suite whose generator quietly stops producing settlements still
-prints a green line. This one does not: after the run it asserts that it
-actually reached the states its invariants are about — at least one successful
-funding, completion, settlement and cancellation, at least one action attempted
-against a terminal agreement, and at least one wrong-relationship account
-refused. It also prints the whole coverage record, so a drift is visible in the
-log before it becomes a hole in the gate.
+Three generator defects were behind it, and each is a shape worth recognising:
 
-## Seeds, replay, and shrinking
+* **A deviation weight applied to something that is not a deviation.**
+  `weighted("first", "second", "foreign")` gave the agreement's *own* second
+  tranche the same one-in-twelve share as an account belonging to a different
+  contract. Only `foreign` is a deviation.
+* **A fixed order where the program has none.** Tranches were always released
+  smallest-last, so the state where a repeat release fits inside the remaining
+  balance never arose — and a missing single-release guard stayed masked by the
+  custody cap.
+* **`fc.nat` is biased toward small values.** Prefix lengths drawn with it
+  concentrated on "barely started", so the deep states the prefix exists to
+  reach were under-sampled by the run meant to reach them.
 
-Every execution is seeded and every failure is reproducible. A failure reports:
+The structural answer is a generated *prefix* of each flavour's canonical
+lifecycle, followed by a randomized attack on whatever state it reached. The
+prefix length is generated and shrinks toward zero, so a counterexample still
+minimizes to the shortest setup that breaks the property, and a zero-length
+prefix is the pure random walk the suite always did.
 
-* the random seed,
-* fast-check's shrink path,
-* the minimized action sequence,
-* the index of the action where divergence first occurred,
-* the expected model state,
-* the observed chain state,
-* the relevant balances (both snapshots, plus the conservation arithmetic),
-* the violated invariant ID,
-* and a copy-pasteable replay command.
+Nothing in the prefix is assumed to succeed: every prefix action goes through
+the same model prediction and the same assertions as a random one. The prefix
+decides what is attempted, never what is true. A separate assertion keeps it
+honest — acceptance must stay under 40% of attempted actions, or the setup has
+taken over and the attack has been diluted into a happy-path walk.
 
-```text
-  violated invariant : PPV-P10
-  seed               : 20260912
-  replay             : PPV_INVARIANT_SEED=20260912 npm run test:invariants:seed
-  divergence index   : 1 of 2
-  action sequence    :
-       [0] fund(buyer) [canonical]
-    >> [1] settle(seller) [canonical]
+### Reachability is now a millisecond question
+
+`tests/invariants/reachability.test.ts` walks sampled scenarios through the
+model alone and asserts that every lifecycle the coverage floors demand is
+actually reached, with margin. It proves nothing about the program — it assumes
+the chain agrees with the model, which is the one thing it cannot check — but it
+answers the question that used to cost forty minutes of CI, and every generator
+defect above was found with it rather than by waiting.
+
+The release-tier coverage after all of it, 5 seeds × 200 sequences:
+
+```json
+{"attempted":17607,"succeeded":3532,"refused":14075,"refusedNonCanonical":4856,
+ "escrowSequences":362,"milestoneSequences":315,"bountySequences":323,
+ "milestoneActions":4998,"milestonesScheduled":576,"milestoneReleases":169,
+ "milestoneDuplicateReleaseAttempts":348,"milestoneForeignAccountAttempts":362,
+ "milestonePostTerminalAttempts":1185,"bountyActions":5577,
+ "winnerSelections":306,"winnerReplacementAttempts":1081,"bountyPayouts":93,
+ "bountyUnassignedPayoutAttempts":144,"postTerminalAttempts":6028}
 ```
 
-Shrinking is enabled (`endOnFailure: false`). Every arbitrary lists its
-canonical option first, because fast-check shrinks toward the first entry — so a
-minimized counterexample is the *most honest* sequence that still breaks the
-property, not an arbitrary pile of substituted accounts. A seven-action sequence
-such as
+## Does the suite detect defects, or only pass correct code?
 
-```text
-fund, complete, settle, cancel, fund, settle, settle
-```
+Two harnesses, because an answer about one layer says nothing about the other.
+`scripts/mutation-qualify.sh` breaks seven defences and requires the *host*
+suite to fail. `scripts/mutation-qualify-property.sh` breaks four and requires
+*this* suite to fail, pinned to `tests/invariants/**/*.invariant.ts` so no
+deterministic test can be what noticed.
 
-reduces toward the two actions that actually matter.
-
-To replay one exact counterexample rather than a whole seed:
-
-```bash
-PPV_INVARIANT_SEED=<seed> PPV_INVARIANT_PATH=<path> npm run test:invariants:seed
-```
-
-Random failures that cannot be reproduced are not accepted as findings.
-
-## Regressions
-
-Every real bug the harness finds becomes a permanent deterministic test under
-`tests/invariants/regression/`, or joins the existing deterministic suite when
-that is the more natural home. Regressions are seedless, written out action by
-action, and run in the F1 suite on every pull request — a counterexample that
-lives only in a seed disappears the first time a generator is re-weighted.
-
-Replays go through the same `runner.ts` as the property gate, so all ten
-invariants are asserted after every action of a regression, not just the one
-that originally broke.
-
-## Mutation evidence
-
-A harness that passes against correct code has proved nothing. This one was
-qualified by deliberately breaking the program and confirming the suite finds
-it.
-
-**Mutation.** In `programs/ppv_escrow/src/state/agreement.rs`,
-`require_settleable` was changed to accept `Funded` as well as `Completed` —
-removing the completion requirement from normal settlement:
-
-```rust
--        require!(
--            self.state == AgreementState::Completed,
--            EscrowError::BadState
--        );
-+        require!(
-+            matches!(
-+                self.state,
-+                AgreementState::Completed | AgreementState::Funded
-+            ),
-+            EscrowError::BadState
-+        );
-```
-
-**Result.** `PPV_INVARIANT_SEED=20260912 PPV_INVARIANT_SEQUENCES=40 npm run
-test:invariants:seed` found it on the third generated sequence and shrank it in
-three steps:
-
-```text
-PPV protocol invariant violated.
-  seed            : 20260912
-  shrink path     : 2:4:4:8
-  replay          : PPV_INVARIANT_SEED=20260912 PPV_INVARIANT_PATH=2:4:4:8 npm run test:invariants:seed
-  runs executed   : 3
-  shrinks applied : 3
-  minimized to    : 3 action(s)
-    [0] fund(buyer) [canonical]
-    [1] settle(seller) [canonical]
-    [2] complete(seller) [canonical]
-
-  violated invariant : PPV-MODEL
-  detail             : the chain accepted an action the model says is illegal
-  divergence index   : 1 of 3
-  prediction         : FAIL — settlement requires state completed, model is funded
-  chain outcome      : SUCCEEDED
-  expected model     : state funded,  vaultBalance 1000000, sellerBalance 17000000
-  observed chain     : state settled, vault 0,              seller 18000000
-```
-
-| | |
-| --- | --- |
-| Seed | `20260912` |
-| Shrink path | `2:4:4:8` |
-| Minimized sequence | `fund(buyer)`, `settle(seller)`, `complete(seller)` |
-| Divergence index | 1 |
-| Invariant violated | `PPV-MODEL`, the prediction/chain disagreement that guards `PPV-P10` |
-
-The `Funded -> Settled` edge is not in `LEGAL_EDGES`, so `PPV-P10` would have
-caught the same mutation on its own; `PPV-MODEL` simply fires first, at the
-moment the chain accepts an action the model refused. The run also failed its
-coverage floor — with settlement reachable from `Funded`, most sequences ended
-before ever cancelling anything — which is the second, independent signal that
-something about the state machine had changed.
-
-The mutation was reverted before anything was committed, and the clean tree was
-proved with `git diff --exit-code` and
-`./scripts/verify-devnet-readiness.sh --repo-only`.
-
-## Current limitations
-
-* **One agreement type.** Ordinary `Escrow` only.
-* **Four instructions.** Everything in the "not covered" table above is
-  untested by this harness, and the deterministic suite remains its only cover.
-* **One concurrency model.** Actions are executed and confirmed one at a time.
-  Transaction ordering and same-slot races are not explored here; that is
-  Lesson 13 territory.
-* **No compute or rent adversary.** Compute-budget exhaustion, account-size
-  griefing and rent manipulation are not modelled.
-* **No Token-2022.** Transfer hooks, transfer fees and confidential transfers
-  would each break assumptions this model makes about balance deltas, which is
-  exactly why they need their own phase rather than a flag here.
-* **Balances only for the escrowed mint.** Lamport accounting is out of scope;
-  the stranded-donation limitation in `docs/security-model.md` is unchanged.
-
-## Expansion plan
-
-Each phase lands only once the phase before it is green, and each arrives with
-its own generators, model rules and invariant rows — an invariant listed before
-its generator exists documents a check nothing performs.
-
-| Phase | Adds |
-| --- | --- |
-| B | `open_dispute`, `resolve_dispute`, `refund`, terminal `Refunded`, concession semantics |
-| C | proofs, proof-decision finality, the settlement/evidence relationship |
-| D | the milestone child state machine, partial payouts, `settled_total <= amount`, remaining-balance invariants |
-| E | bounty one-time counterparty selection (and the `PPV-P6` exception it requires) |
-| F | cross-program PPV Core / Escrow / Commerce relationships |
-| G | migrations, if and when migration instructions exist |
-| H | adversarial transaction engineering (Lesson 13) |
-
-## Release gate
-
-The release tier is a named gate, `SECURITY_INVARIANTS_GREEN`, in the devnet
-release progression. See `docs/devnet-release-readiness.md`. Passing it proves
-the escrow state machine survived randomized attack at the stated budget. It
-authorizes nothing on its own, and it does not move the custody gate in
-`docs/deployment-gates.md`: `ppv_escrow` still ships no further than a local
-validator.
+Two of the four survived their first run, for the generator reasons above rather
+than for anything in the assertions. The budget was then measured rather than
+guessed — at 90 sequences the generator produced a single wrong-destination
+window in the entire run — and the harness now runs 300. Both are recorded in
+[security/ppv-escrow-attack-matrix.md](security/ppv-escrow-attack-matrix.md).

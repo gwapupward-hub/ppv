@@ -1,11 +1,11 @@
 # PPV Escrow residual-risk register
 
-**Readiness verdict: PPV ESCROW DEVNET DEPLOYMENT READINESS: NO-GO.** The
-blocking entries are **RR-1** (milestones and bounties are not modelled under
-randomized adversarial execution) and **RR-8** (the randomized layer is not
-mutation-qualified). See
+**Readiness verdict: PPV ESCROW DEVNET DEPLOYMENT READINESS: GO** (Sprint 3.1).
+**RR-1** and **RR-8**, the two entries that blocked Sprint 3's verdict, are
+CLOSED with the evidence recorded below. Nothing else changed severity. See
 [ppv-escrow-readiness-verdict.md](ppv-escrow-readiness-verdict.md) for the full
-verdict and its statements of record.
+verdict and its statements of record — including what a GO does and does not
+authorise.
 
 What Sprint 3 did not resolve, classified honestly. Every entry here is
 referenced from the [attack matrix](ppv-escrow-attack-matrix.md), so a risk
@@ -41,39 +41,85 @@ are fixed, regression-tested and mutation-qualified:
 
 ## MEDIUM
 
-### RR-1 — Milestones and bounties are not randomly attacked — **BLOCKS GO**
+RR-1 and RR-8 are recorded here in place, marked CLOSED, rather than removed:
+the identifiers are cited from the attack matrix and from two sprint verdicts,
+and an entry that vanishes is indistinguishable from one nobody wrote down.
 
-The model-based property suite attacks `fund`, `mark_completed`, `settle`,
-`cancel`, `refund`, `open_dispute` and `resolve_dispute` — the ordinary-escrow
-custody surface, including everything this sprint added. `create_milestone`,
-`submit_milestone`, `approve_milestone`, `reject_milestone`,
-`settle_milestone`, `select_counterparty`, `submit_proof`, `approve_proof` and
-`reject_proof` are covered by 31 deterministic local-validator tests and by the
-exhaustive host model, and by no randomized adversarial sequence.
+### RR-1 — Milestones and bounties are not randomly attacked — **CLOSED**
 
-*Why it is not HIGH:* the milestone and bounty payout paths do not have their
-own custody code. Every one of them releases money through `pay_out_of_vault`,
-the same function the randomized suite attacks, under the same PDA signing and
-the same exact-amount assertion. What is unattacked is the *lifecycle around*
-those payouts, and the host model walks that exhaustively at the authorization
-and state layer.
+*Closed in Sprint 3.1.* Milestone contracts and bounties are now attacked by the
+randomized model-based suite, not only by deterministic tests and the exhaustive
+host model. A sequence carries an agreement flavour, and six action kinds joined
+the model: `createMilestone`, `submitMilestone`, `approveMilestone`,
+`rejectMilestone`, `settleMilestone`, `selectWinner`.
 
-*What would close it:* milestone and bounty action kinds in
-`tests/invariants/`, with a model that tracks per-milestone state.
+The release-tier run that closed it, 5 seeds × 200 sequences:
 
-### RR-2 — Milestone release order is unconstrained by design
+```json
+{"attempted":17607,"succeeded":3532,"refused":14075,"refusedNonCanonical":4856,
+ "escrowSequences":362,"milestoneSequences":315,"bountySequences":323,
+ "milestoneActions":4998,"milestonesScheduled":576,"milestoneReleases":169,
+ "milestoneDuplicateReleaseAttempts":348,"milestoneForeignAccountAttempts":362,
+ "milestonePostTerminalAttempts":1185,
+ "bountyActions":5577,"winnerSelections":306,"winnerReplacementAttempts":1081,
+ "bountyPayouts":93,"bountyUnassignedPayoutAttempts":144}
+```
 
-A buyer can approve and release tranche 2 before tranche 1. Each tranche has
-its own submission and its own approval, and nothing sequences them.
+Zero invariant violations.
 
-*Why it is not a defect:* no invariant is broken — `PPV-M1` and `PPV-M2` bound
-the totals, `PPV-M3` bounds each tranche to one release, and every release
-needs the buyer's approval. A schedule where later work is approved first is a
-schedule the buyer chose.
+**It did not close on the first try, and the reasons are worth keeping.** The
+first run failed its own coverage floor — tranches scheduled, none released —
+because reaching a release needs six ordered actions and the expected sequence
+length to get there was about 47 against a budget of 32. Reachable in principle,
+unreachable in practice, which is the fictional coverage this entry was about.
+Three generator defects were behind it: the agreement's own second tranche
+shared the *foreign* account's one-in-twelve weight, tranches were always
+released in the same order, and `fc.nat` biased prefix lengths toward "barely
+started".
 
-*Why it is listed:* it is a reasonable thing to assume is enforced, and it is
-not. Anyone integrating against milestones needs to know that "milestone 3 was
-paid" does not imply 1 and 2 were.
+Coverage floors now make this a gate rather than a claim: an action kind that
+exists in the generator and is never selected fails the run, in the suite and in
+the cross-seed aggregator.
+`tests/invariants/reachability.test.ts` asserts the same reachability against
+the model alone in milliseconds, so a generator change that closes a window
+fails locally rather than after forty minutes of CI.
+
+*What remains:* the randomized suite attacks one agreement per sequence, so
+interactions *between* two live agreements of different types are still covered
+only by the cross-agreement isolation tests. No path to one is known — every
+instruction re-derives its accounts from the agreement it names — and it is not
+tracked as a separate risk because PPV-P9 covers the substitution directly.
+
+### RR-2 — Milestone state does not mean what a reader assumes
+
+Two things about milestone contracts are true, deliberate, and not what someone
+reading tranche state would guess.
+
+**Release order is unconstrained.** A buyer can approve and release tranche 2
+before tranche 1. Each tranche has its own submission and its own approval, and
+nothing sequences them.
+
+**A settled contract may have every tranche unreleased.** `resolve_dispute`
+pays the whole remaining balance and terminates the agreement whatever the
+tranche bookkeeping says, so a contract conceded by its buyer ends `Settled`
+with both tranches `Pending`. The same is true of `refund`, which returns the
+tranches nobody earned.
+
+*Why neither is a defect:* no invariant is broken. `PPV-M1` and `PPV-M2` bound
+the totals, `PPV-M3` bounds each tranche to one release, every release needs the
+buyer's approval, and a terminal agreement can never release another tranche
+because `require_milestone_active` demands `Funded`. Custody conserves in every
+case.
+
+*Evidence, since Sprint 3.1:* the randomized suite now releases tranches in a
+generated order rather than always smallest-last, and the concession path is
+pinned as a deterministic regression in
+`tests/invariants/regression/milestone-dispute-settlement.ts` alongside its
+converse. Neither produced a violation.
+
+*Why it is listed:* "milestone 2 was never released" does not mean the money is
+still there, and "milestone 3 was paid" does not imply 1 and 2 were. Anyone
+integrating against milestones needs both facts.
 
 ### RR-3 — Donated surplus is stranded
 
@@ -150,18 +196,38 @@ and applies to them today.
 Attempted in Sprint 1 against two candidate program ids without a match; not
 guessed at since.
 
-### RR-8 — The property suite is not mutation-qualified — **BLOCKS GO**
+### RR-8 — The property suite is not mutation-qualified — **CLOSED**
 
-`scripts/mutation-qualify.sh` breaks seven defences and requires the host
-suite to fail. It does not run the local-validator property suite, because each
-mutation would cost a full build and a multi-minute validator run.
+*Closed in Sprint 3.1.* `scripts/mutation-qualify-property.sh` breaks one
+defence at a time and requires **the randomized property suite** to fail. The
+run is pinned to `tests/invariants/**/*.invariant.ts`, so a deterministic test
+cannot be what noticed; a mutation that does not compile is reported as a broken
+mutation rather than a detection; a validator that never started is not a
+result; and the clean suite must be green again afterwards.
 
-*Consequence:* the randomized custody assertions — conservation, exact-amount
-transfers, account substitution — are not proven to detect an injected defect
-the way the state-machine assertions are.
+| Mutation | Class | Detected | Seed | First violation |
+| --- | --- | --- | --- | --- |
+| an already-settled tranche may be released again | milestone lifecycle finality (PPV-M3) | yes | 20260912 | PPV-MODEL |
+| a tranche may be paid to any account of the right mint | destination binding (PPV-M4 / PPV-P4) | yes | 20260912 | PPV-MODEL |
+| a tranche pays out everything the vault still owes | custody conservation (PPV-P1 / PPV-M2) | yes | 20260912 | PPV-MODEL |
+| a bounty sponsor may replace the winner after naming one | bounty lifecycle finality (PPV-B1) | yes | 20260912 | PPV-MODEL |
 
-*What would close it:* a scheduled job that runs two or three custody mutations
-against the PR-tier property budget.
+Each records its minimized counterexample, so the evidence is a sequence rather
+than an exit code.
+
+**Two of the four survived the first run**, and the cause was the generator
+rather than the assertions — the same three defects RR-1 records. Both were
+then caught through the *second* tranche, which is what confirms the weight fix
+was the enabler. The budget was also measured rather than guessed: at 90
+sequences the generator produced a single wrong-destination window in the whole
+run, so the harness runs 300.
+
+No mutation was made easier and no assertion was weakened to close this.
+
+*What remains:* four mutations across four classes is a sample, not a proof of
+detection power in general. The classes chosen are the ones a custody defect
+would fall into, and the host-model qualification covers seven more; neither is
+a substitute for an independent review (RR-13).
 
 ## LOW
 

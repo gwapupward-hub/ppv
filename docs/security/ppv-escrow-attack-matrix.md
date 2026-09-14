@@ -6,8 +6,9 @@ executable evidence for it. A claim with no test is listed as having no test.
 **Nothing here authorises a deployment.** `ppv_escrow` is not deployed to any
 cluster, and the custody gate in [deployment-gates.md](../deployment-gates.md)
 is closed. The readiness verdict is
-[**NO-GO**](ppv-escrow-readiness-verdict.md); a matrix of passing rows is not a
-verdict, and this one is not read as one.
+[**GO**](ppv-escrow-readiness-verdict.md) as of Sprint 3.1 — which authorises a
+separately controlled deployment sprint and nothing else. A matrix of passing
+rows is not a verdict, and this one is not read as one.
 
 ## How to read the evidence column
 
@@ -94,8 +95,9 @@ be.** Sprint 3 is qualification for deployment, not proof from one.
 | M-6 | Redirect a milestone payment | PPV-M4 | `seller_token_account.owner == agreement.counterparty` | `milestone.rs`, `escrow.ts` | LOCAL-VALIDATOR | pass |
 | M-7 | Release after the agreement settled or refunded | PPV-M5 | `require_milestone_active` demands `Funded` | `lifecycle_model.rs`, `escrow.ts` | MODEL + LOCAL-VALIDATOR | pass |
 | M-8 | Add a milestone after funding | PPV-M1 | `require_milestone_creatable` demands `Open` | `lifecycle_model.rs` | MODEL | pass |
-| M-9 | Milestone ordering: release tranche 2 before tranche 1 | PPV-M3 | **By design, tranches are independent** — each has its own approval, and order is not constrained | — | **NOT COVERED** | see residual risk RR-2 |
-| M-10 | Randomized adversarial attack on the milestone lifecycle | PPV-M1…M5 | — | — | **NOT COVERED** | see residual risk RR-1 |
+| M-9 | Milestone ordering: release tranche 2 before tranche 1 | PPV-M3 | **By design, tranches are independent** — each has its own approval, and order is not constrained | property suite (generated tranche order) | LOCAL-VALIDATOR | pass; see RR-2 |
+| M-10 | Randomized adversarial attack on the milestone lifecycle | PPV-M1…M5 | — | property suite: 315 milestone sequences, 4,998 tranche actions, 169 releases, 348 duplicate-release attempts, 362 foreign-account attempts, 1,185 post-terminal attempts | LOCAL-VALIDATOR | pass (RR-1 closed) |
+| M-11 | A settled milestone contract with every tranche unreleased | PPV-M5 | **Intended.** `resolve_dispute` and `refund` pay the remaining balance and terminate whatever the tranche state says; `require_milestone_active` then refuses every release | `regression/milestone-dispute-settlement.ts` | LOCAL-VALIDATOR | pass; see RR-2 |
 
 ## Bounties
 
@@ -107,7 +109,7 @@ be.** Sprint 3 is qualification for deployment, not proof from one.
 | B-4 | Pay a bounty before a winner exists | PPV-B3 | `require_settleable`/`require_refundable`/`require_completable` all require a payee | `lifecycle_model.rs` (no-payee configurations) | MODEL | pass |
 | B-5 | Reach a payout path on an unclaimed bounty via the dispute route | PPV-B3 | **Fixed in this sprint** — see S-9 | `agreement.rs::an_unclaimed_bounty_cannot_be_disputed_into_a_dead_end` | MODEL | pass (was a finding) |
 | B-6 | Pay a bounty twice | PPV-B2 | Settlement is terminal | `lifecycle_model.rs`, property suite | MODEL + LOCAL-VALIDATOR | pass |
-| B-7 | Randomized adversarial attack on the bounty lifecycle | PPV-B1…B4 | — | — | **NOT COVERED** | see residual risk RR-1 |
+| B-7 | Randomized adversarial attack on the bounty lifecycle | PPV-B1…B4 | — | property suite: 323 bounty sequences, 5,577 bounty actions, 306 winner selections, 1,081 replacement attempts, 144 payout attempts with no winner | LOCAL-VALIDATOR | pass (RR-1 closed) |
 
 ## Cross-program
 
@@ -156,7 +158,12 @@ be.** Sprint 3 is qualification for deployment, not proof from one.
 
 ## Does the suite detect real defects?
 
-A matrix of passing tests is worth what the tests would catch. `./scripts/mutation-qualify.sh` breaks one defence at a time and requires the suite to fail:
+A matrix of passing tests is worth what the tests would catch. Two harnesses ask
+that question of the two layers, because an answer about one says nothing about
+the other.
+
+**The host model** — `./scripts/mutation-qualify.sh` breaks one defence at a
+time and requires the host suite to fail:
 
 | Mutation | Class | Detected by |
 | --- | --- | --- |
@@ -168,8 +175,21 @@ A matrix of passing tests is worth what the tests would catch. `./scripts/mutati
 | a schedule may promise more than the escrow | milestone allocation | `a_milestone_schedule_cannot_promise_more_than_the_escrow` |
 | settlement no longer requires `Completed` | state-machine legality | `double_settlement_is_impossible` and two others |
 
-All seven detected. The qualification covers the host model; the local-validator
-property suite is not mutation-qualified, which is [RR-8](ppv-escrow-residual-risk.md).
+**The randomized property suite** — `./scripts/mutation-qualify-property.sh`,
+pinned to `tests/invariants/**/*.invariant.ts` so no deterministic test can be
+what noticed:
+
+| Mutation | Class | Seed | First violation | Minimized counterexample |
+| --- | --- | --- | --- | --- |
+| an already-settled tranche may be released again | milestone lifecycle finality (PPV-M3) | 20260912 | PPV-MODEL | `settleMilestone(second)` after it had settled |
+| a tranche may be paid to any account of the right mint | destination binding (PPV-M4 / PPV-P4) | 20260912 | PPV-MODEL | `settleMilestone(second) [destination=attacker]` |
+| a tranche pays out everything the vault still owes | custody conservation (PPV-P1 / PPV-M2) | 20260912 | PPV-MODEL | a second release after a canonical one |
+| a bounty sponsor may replace the winner after naming one | bounty lifecycle finality (PPV-B1) | 20260912 | PPV-MODEL | `selectWinner` twice |
+
+All eleven detected. Two of the property mutations survived their first run, and
+the cause was the generator rather than the assertions — see RR-1 and RR-8 in
+the [residual-risk register](ppv-escrow-residual-risk.md). No mutation was made
+easier and no assertion weakened to close them.
 
 ## Token program scope
 
