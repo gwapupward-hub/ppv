@@ -38,6 +38,9 @@ esac
 
 CORE_ID="9cWE41ZDNQChvFrRoVuPQDeoVLg46ACTiZRCZaBZzfwU"
 COMMERCE_ID="GmRDoFuPrBrsxnvTX751WK5rLu14JXe4sgjh6vNwHzr3"
+# Frozen in Sprint 4. Escrow has a permanent identity and is deliberately not
+# deployed; those are different facts and this script checks the first one.
+ESCROW_ID="7U1bCHQcr8Jg6J8G69JGaAWCRtsrZB1RYx4zo1sNEVF4"
 MIN_THRESHOLD="${PPV_MIN_SQUADS_THRESHOLD:-2}"
 rpc_url="${PPV_READINESS_RPC_URL:-https://api.devnet.solana.com}"
 
@@ -176,6 +179,7 @@ check_identity() {
 
 check_identity ppv_core "${CORE_ID}"
 check_identity ppv_commerce "${COMMERCE_ID}"
+check_identity ppv_escrow "${ESCROW_ID}"
 
 # Optional: prove a supplied permanent keypair really is the committed identity.
 # Only the derived public key is ever read or printed.
@@ -201,6 +205,7 @@ check_keypair() {
 
 check_keypair ppv_core "${CORE_ID}" "${PPV_CORE_PROGRAM_KEYPAIR_PATH:-}"
 check_keypair ppv_commerce "${COMMERCE_ID}" "${PPV_COMMERCE_PROGRAM_KEYPAIR_PATH:-}"
+check_keypair ppv_escrow "${ESCROW_ID}" "${PPV_ESCROW_PROGRAM_KEYPAIR_PATH:-}"
 
 # ----------------------------------------------------------------- toolchain
 if [[ "${mode}" == "deployment-grade" ]]; then
@@ -346,7 +351,7 @@ if [[ "${mode}" == "deployment-grade" ]]; then
     # record is *supposed* to be occupied — PPV Core is — and treating that as a
     # failure would make this preflight permanently red and block the release of
     # every other program. Released means: verify it, do not redeploy it.
-    for entry in "ppv_core:${CORE_ID}" "ppv_commerce:${COMMERCE_ID}"; do
+    for entry in "ppv_core:${CORE_ID}" "ppv_commerce:${COMMERCE_ID}" "ppv_escrow:${ESCROW_ID}"; do
       program="${entry%%:*}"
       program_id="${entry##*:}"
 
