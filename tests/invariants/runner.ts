@@ -231,7 +231,6 @@ export class InvariantRunner {
         seller: fixture.seller.publicKey.toBase58(),
         mint: fixture.mint.toBase58(),
       };
-      coverage.sequences += 0; // counted once at the end, with the flavour
       if (flavour === "escrow") coverage.escrowSequences += 1;
       if (flavour === "milestone") coverage.milestoneSequences += 1;
       if (flavour === "bounty") coverage.bountySequences += 1;

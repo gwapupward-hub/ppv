@@ -492,8 +492,15 @@ export function applySuccess(model: EscrowModel, action: GeneratedAction): Escro
       const allocation = model.milestones[slot].allocation;
       const advanced = withMilestone(model, action, "settled");
       const released = advanced.releasedTotal + allocation;
-      // The agreement itself finishes when the last tranche is paid.
-      const finished = advanced.milestones.every((milestone) => milestone.state === "settled");
+      // The agreement finishes when every *scheduled* tranche is paid, not
+      // when both slots are. A single tranche worth the whole amount is a
+      // legal schedule — `fund` only asks that the allocations sum to the
+      // agreement amount — so a contract with one tranche settles on its
+      // first release, and a model that waited for a second slot it never had
+      // would report a divergence the program did not commit.
+      const scheduled = advanced.milestones.filter((milestone) => milestone.state !== "absent");
+      const finished =
+        scheduled.length > 0 && scheduled.every((milestone) => milestone.state === "settled");
       return {
         ...advanced,
         state: finished ? "settled" : advanced.state,
