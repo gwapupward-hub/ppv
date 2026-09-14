@@ -377,7 +377,10 @@ test("a program with no release record is not demanded on chain", async () => {
     encodeBase58: encodeBase58Sdk,
     released: { ppv_core: {} },
   });
-  assert.deepEqual(result.notReleased, ["ppv_commerce"]);
+  // ppv_escrow joins the list for a different reason than ppv_commerce: it has
+  // a permanent identity and is deliberately undeployed, so it is never
+  // expected on chain until the custody gate opens.
+  assert.deepEqual(result.notReleased, ["ppv_commerce", "ppv_escrow"]);
   assert.equal(result.programs.ppv_core.authorityAddress, VAULT);
   assert.equal(result.programs.ppv_commerce, undefined);
   state = defaultState();

@@ -132,17 +132,34 @@ test("the randomized suite still carries the lifecycles that closed RR-1", () =>
 test("the placeholder id is never represented as an approved permanent identity", () => {
   assert.match(VERDICT, new RegExp(`\`${PLACEHOLDER}\` is a build/local placeholder`));
   assert.match(VERDICT, /\*\*not\*\* an approved permanent deployment identity/);
-  assert.match(VERDICT, /No permanent `ppv_escrow` identity exists/);
 
-  // The repository must still agree: the id lives in exactly two places, and
-  // the permanent-identity table is not one of them.
+  // Since the Sprint 4 freeze the placeholder is not merely unapproved, it is
+  // gone from every identity and deploy path. The permanent table names escrow
+  // now, and it must name the permanent id — never the placeholder.
   const identity = read("scripts", "lib", "identity.mjs");
   const permanent = identity.match(/PERMANENT_PROGRAM_IDS = Object\.freeze\(\{([\s\S]*?)\}\)/);
   assert.ok(permanent, "identity.mjs declares no permanent program table");
   assert.ok(
-    !permanent[1].includes(PLACEHOLDER) && !permanent[1].includes("ppv_escrow"),
-    "the placeholder or ppv_escrow appears in the permanent identity table",
+    !permanent[1].includes(PLACEHOLDER),
+    "the placeholder appears in the permanent identity table",
   );
+  assert.match(permanent[1], /ppv_escrow: "7U1bCHQcr8Jg6J8G69JGaAWCRtsrZB1RYx4zo1sNEVF4"/);
+
+  // And the verdict must not still claim there is no identity, which was true
+  // when it was written and is now the opposite of the repository's state.
+  assert.doesNotMatch(VERDICT, /No permanent `ppv_escrow` identity exists/);
+  assert.match(VERDICT, /RR-12 CLOSED/);
+});
+
+test("an identity is not a deployment, and the verdict says so", () => {
+  // The dangerous misreading of this freeze is "escrow has an id, so escrow
+  // shipped". Both the document and the code must refuse it.
+  assert.match(VERDICT, /Having an identity is not being deployed/);
+  assert.match(VERDICT, /PPV ESCROW DEPLOYED: NO. PPV ESCROW CUSTODY GATE: CLOSED/);
+  const identity = read("scripts", "lib", "identity.mjs");
+  const deployed = identity.match(/DEVNET_DEPLOYED_PROGRAMS = Object\.freeze\(\[([\s\S]*?)\]\)/);
+  assert.ok(deployed, "identity.mjs declares no deployed-program list");
+  assert.ok(!deployed[1].includes("ppv_escrow"), "escrow is listed as deployed to devnet");
 });
 
 test("the cross-program invariants are recorded as not applicable, not as passing", () => {

@@ -9,15 +9,17 @@ skip-lint = false
 [programs.localnet]
 ppv_core = "9cWE41ZDNQChvFrRoVuPQDeoVLg46ACTiZRCZaBZzfwU"
 ppv_commerce = "GmRDoFuPrBrsxnvTX751WK5rLu14JXe4sgjh6vNwHzr3"
-ppv_escrow = "7BECot7zFqH2oCxTu9uLmmwvzQSBtxWro47jMa2MqUdR"
+ppv_escrow = "7U1bCHQcr8Jg6J8G69JGaAWCRtsrZB1RYx4zo1sNEVF4"
 
-# ppv_escrow is deliberately absent from [programs.devnet] and from the devnet
-# deploy workflow. It is the only program that holds value, so it ships no
-# further than a local validator until the custody gate in
-# docs/deployment-gates.md is met.
+# ppv_escrow carries its permanent identity here as of the Sprint 4 freeze. The
+# address being listed is not permission to deploy it: the custody gate in
+# docs/deployment-gates.md is still closed on its remaining requirements, and
+# the deploy workflow refuses escrow unless every frozen fact in
+# scripts/lib/identity.mjs matches what the run was given.
 [programs.devnet]
 ppv_core = "9cWE41ZDNQChvFrRoVuPQDeoVLg46ACTiZRCZaBZzfwU"
 ppv_commerce = "GmRDoFuPrBrsxnvTX751WK5rLu14JXe4sgjh6vNwHzr3"
+ppv_escrow = "7U1bCHQcr8Jg6J8G69JGaAWCRtsrZB1RYx4zo1sNEVF4"
 
 [registry]
 url = "https://api.apr.dev"

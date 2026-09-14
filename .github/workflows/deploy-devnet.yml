@@ -16,7 +16,7 @@ on:
         description: Program to deploy
         required: true
         type: choice
-        options: [ppv_core, ppv_commerce]
+        options: [ppv_core, ppv_commerce, ppv_escrow]
       confirm:
         description: Type the program name again to confirm
         required: true
@@ -167,18 +167,118 @@ jobs:
           echo "program address: $(solana-keygen pubkey "${work}/ppv_commerce-keypair.json")"
           echo "deployer:        $(solana-keygen pubkey "${work}/deployer.json")"
 
+      - name: Fetch ppv_escrow signing material
+        if: inputs.program == 'ppv_escrow'
+        id: escrow_keys
+        env:
+          PROGRAM_KEYPAIR: ${{ secrets.PPV_ESCROW_PROGRAM_KEYPAIR }}
+          DEPLOYER_KEYPAIR: ${{ secrets.PPV_DEPLOYER_KEYPAIR }}
+        run: |
+          if [[ -z "${PROGRAM_KEYPAIR}" ]]; then
+            echo "PPV_ESCROW_PROGRAM_KEYPAIR must be set on the devnet environment." >&2
+            exit 1
+          fi
+          if [[ -z "${DEPLOYER_KEYPAIR}" ]]; then
+            echo "PPV_DEPLOYER_KEYPAIR must be set on the devnet environment." >&2
+            exit 1
+          fi
+          work="$(mktemp -d)"
+          echo "work=${work}" >> "${GITHUB_OUTPUT}"
+          umask 077
+          printf '%s' "${PROGRAM_KEYPAIR}" > "${work}/ppv_escrow-keypair.json"
+          printf '%s' "${DEPLOYER_KEYPAIR}" > "${work}/deployer.json"
+          # Only public keys are printed.
+          echo "program address: $(solana-keygen pubkey "${work}/ppv_escrow-keypair.json")"
+          echo "deployer:        $(solana-keygen pubkey "${work}/deployer.json")"
+
       - name: Select the isolated signing directory
         id: keys
         env:
           CORE_WORK: ${{ steps.core_keys.outputs.work }}
           COMMERCE_WORK: ${{ steps.commerce_keys.outputs.work }}
+          ESCROW_WORK: ${{ steps.escrow_keys.outputs.work }}
         run: |
-          work="${CORE_WORK:-${COMMERCE_WORK}}"
+          work="${CORE_WORK:-${COMMERCE_WORK:-${ESCROW_WORK}}}"
           if [[ -z "${work}" || ! -d "${work}" ]]; then
             echo "The selected program's signing directory was not created." >&2
             exit 1
           fi
           echo "work=${work}" >> "${GITHUB_OUTPUT}"
+
+      # Escrow holds value and is governed by its own multisig. Reading its
+      # authority from the same repository variables Core and Commerce use would
+      # mean a misconfigured variable could hand the vault to the non-custodial
+      # signers, which is exactly what the custody gate exists to prevent. So
+      # escrow's governance comes from the frozen record in
+      # scripts/lib/identity.mjs and the variables are refused if they disagree.
+      - name: Resolve the governance for this program
+        id: governance
+        env:
+          VAR_VAULT: ${{ vars.PPV_SQUADS_VAULT_PDA }}
+          VAR_MEMBERS: ${{ vars.PPV_SQUADS_MEMBER_PUBKEYS }}
+          VAR_THRESHOLD: ${{ vars.PPV_SQUADS_THRESHOLD }}
+        run: |
+          program="${{ inputs.program }}"
+          if [[ "${program}" == "ppv_escrow" ]]; then
+            # One field per call, each script single-quoted so no shell
+            # expansion reaches it. An `eval` of a generated assignment block
+            # would be shorter, and would put the contents of a file on the
+            # shell's execution path — not a trade worth making in the step
+            # that decides who ends up owning the program.
+            field() {
+              node --input-type=module -e '
+                import { ESCROW_CUSTODY_GOVERNANCE as g } from "./scripts/lib/identity.mjs";
+                if (g === null) {
+                  console.error("no custody governance is frozen");
+                  process.exit(1);
+                }
+                const name = process.argv[1];
+                const value = name === "members" ? g.members.join(",") : g[name];
+                if (value === undefined || value === null || value === "") {
+                  console.error("custody governance has no " + name);
+                  process.exit(1);
+                }
+                process.stdout.write(String(value));
+              ' -- "$1"
+            }
+            multisig="$(field multisig)"
+            vault="$(field vault)"
+            members="$(field members)"
+            threshold="$(field threshold)"
+            network="$(field network)"
+
+            if [[ "${network}" != "devnet" ]]; then
+              echo "The frozen custody governance is for ${network}, not devnet." >&2
+              exit 1
+            fi
+            # The custody vault must not be the non-custodial one, whatever the
+            # repository variables say.
+            if [[ "${vault}" == "${VAR_VAULT}" ]]; then
+              echo "The custody vault equals the non-custodial vault ${VAR_VAULT}." >&2
+              echo "ppv_escrow must be governed separately. Refusing to deploy." >&2
+              exit 1
+            fi
+            # The devnet-only shared-signer exception is taken here, explicitly,
+            # for escrow alone. It is never the verifier's default.
+            node scripts/verify-custody-governance.mjs \
+              --multisig "${multisig}" --vault "${vault}" \
+              --threshold "${threshold}" --members "${members}" \
+              --allow-shared-signers
+          else
+            vault="${VAR_VAULT}"
+            members="${VAR_MEMBERS}"
+            threshold="${VAR_THRESHOLD}"
+          fi
+          if [[ -z "${vault}" || -z "${members}" || -z "${threshold}" ]]; then
+            echo "Governance for ${program} is incomplete." >&2
+            exit 1
+          fi
+          {
+            echo "vault=${vault}"
+            echo "members=${members}"
+            echo "threshold=${threshold}"
+          } >> "${GITHUB_OUTPUT}"
+          echo "governance vault for ${program}: ${vault} (threshold ${threshold})"
 
       - name: Assert committed identity and build
         id: release_identity
@@ -210,6 +310,25 @@ jobs:
             echo "Built IDL id ${idl_id} does not match keypair ${keypair_id}." >&2
             exit 1
           fi
+          # For escrow the committed identity must additionally equal the frozen
+          # permanent id. The checks above only prove the three committed
+          # sources agree with the keypair; they would pass just as happily if
+          # all four had been changed together to a different program universe.
+          if [[ "${program}" == "ppv_escrow" ]]; then
+            frozen_id="$(node --input-type=module -e "
+              import { ESCROW_PERMANENT_ID } from './scripts/lib/identity.mjs';
+              process.stdout.write(ESCROW_PERMANENT_ID ?? '');
+            ")"
+            if [[ -z "${frozen_id}" ]]; then
+              echo "No permanent ppv_escrow identity is frozen. Refusing to deploy." >&2
+              exit 1
+            fi
+            if [[ "${keypair_id}" != "${frozen_id}" ]]; then
+              echo "Escrow keypair ${keypair_id} is not the frozen permanent id ${frozen_id}." >&2
+              exit 1
+            fi
+          fi
+
           git diff --exit-code -- Anchor.toml "programs/${program}/src/lib.rs"
           echo "program_id=${keypair_id}" >> "${GITHUB_OUTPUT}"
           echo "program id: ${keypair_id}"
@@ -225,9 +344,9 @@ jobs:
           PPV_RELEASE_APPROVER_2: ${{ inputs.approver_2 }}
           PPV_RELEASE_SIGNATURE_2: ${{ inputs.signature_2 }}
 
-          PPV_SQUADS_VAULT_PDA: ${{ vars.PPV_SQUADS_VAULT_PDA }}
-          PPV_SQUADS_MEMBER_PUBKEYS: ${{ vars.PPV_SQUADS_MEMBER_PUBKEYS }}
-          PPV_SQUADS_THRESHOLD: ${{ vars.PPV_SQUADS_THRESHOLD }}
+          PPV_SQUADS_VAULT_PDA: ${{ steps.governance.outputs.vault }}
+          PPV_SQUADS_MEMBER_PUBKEYS: ${{ steps.governance.outputs.members }}
+          PPV_SQUADS_THRESHOLD: ${{ steps.governance.outputs.threshold }}
         run: |
           node scripts/verify-devnet-release-approval.mjs
 
@@ -271,9 +390,9 @@ jobs:
 
       - name: Validate the configured final upgrade authority
         env:
-          UPGRADE_AUTHORITY: ${{ vars.PPV_SQUADS_VAULT_PDA }}
-          AUTHORITY_MEMBERS: ${{ vars.PPV_SQUADS_MEMBER_PUBKEYS }}
-          AUTHORITY_THRESHOLD: ${{ vars.PPV_SQUADS_THRESHOLD }}
+          UPGRADE_AUTHORITY: ${{ steps.governance.outputs.vault }}
+          AUTHORITY_MEMBERS: ${{ steps.governance.outputs.members }}
+          AUTHORITY_THRESHOLD: ${{ steps.governance.outputs.threshold }}
         run: |
           # Checked before deployment, so a misconfigured authority never
           # becomes the thing that owns the program.
@@ -381,7 +500,7 @@ jobs:
         if: ${{ !inputs.verify_only }}
         id: transfer
         env:
-          UPGRADE_AUTHORITY: ${{ vars.PPV_SQUADS_VAULT_PDA }}
+          UPGRADE_AUTHORITY: ${{ steps.governance.outputs.vault }}
         run: |
           if [[ -z "${UPGRADE_AUTHORITY}" ]]; then
             echo "PPV_SQUADS_VAULT_PDA must be set as a devnet environment variable." >&2
@@ -431,9 +550,9 @@ jobs:
       - name: Verify on chain and record the deployment
         if: ${{ !inputs.verify_only }}
         env:
-          EXPECTED_AUTHORITY: ${{ vars.PPV_SQUADS_VAULT_PDA }}
-          AUTHORITY_MEMBERS: ${{ vars.PPV_SQUADS_MEMBER_PUBKEYS }}
-          AUTHORITY_THRESHOLD: ${{ vars.PPV_SQUADS_THRESHOLD }}
+          EXPECTED_AUTHORITY: ${{ steps.governance.outputs.vault }}
+          AUTHORITY_MEMBERS: ${{ steps.governance.outputs.members }}
+          AUTHORITY_THRESHOLD: ${{ steps.governance.outputs.threshold }}
           DEPLOY_SIGNATURE: ${{ steps.deploy.outputs.signature }}
         run: |
           if [[ -z "${AUTHORITY_MEMBERS}" || -z "${AUTHORITY_THRESHOLD}" ]]; then
@@ -486,8 +605,8 @@ jobs:
       - name: Write and verify the canonical release record
         if: ${{ !inputs.verify_only }}
         env:
-          AUTHORITY_MEMBERS: ${{ vars.PPV_SQUADS_MEMBER_PUBKEYS }}
-          AUTHORITY_THRESHOLD: ${{ vars.PPV_SQUADS_THRESHOLD }}
+          AUTHORITY_MEMBERS: ${{ steps.governance.outputs.members }}
+          AUTHORITY_THRESHOLD: ${{ steps.governance.outputs.threshold }}
           DEPLOY_SIGNATURE: ${{ steps.deploy.outputs.signature }}
           TRANSFER_SIGNATURE: ${{ steps.transfer.outputs.transfer_signature }}
         run: |

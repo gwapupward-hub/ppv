@@ -65,11 +65,30 @@ authorizes nothing, and it does not move the custody gate below.
 
 ## Custody gate — `ppv_escrow`
 
+**CUSTODY GATE: CLOSED.**
+
 `ppv_escrow` holds value. It passes F0 and F1 like any other program in the
-workspace, and that authorizes nothing beyond a local validator. It is
-deliberately absent from `[programs.devnet]` in `Anchor.toml`, from
-`.github/workflows/deploy-devnet.yml`, and from `scripts/record-deployment.sh`,
-so no existing path can deploy it by accident.
+workspace, and that authorizes nothing beyond a local validator.
+
+Until Sprint 4 this gate was enforced by *absence*: escrow was missing from
+`[programs.devnet]`, from `.github/workflows/deploy-devnet.yml` and from
+`scripts/record-deployment.sh`, so no path could deploy it by accident. The
+Sprint 4 freeze ended that. Escrow now has a permanent identity, a dedicated
+custody multisig, and a deployment path — so the gate is now enforced by
+**checks rather than by absence**, and it is worth being precise about what
+that buys and what it costs.
+
+What it buys: every fact a deployment depends on is frozen in
+`scripts/lib/identity.mjs` and verified at run time against the run's own
+inputs — the program id, the keypair-derived address, the cluster's genesis
+hash, the custody vault, the member set, the threshold, and two independent
+approvals bound to the exact release commit. `verify_only` defaults to true.
+
+What it costs: an operator with the deploy secrets and two custody approvals can
+now reach a deployment, where previously no configuration could. That is a real
+reduction in margin, and it is why the requirements below are unchanged rather
+than relaxed. **Governance was one requirement of several. Satisfying it did not
+open the gate.**
 
 **Readiness verdict:
 [PPV ESCROW DEVNET DEPLOYMENT READINESS: GO](security/ppv-escrow-readiness-verdict.md)**
@@ -100,11 +119,40 @@ Before any cluster deployment of `ppv_escrow`:
   action. It covers `fund`, `mark_completed`, `settle` and `cancel` only;
   disputes, refunds, milestones, bounties, proofs and cross-program composition
   are still unfuzzed. See [property-testing.md](property-testing.md).
-- An upgrade authority held by a multisig separate from the non-custodial
-  programs, so a compromise of one cannot reach the other.
+- ~~An upgrade authority held by a multisig separate from the non-custodial
+  programs, so a compromise of one cannot reach the other.~~ **MET** (Sprint 4,
+  RR-11). A dedicated Squads V4 2-of-3 exists on devnet:
+  multisig `GEE6nE9xN4GsHGo8QHvyqNLH7eM7yLBrtFtfsmH9ip46`, vault
+  `FD2spnsMVgsuddPSRWAe3ee4DMbgDx5ivpvVfvKcNrLE`. Recorded in
+  `ESCROW_CUSTODY_GOVERNANCE`. The vault is the *intended future* upgrade
+  authority; **no authority has been transferred**, because escrow is not
+  deployed.
+
+  **Approved exception — one shared signer, devnet only.** One custody signer is
+  intentionally shared with Core/Commerce governance
+  (`BJmFM4k7Q32CiCYSdoYkAhXdD5Sk3BegMh2cbEAsgSwJ`). The other two custody
+  signers are distinct. This exception is approved for devnet only. One shared
+  key cannot reach a 2-of-3 threshold by itself, which is what makes it
+  tolerable; a second would end that property, so
+  `verify-custody-governance.mjs` counts overlaps and still refuses this member
+  set by default. The exception is taken per run with `--allow-shared-signers`
+  and is never the verifier's default.
 - Legal review of the settlement and (once implemented) dispute paths.
 - The accepted limitations in [security-model.md](security-model.md) — stranded
   donations, no refund, no expiry — either resolved or explicitly signed off.
 
 Invoices, milestones, disputes, refunds, fees, and mainnet value transfer remain
 outside this release. Passing the Foundation gates does not approve custody.
+
+**Status after Sprint 4's freeze:**
+
+| | |
+| --- | --- |
+| Permanent Escrow identity | ESTABLISHED (`7U1bCHQcr8Jg6J8G69JGaAWCRtsrZB1RYx4zo1sNEVF4`) |
+| Dedicated custody governance | ESTABLISHED (devnet) |
+| Escrow deployed | NO |
+| Escrow authority transferred | NO |
+| Independent security review | NOT DONE (RR-13) |
+| Legal review | NOT DONE |
+| **Custody gate** | **CLOSED** |
+| Mainnet authorized | NO |

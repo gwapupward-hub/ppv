@@ -26,7 +26,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 cluster="${PPV_CLUSTER:-devnet}"
 rpc_url="${PPV_RPC_URL:-https://api.${cluster}.solana.com}"
-program="${PPV_PROGRAM:?set PPV_PROGRAM to ppv_core or ppv_commerce}"
+program="${PPV_PROGRAM:?set PPV_PROGRAM to ppv_core, ppv_commerce or ppv_escrow}"
 signature="${PPV_DEPLOY_SIGNATURE:?set PPV_DEPLOY_SIGNATURE to the deploy transaction signature}"
 members="${PPV_UPGRADE_AUTHORITY_MEMBERS:?set PPV_UPGRADE_AUTHORITY_MEMBERS to the Squads member public keys}"
 threshold="${PPV_UPGRADE_AUTHORITY_THRESHOLD:?set PPV_UPGRADE_AUTHORITY_THRESHOLD to the Squads threshold}"
@@ -41,9 +41,33 @@ case "${verifiable}" in
 esac
 
 case "${program}" in
-  ppv_core | ppv_commerce) ;;
-  *) echo "PPV_PROGRAM must be ppv_core or ppv_commerce" >&2; exit 1 ;;
+  ppv_core | ppv_commerce | ppv_escrow) ;;
+  *) echo "PPV_PROGRAM must be ppv_core, ppv_commerce or ppv_escrow" >&2; exit 1 ;;
 esac
+
+# ppv_escrow is the one program that holds value, and it is governed by its own
+# multisig rather than the one holding Core and Commerce. A record that names
+# the wrong authority is worse than no record, so the escrow record is required
+# to name the frozen custody vault and member set exactly.
+if [[ "${program}" == "ppv_escrow" ]]; then
+  expected_members="$(node --input-type=module -e "
+    import { ESCROW_CUSTODY_GOVERNANCE as g } from './scripts/lib/identity.mjs';
+    process.stdout.write([...g.members].sort().join(','));
+  ")"
+  actual_members="$(printf '%s' "${members}" | tr ',' '\n' | sed '/^$/d' | sort | paste -sd, -)"
+  if [[ "${actual_members}" != "${expected_members}" ]]; then
+    echo "ppv_escrow evidence must name the frozen custody member set." >&2
+    exit 1
+  fi
+  expected_threshold="$(node --input-type=module -e "
+    import { ESCROW_CUSTODY_GOVERNANCE as g } from './scripts/lib/identity.mjs';
+    process.stdout.write(String(g.threshold));
+  ")"
+  if [[ "${threshold}" != "${expected_threshold}" ]]; then
+    echo "ppv_escrow evidence must record threshold ${expected_threshold}." >&2
+    exit 1
+  fi
+fi
 
 # Evidence must never claim a weaker authority than policy allows. A threshold
 # of one is a single key that can replace the program.

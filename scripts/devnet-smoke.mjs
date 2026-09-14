@@ -26,7 +26,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { PERMANENT_PROGRAM_IDS, UPGRADEABLE_LOADER_ID } from "./lib/identity.mjs";
+import { PERMANENT_PROGRAM_IDS, UPGRADEABLE_LOADER_ID, DEVNET_DEPLOYED_PROGRAMS } from "./lib/identity.mjs";
 import { PROOF_RECORD_DISCRIMINATOR, PROOF_RECORD_LEN, decodeProofRecord } from "./lib/core-accounts.mjs";
 import { encodeBase58, isAddress, isProgramDerived } from "./lib/pubkey.mjs";
 import {
@@ -263,9 +263,12 @@ export async function runIdentityPhase(
     );
   }
 
-  // Default to the whole identity table, which is what a caller that has not
-  // thought about release state wants: every program is required.
-  const expected = released ?? Object.fromEntries(Object.keys(PERMANENT_PROGRAM_IDS).map((n) => [n, {}]));
+  // Default to the programs that are actually deployed to devnet, not to the
+  // whole identity table. A program can have a permanent identity and be
+  // deliberately undeployed — ppv_escrow is exactly that — and requiring the
+  // identity table on chain would report that correct state as a failure.
+  const expected =
+    released ?? Object.fromEntries(DEVNET_DEPLOYED_PROGRAMS.map((name) => [name, {}]));
 
   process.stdout.write("\nPrograms\n");
   const programs = {};

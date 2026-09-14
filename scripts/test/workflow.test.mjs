@@ -45,7 +45,7 @@ test("the job runs in the protected devnet environment", () => {
 });
 
 test("exactly one program is deployed per run, and it must be typed twice", () => {
-  assert.match(WORKFLOW, /options: \[ppv_core, ppv_commerce\]/);
+  assert.match(WORKFLOW, /options: \[ppv_core, ppv_commerce, ppv_escrow\]/);
   assert.match(WORKFLOW, /inputs\.program \}\}" != "\$\{\{ inputs\.confirm \}\}/);
   assert.ok(
     stepIndex("Confirm the program name") < stepIndex("Assert committed identity and build"),
