@@ -174,6 +174,49 @@ test("every agreement type is generated, with its own lifecycle weighted", () =>
   }
 });
 
+test("the randomized property suite is itself mutation-qualified", () => {
+  // RR-8. The host-model qualification proves nothing about the layer that
+  // attacks real custody against a real validator, and that is the layer a
+  // milestone or bounty defect would have to be caught by.
+  const script = readFileSync(join(REPO, "scripts", "mutation-qualify-property.sh"), "utf8");
+
+  // Only the property suite may run, or a deterministic test could be what
+  // "detected" the mutation.
+  assert.match(script, /PPV_ANCHOR_TEST_GLOB="tests\/invariants\/\*\*\/\*\.invariant\.ts"/);
+
+  // The required classes: custody conservation, destination binding, and
+  // lifecycle finality for both milestones and bounties.
+  for (const mutation of [
+    "milestone-double-release",
+    "milestone-recipient",
+    "milestone-overpay",
+    "bounty-winner-replacement",
+  ]) {
+    assert.ok(script.includes(mutation), `no ${mutation} mutation`);
+  }
+
+  // A mutation that does not compile, or a validator that never started, is a
+  // broken mutation rather than a detection.
+  assert.match(script, /MUTATION DID NOT COMPILE — not a qualification/);
+  assert.match(script, /validator did not start; this is not a result/);
+
+  // The suite must be green again afterwards, or "it detected the mutation"
+  // could just mean "it fails on everything".
+  assert.match(script, /clean rerun \(no mutation\)/);
+  assert.match(script, /CLEAN PROPERTY SUITE FAILED after reverting every mutation/);
+
+  // And no mutation may survive into the tree.
+  assert.match(script, /SECURITY: a mutation was left in the working tree/);
+});
+
+test("CI runs the property mutation qualification as its own job", () => {
+  assert.match(CI, /^  property-mutation:$/m);
+  assert.match(CI, /\.\/scripts\/mutation-qualify-property\.sh/);
+  // The job must prove the tree is clean after it, independently of the
+  // script's own trap.
+  assert.match(CI, /git diff --exit-code -- programs\//);
+});
+
 test("the PR tier spends the adversarial budget the docs claim", () => {
   const tier = GATE.split(/^\s+pr\)$/m)[1]?.split(/;;/)[0] ?? "";
   assert.match(tier, /PPV_INVARIANT_SEQUENCES:=100\b/, "PR tier must run 100 sequences");
