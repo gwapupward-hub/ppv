@@ -1,14 +1,14 @@
 import { BN } from "@coral-xyz/anchor";
 import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
-import { SystemProgram } from "@solana/web3.js";
+import { PublicKey, SystemProgram } from "@solana/web3.js";
 
-import type { GeneratedAction } from "./actions";
+import type { AgreementFlavour, GeneratedAction, Scenario } from "./actions";
 import { isCanonicallyAddressed } from "./actions";
 import { assertInvariants } from "./assertions";
 import { executeAction, resolveAccounts, type SequenceWorld } from "./execute";
-import { agreementAddresses, AMOUNT, type Fixture } from "./fixture";
+import { agreementAddresses, milestoneAddress, AMOUNT, type Fixture } from "./fixture";
 import type { EscrowModel } from "./model";
-import { applySuccess, predict, TERMINAL_STATES } from "./model";
+import { applySuccess, emptyMilestones, predict, TERMINAL_STATES } from "./model";
 import { snapshotProtocolState, type SnapshotContext } from "./snapshots";
 
 /**
@@ -47,6 +47,23 @@ export type Coverage = {
   resolutions: number;
   postTerminalAttempts: number;
   sequences: number;
+  /** Sequences opened per agreement type, so an unreached flavour is visible. */
+  escrowSequences: number;
+  milestoneSequences: number;
+  bountySequences: number;
+  /** Milestone lifecycle, attempted and accepted. */
+  milestoneActions: number;
+  milestonesScheduled: number;
+  milestoneReleases: number;
+  milestoneDuplicateReleaseAttempts: number;
+  milestoneForeignAccountAttempts: number;
+  milestonePostTerminalAttempts: number;
+  /** Bounty lifecycle, attempted and accepted. */
+  bountyActions: number;
+  winnerSelections: number;
+  winnerReplacementAttempts: number;
+  bountyPayouts: number;
+  bountyUnassignedPayoutAttempts: number;
 };
 
 export function emptyCoverage(): Coverage {
@@ -64,8 +81,31 @@ export function emptyCoverage(): Coverage {
     resolutions: 0,
     postTerminalAttempts: 0,
     sequences: 0,
+    escrowSequences: 0,
+    milestoneSequences: 0,
+    bountySequences: 0,
+    milestoneActions: 0,
+    milestonesScheduled: 0,
+    milestoneReleases: 0,
+    milestoneDuplicateReleaseAttempts: 0,
+    milestoneForeignAccountAttempts: 0,
+    milestonePostTerminalAttempts: 0,
+    bountyActions: 0,
+    winnerSelections: 0,
+    winnerReplacementAttempts: 0,
+    bountyPayouts: 0,
+    bountyUnassignedPayoutAttempts: 0,
   };
 }
+
+/** The instructions that only a milestone contract implements. */
+const MILESTONE_KINDS = new Set([
+  "createMilestone",
+  "submitMilestone",
+  "approveMilestone",
+  "rejectMilestone",
+  "settleMilestone",
+]);
 
 export class InvariantRunner {
   private nextAgreementId: bigint;
@@ -85,8 +125,14 @@ export class InvariantRunner {
     this.nextAgreementId = firstAgreementId;
   }
 
-  /** A fresh `Open` agreement between the fixture's buyer and seller. */
-  async openAgreement(): Promise<SequenceWorld> {
+  /**
+   * A fresh `Open` agreement of the requested type.
+   *
+   * A bounty is opened with no payee at all, which is the one place the
+   * protocol allows it and the reason `selectWinner` exists. Everything else
+   * names the fixture's seller at creation, where it is fixed forever.
+   */
+  async openAgreement(flavour: AgreementFlavour): Promise<SequenceWorld> {
     const fixture = this.fixture;
     const agreementId = new BN((this.nextAgreementId++).toString());
     const derived = agreementAddresses(
@@ -94,11 +140,19 @@ export class InvariantRunner {
       fixture.buyer.publicKey,
       agreementId,
     );
+    const agreementType =
+      flavour === "milestone"
+        ? { milestoneContract: {} }
+        : flavour === "bounty"
+          ? { bounty: {} }
+          : { escrow: {} };
+    const counterparty =
+      flavour === "bounty" ? PublicKey.default : fixture.seller.publicKey;
     await fixture.escrow.methods
       .initializeAgreement(
         agreementId,
-        fixture.seller.publicKey,
-        { escrow: {} },
+        counterparty,
+        agreementType,
         new BN(AMOUNT.toString()),
         Array<number>(32).fill(7),
       )
@@ -113,7 +167,14 @@ export class InvariantRunner {
       })
       .signers([fixture.buyer])
       .rpc({ commitment: "confirmed" });
-    return { ...derived, agreementId };
+    return {
+      ...derived,
+      agreementId,
+      milestones: [
+        milestoneAddress(fixture.escrow.programId, derived.agreement, 0),
+        milestoneAddress(fixture.escrow.programId, derived.agreement, 1),
+      ],
+    };
   }
 
   private snapshotContext(world: SequenceWorld): SnapshotContext {
@@ -139,19 +200,23 @@ export class InvariantRunner {
    * Runs one sequence against a fresh agreement. Throws `InvariantViolation`
    * at the first divergence, with the full forensic report attached.
    */
-  async runSequence(
-    seed: number,
-    sequence: GeneratedAction[],
-    coverage: Coverage,
-  ): Promise<void> {
+  async runSequence(seed: number, scenario: Scenario, coverage: Coverage): Promise<void> {
     const fixture = this.fixture;
-    const world = await this.openAgreement();
+    const { flavour, actions: sequence } = scenario;
+    const world = await this.openAgreement(flavour);
     const ctx = this.snapshotContext(world);
     try {
       const start = await snapshotProtocolState(ctx);
       let model: EscrowModel = {
+        flavour,
         state: "open",
         amount: AMOUNT,
+        // Only a bounty starts without one, which is what `selectWinner` is
+        // for and what every payee-dependent guard has to refuse until then.
+        payeeAssigned: flavour !== "bounty",
+        milestones: emptyMilestones(),
+        milestoneTotal: 0n,
+        releasedTotal: 0n,
         buyer: fixture.buyer.publicKey,
         seller: fixture.seller.publicKey,
         mint: fixture.mint,
@@ -166,6 +231,10 @@ export class InvariantRunner {
         seller: fixture.seller.publicKey.toBase58(),
         mint: fixture.mint.toBase58(),
       };
+      coverage.sequences += 0; // counted once at the end, with the flavour
+      if (flavour === "escrow") coverage.escrowSequences += 1;
+      if (flavour === "milestone") coverage.milestoneSequences += 1;
+      if (flavour === "bounty") coverage.bountySequences += 1;
       let settlementCount = 0;
 
       for (let index = 0; index < sequence.length; index += 1) {
@@ -177,7 +246,13 @@ export class InvariantRunner {
         // checked on the paths that were added last.
         const wasTerminal = TERMINAL_STATES.has(model.state);
 
-        const result = await executeAction(fixture, world, action);
+        // The tranche `create_milestone` would address next, from the model's
+        // own count of what has been scheduled. The chain decides whether the
+        // create succeeds; this only decides which account it names.
+        const nextSlot = model.milestones.filter(
+          (milestone) => milestone.state !== "absent",
+        ).length;
+        const result = await executeAction(fixture, world, action, nextSlot);
         const post = await snapshotProtocolState(ctx);
 
         // Every way the seller can be paid counts as a settlement, because
@@ -226,9 +301,50 @@ export class InvariantRunner {
             coverage.resolutions += 1;
             if (action.accounts.destination === "seller") coverage.settlements += 1;
           }
+          if (action.kind === "createMilestone") coverage.milestonesScheduled += 1;
+          if (action.kind === "settleMilestone") {
+            coverage.milestoneReleases += 1;
+            coverage.settlements += 1;
+          }
+          if (action.kind === "selectWinner") coverage.winnerSelections += 1;
+          if (flavour === "bounty" && action.kind === "settle") coverage.bountyPayouts += 1;
         } else {
           coverage.refused += 1;
           if (!isCanonicallyAddressed(action)) coverage.refusedNonCanonical += 1;
+        }
+
+        // Attack-class counters, recorded on the attempt rather than on the
+        // outcome. "How often was this refused" is the question; counting only
+        // successes would report zero for every attack that works correctly.
+        if (MILESTONE_KINDS.has(action.kind)) {
+          coverage.milestoneActions += 1;
+          if (action.accounts.milestone === "foreign") {
+            coverage.milestoneForeignAccountAttempts += 1;
+          }
+          if (wasTerminal) coverage.milestonePostTerminalAttempts += 1;
+          if (action.kind === "settleMilestone") {
+            const slot = action.accounts.milestone === "second" ? 1 : 0;
+            if (
+              action.accounts.milestone !== "foreign" &&
+              model.milestones[slot].state === "settled"
+            ) {
+              coverage.milestoneDuplicateReleaseAttempts += 1;
+            }
+          }
+        }
+        if (flavour === "bounty") {
+          coverage.bountyActions += 1;
+          if (action.kind === "selectWinner" && model.payeeAssigned) {
+            coverage.winnerReplacementAttempts += 1;
+          }
+          if (
+            !model.payeeAssigned &&
+            (action.kind === "settle" ||
+              action.kind === "refund" ||
+              action.kind === "resolve")
+          ) {
+            coverage.bountyUnassignedPayoutAttempts += 1;
+          }
         }
         if (wasTerminal) coverage.postTerminalAttempts += 1;
       }

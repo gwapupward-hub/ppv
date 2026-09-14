@@ -131,10 +131,47 @@ test("the destination the generator favours depends on the instruction", () => {
   assert.match(generators, /function destinationArbitrary\(kind: ActionKind\)/);
   assert.match(generators, /kind === "refund" \? "buyer" : "seller"/);
   // The account variant must be drawn per kind, or the kind cannot inform it.
-  assert.match(generators, /kindArbitrary\.chain\(\(kind\)/);
+  assert.match(generators, /kindArbitrary\(flavour\)\.chain\(\(kind\)/);
   // And the wrong-destination attack must still be generated: the weighting
   // moved, the option set did not.
   assert.match(generators, /\.filter\(\(ref\) => ref !== canonical\)/);
+});
+
+test("every agreement type is generated, with its own lifecycle weighted", () => {
+  // RR-1: a milestone or bounty action kind that exists and is never selected
+  // closes nothing. The weights are per flavour so each lifecycle is walked
+  // inside a generated sequence rather than merely being reachable.
+  const generators = readFileSync(
+    join(REPO, "tests", "invariants", "generators.ts"),
+    "utf8",
+  );
+  assert.match(generators, /KIND_WEIGHTS: Record<AgreementFlavour/);
+  for (const flavour of ["escrow", "milestone", "bounty"]) {
+    assert.ok(
+      new RegExp(`^  ${flavour}: \\{`, "m").test(generators),
+      `the generator has no weights for ${flavour}`,
+    );
+  }
+  assert.match(generators, /export function scenarioArbitrary/);
+  assert.match(generators, /constantFrom\(\.\.\.AGREEMENT_FLAVOURS\)/);
+
+  // And the suite must refuse a run that did not reach them.
+  const suite = readFileSync(
+    join(REPO, "tests", "invariants", "protocol.invariant.ts"),
+    "utf8",
+  );
+  for (const floor of [
+    "milestonesScheduled",
+    "milestoneReleases",
+    "milestoneForeignAccountAttempts",
+    "winnerSelections",
+    "bountyUnassignedPayoutAttempts",
+  ]) {
+    assert.ok(
+      suite.includes(`coverage.${floor} > 0`),
+      `the suite has no coverage floor for ${floor}`,
+    );
+  }
 });
 
 test("the PR tier spends the adversarial budget the docs claim", () => {

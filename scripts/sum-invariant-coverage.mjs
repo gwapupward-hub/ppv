@@ -44,6 +44,20 @@ const COUNTERS = [
   "resolutions",
   "postTerminalAttempts",
   "sequences",
+  "escrowSequences",
+  "milestoneSequences",
+  "bountySequences",
+  "milestoneActions",
+  "milestonesScheduled",
+  "milestoneReleases",
+  "milestoneDuplicateReleaseAttempts",
+  "milestoneForeignAccountAttempts",
+  "milestonePostTerminalAttempts",
+  "bountyActions",
+  "winnerSelections",
+  "winnerReplacementAttempts",
+  "bountyPayouts",
+  "bountyUnassignedPayoutAttempts",
 ];
 
 const total = Object.fromEntries(COUNTERS.map((name) => [name, 0]));
@@ -95,6 +109,24 @@ for (const [name, message] of [
   ["refunds", "no refund ever succeeded — PPV-D3 and PPV-D4 were never exercised"],
   ["disputes", "no dispute was ever opened — PPV-D1 and PPV-D2 were never exercised"],
   ["resolutions", "no dispute was ever resolved — PPV-D5 was never exercised"],
+  // RR-1: milestone and bounty lifecycles must be reached by the run, not
+  // merely be reachable by the generator.
+  ["milestoneSequences", "no milestone contract was ever generated"],
+  ["bountySequences", "no bounty was ever generated"],
+  ["milestonesScheduled", "no milestone was ever scheduled — PPV-M1 was never exercised"],
+  [
+    "milestoneReleases",
+    "no milestone was ever released — PPV-M2, PPV-M3 and PPV-M4 were never exercised",
+  ],
+  [
+    "milestoneForeignAccountAttempts",
+    "no foreign milestone account was ever presented — PPV-M4 was never attacked",
+  ],
+  ["winnerSelections", "no bounty winner was ever named — PPV-B1 was never exercised"],
+  [
+    "bountyUnassignedPayoutAttempts",
+    "no payout was ever attempted on an unclaimed bounty — PPV-B3 was never attacked",
+  ],
 ]) {
   if (total[name] === 0) failures.push(message);
 }

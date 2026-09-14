@@ -28,6 +28,7 @@ import type { TokenAccountRef } from "./actions";
  */
 
 const AGREEMENT_SEED = new TextEncoder().encode("agreement");
+const MILESTONE_SEED = new TextEncoder().encode("milestone");
 const VAULT_AUTHORITY_SEED = new TextEncoder().encode("vault");
 const VAULT_TOKEN_SEED = new TextEncoder().encode("vault_token");
 
@@ -40,6 +41,25 @@ export type AgreementAddresses = {
   vaultAuthority: PublicKey;
   vault: PublicKey;
 };
+
+/**
+ * A tranche address, derived from the agreement and the index its own counter
+ * will assign. Derived rather than read back, so the harness can name a
+ * tranche that does not exist yet — which is one of the attacks.
+ */
+export function milestoneAddress(
+  programId: PublicKey,
+  agreement: PublicKey,
+  index: number,
+): PublicKey {
+  const indexSeed = new Uint8Array(4);
+  new DataView(indexSeed.buffer).setUint32(0, index, true);
+  const [milestone] = PublicKey.findProgramAddressSync(
+    [MILESTONE_SEED, agreement.toBytes(), indexSeed],
+    programId,
+  );
+  return milestone;
+}
 
 export function agreementAddresses(
   programId: PublicKey,
@@ -75,6 +95,13 @@ export type Fixture = {
   outsider: Keypair;
   /** Counterparty of the unrelated agreement. Never signs anything. */
   outsiderCounterparty: Keypair;
+  /**
+   * A real tranche of a *different* milestone contract, created once and never
+   * acted on. Presented in place of this agreement's tranche it is a correctly
+   * formed `Milestone` in entirely the wrong relationship, which is what
+   * PPV-M4 and PPV-P9 exist to refuse.
+   */
+  unrelatedMilestone: PublicKey;
   tokens: Record<TokenAccountRef, PublicKey>;
   /** A token account of the agreement mint owned by the attacker, presented
    *  as a vault. It is not a PDA of anything. */
@@ -211,6 +238,51 @@ export async function buildFixture(
     .signers([outsider])
     .rpc({ commitment: "confirmed" });
 
+  // A second unrelated agreement, this one a milestone contract with one
+  // scheduled tranche. Its parties never sign here either, so its tranche is a
+  // fixed "correct account, wrong agreement" probe for the milestone paths.
+  const unrelatedMilestoneId = new BN(2);
+  const unrelatedContract = agreementAddresses(
+    escrow.programId,
+    outsider.publicKey,
+    unrelatedMilestoneId,
+  );
+  await escrow.methods
+    .initializeAgreement(
+      unrelatedMilestoneId,
+      outsiderCounterparty.publicKey,
+      { milestoneContract: {} },
+      new BN(AMOUNT.toString()),
+      Array<number>(32).fill(13),
+    )
+    .accounts({
+      creator: outsider.publicKey,
+      mint,
+      agreement: unrelatedContract.agreement,
+      vaultAuthority: unrelatedContract.vaultAuthority,
+      vault: unrelatedContract.vault,
+      tokenProgram: TOKEN_PROGRAM_ID,
+      systemProgram: SystemProgram.programId,
+    })
+    .signers([outsider])
+    .rpc({ commitment: "confirmed" });
+
+  const unrelatedMilestone = milestoneAddress(
+    escrow.programId,
+    unrelatedContract.agreement,
+    0,
+  );
+  await escrow.methods
+    .createMilestone(new BN(AMOUNT.toString()), Array<number>(32).fill(17))
+    .accounts({
+      creator: outsider.publicKey,
+      agreement: unrelatedContract.agreement,
+      milestone: unrelatedMilestone,
+      systemProgram: SystemProgram.programId,
+    })
+    .signers([outsider])
+    .rpc({ commitment: "confirmed" });
+
   const controlled = [
     tokens.buyer,
     tokens.seller,
@@ -218,6 +290,7 @@ export async function buildFixture(
     tokens.outsider,
     fakeVault,
     unrelated.vault,
+    unrelatedContract.vault,
   ];
   const infos = await connection.getMultipleAccountsInfo(controlled, "confirmed");
   const conservationBaseline = infos.reduce<bigint>((total, info) => {
@@ -239,6 +312,7 @@ export async function buildFixture(
     tokens,
     fakeVault,
     unrelated,
+    unrelatedMilestone,
     decodeAgreement,
     conservationBaseline,
     amount: AMOUNT,

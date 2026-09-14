@@ -4,9 +4,15 @@ import type {
   AccountVariant,
   Actor,
   ActionKind,
+  AgreementFlavour,
   GeneratedAction,
+  MilestoneAmountRef,
+  MilestoneRef,
+  Scenario,
   TokenAccountRef,
+  WinnerRef,
 } from "./actions";
+import { AGREEMENT_FLAVOURS } from "./actions";
 
 /**
  * Generation of both instruction order and account relationships.
@@ -77,6 +83,15 @@ const EXPECTED_ACTOR: Record<ActionKind, Actor> = {
   // conceding to the seller is the shape that pairs with the default
   // destination, so it is the one that shrinks to first place.
   resolve: "buyer",
+  // The buyer plans and decides tranches; the seller does the work and is
+  // paid for it.
+  createMilestone: "buyer",
+  submitMilestone: "seller",
+  approveMilestone: "buyer",
+  rejectMilestone: "buyer",
+  settleMilestone: "seller",
+  // Only the sponsor may name a bounty winner.
+  selectWinner: "buyer",
 };
 
 const actorArbitrary: fc.Arbitrary<ActorChoice> = fc.oneof(
@@ -87,39 +102,101 @@ const actorArbitrary: fc.Arbitrary<ActorChoice> = fc.oneof(
 );
 
 /**
- * Weights, not a uniform draw.
+ * Weights, per agreement flavour.
  *
  * The lifecycle has to be walked before the interesting states exist: nothing
- * can be disputed until something is funded. The three original transitions
- * therefore stay heaviest, and the Phase 5 paths are common enough to be
- * reached often within a sequence of a few dozen actions. `dispute` carries
- * the same weight as `resolve` because a resolution is only legal after one.
+ * can be disputed until something is funded, and no tranche can be released
+ * until two have been scheduled and the contract funded. So each flavour
+ * weights the actions that advance *its own* lifecycle, and keeps the others
+ * at a low weight rather than excluding them — scheduling a tranche on an
+ * ordinary escrow is a wrong-type attack worth generating, just not worth
+ * spending half the budget on.
+ *
+ * A milestone contract needs `createMilestone` twice before `fund` can
+ * succeed, then submit/approve/settle twice. That is nine canonical actions,
+ * against a release-tier budget of up to 32, which is why the milestone
+ * actions carry the weight they do: at a uniform draw the lifecycle would be
+ * reachable in principle and almost never reached in practice, which is the
+ * failure RR-1 names.
  */
-const kindArbitrary: fc.Arbitrary<ActionKind> = fc.oneof(
-  { arbitrary: fc.constant<ActionKind>("fund"), weight: 4 },
-  { arbitrary: fc.constant<ActionKind>("complete"), weight: 4 },
-  { arbitrary: fc.constant<ActionKind>("settle"), weight: 4 },
-  { arbitrary: fc.constant<ActionKind>("cancel"), weight: 1 },
-  { arbitrary: fc.constant<ActionKind>("refund"), weight: 2 },
-  { arbitrary: fc.constant<ActionKind>("dispute"), weight: 3 },
-  { arbitrary: fc.constant<ActionKind>("resolve"), weight: 3 },
+const KIND_WEIGHTS: Record<AgreementFlavour, Partial<Record<ActionKind, number>>> = {
+  escrow: {
+    fund: 4,
+    complete: 4,
+    settle: 4,
+    cancel: 1,
+    refund: 2,
+    dispute: 3,
+    resolve: 3,
+    // Wrong-type attacks against an ordinary escrow.
+    createMilestone: 1,
+    settleMilestone: 1,
+    selectWinner: 1,
+  },
+  milestone: {
+    createMilestone: 6,
+    fund: 4,
+    submitMilestone: 5,
+    approveMilestone: 5,
+    rejectMilestone: 2,
+    settleMilestone: 6,
+    refund: 2,
+    dispute: 2,
+    resolve: 2,
+    cancel: 1,
+    // Both are refused for this type; generating them is the attack.
+    complete: 1,
+    settle: 1,
+    selectWinner: 1,
+  },
+  bounty: {
+    selectWinner: 5,
+    fund: 4,
+    complete: 4,
+    settle: 4,
+    refund: 2,
+    dispute: 3,
+    resolve: 3,
+    cancel: 1,
+    createMilestone: 1,
+    settleMilestone: 1,
+  },
+};
+
+function kindArbitrary(flavour: AgreementFlavour): fc.Arbitrary<ActionKind> {
+  const weights = KIND_WEIGHTS[flavour];
+  return fc.oneof(
+    ...(Object.entries(weights) as Array<[ActionKind, number]>).map(([kind, weight]) => ({
+      arbitrary: fc.constant(kind),
+      weight,
+    })),
+  );
+}
+
+/**
+ * Which tranche an instruction names. `foreign` is a real milestone of a
+ * different contract: the wrong-relationship attack PPV-M4 and PPV-P9 refuse.
+ */
+const milestoneArbitrary: fc.Arbitrary<MilestoneRef> = weighted(
+  "first" as const,
+  "second" as const,
+  "foreign" as const,
 );
 
 /**
- * The destination depends on the instruction, so the weighting must too.
- *
- * A settlement pays the seller and a refund pays the buyer. Weighting one
- * account as "the canonical destination" for every kind makes the *correct*
- * destination for the other a one-in-fourteen draw, and a path that is only
- * legal one time in fourteen is barely attacked: the first release run of this
- * suite produced 151 settlements and 8 refunds from the same 15,337 operations.
- * Eight successes clear a coverage floor and prove very little.
- *
- * So the canonical destination is chosen per kind, exactly as
- * `canonicalValue` in actions.ts does. The deviations are unchanged, and the
- * wrong-destination attack on a refund is still generated — it is the
- * *heavily weighted* option that moves, not the set of options.
+ * `planned` follows the schedule that sums to the agreement amount, so the
+ * contract can actually be funded. The other two are the allocations the
+ * program must refuse — one over the budget, one worth nothing.
  */
+const milestoneAmountArbitrary: fc.Arbitrary<MilestoneAmountRef> = weighted(
+  "planned" as const,
+  "oversized" as const,
+  "zero" as const,
+);
+
+/** Naming the seller is the legal choice; naming yourself is refused. */
+const winnerArbitrary: fc.Arbitrary<WinnerRef> = weighted("seller" as const, "creator" as const);
+
 function destinationArbitrary(kind: ActionKind): fc.Arbitrary<TokenAccountRef> {
   const canonical: TokenAccountRef = kind === "refund" ? "buyer" : "seller";
   const deviations: TokenAccountRef[] = (
@@ -142,28 +219,56 @@ function variantArbitrary(kind: ActionKind): fc.Arbitrary<AccountVariant> {
       "buyerWrongMint" as const,
     ),
     destination: destinationArbitrary(kind),
+    milestone: milestoneArbitrary,
   });
 }
 
-export const actionArbitrary: fc.Arbitrary<GeneratedAction> = kindArbitrary.chain((kind) =>
-  fc
-    .record({ actor: actorArbitrary, accounts: variantArbitrary(kind) })
-    .map(({ actor, accounts }) => ({
-      kind,
-      actor: actor === "expected" ? EXPECTED_ACTOR[kind] : actor,
-      accounts,
-    })),
-);
+function actionArbitrary(flavour: AgreementFlavour): fc.Arbitrary<GeneratedAction> {
+  return kindArbitrary(flavour).chain((kind) =>
+    fc
+      .record({
+        actor: actorArbitrary,
+        accounts: variantArbitrary(kind),
+        amount: milestoneAmountArbitrary,
+        winner: winnerArbitrary,
+      })
+      .map(
+        ({ actor, accounts, amount, winner }) =>
+          ({
+            kind,
+            actor: actor === "expected" ? EXPECTED_ACTOR[kind] : actor,
+            accounts,
+            // Carried on every action and read only by the two kinds that
+            // have them. Generating them unconditionally keeps one record
+            // shape, which is what lets `kind` shrink freely without the
+            // other fields becoming undefined underneath it.
+            amount,
+            winner,
+          }) as GeneratedAction,
+      ),
+  );
+}
 
 /**
- * A bounded sequence.
+ * A bounded sequence against one agreement of one flavour.
  *
  * `minLength: 1` keeps shrinking from producing the empty sequence, which
  * proves nothing and is never the counterexample anyone wants. `size: "max"`
  * makes generation aim at the budget rather than at fast-check's default small
  * arrays — without it a "twenty action" budget spends about seven. Length still
  * shrinks all the way back to one.
+ *
+ * The flavour is generated with the sequence rather than fixed per run, so a
+ * single seed attacks all three lifecycles. `escrow` is listed first because
+ * fast-check shrinks toward it, and a counterexample that survives
+ * simplification to an ordinary escrow is the clearest one to read.
  */
-export function sequenceArbitrary(maxActions: number): fc.Arbitrary<GeneratedAction[]> {
-  return fc.array(actionArbitrary, { minLength: 1, maxLength: maxActions, size: "max" });
+export function scenarioArbitrary(maxActions: number): fc.Arbitrary<Scenario> {
+  return fc
+    .constantFrom(...AGREEMENT_FLAVOURS)
+    .chain((flavour) =>
+      fc
+        .array(actionArbitrary(flavour), { minLength: 1, maxLength: maxActions, size: "max" })
+        .map((actions) => ({ flavour, actions })),
+    );
 }

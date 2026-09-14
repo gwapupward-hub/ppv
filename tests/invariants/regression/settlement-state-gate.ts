@@ -34,6 +34,7 @@ const CANONICAL = {
   vaultAuthority: "canonical",
   source: "buyer",
   destination: "seller",
+  milestone: "first",
 } as const;
 
 /**
@@ -78,10 +79,10 @@ describe("invariant regressions: settlement state gate", function () {
   });
 
   it("refuses settlement before completion and leaves custody untouched", async () => {
-    await runner.runSequence(0, SETTLE_BEFORE_COMPLETION, emptyCoverage());
+    await runner.runSequence(0, { flavour: "escrow", actions: SETTLE_BEFORE_COMPLETION }, emptyCoverage());
   });
 
   it("settles exactly once and refuses everything afterwards", async () => {
-    await runner.runSequence(0, SETTLE_TWICE, emptyCoverage());
+    await runner.runSequence(0, { flavour: "escrow", actions: SETTLE_TWICE }, emptyCoverage());
   });
 });

@@ -25,6 +25,10 @@ export type AgreementObservation = {
   vault: string;
   amount: bigint;
   settledTotal: bigint;
+  /** Tranche bookkeeping, read for PPV-M1 and PPV-M3. */
+  milestoneCount: number;
+  milestonesSettled: number;
+  milestoneTotal: bigint;
   settledAt: bigint;
   fundedAt: bigint;
   completedAt: bigint;
@@ -84,6 +88,9 @@ const ABSENT: AgreementObservation = {
   vault: "",
   amount: 0n,
   settledTotal: 0n,
+  milestoneCount: 0,
+  milestonesSettled: 0,
+  milestoneTotal: 0n,
   settledAt: 0n,
   fundedAt: 0n,
   completedAt: 0n,
@@ -142,6 +149,9 @@ export async function snapshotProtocolState(
       vault: String(decoded.vault),
       amount: big(decoded.amount),
       settledTotal: big(decoded.settledTotal),
+      milestoneCount: Number(decoded.milestoneCount ?? 0),
+      milestonesSettled: Number(decoded.milestonesSettled ?? 0),
+      milestoneTotal: big(decoded.milestoneTotal),
       settledAt: big(decoded.settledAt),
       fundedAt: big(decoded.fundedAt),
       completedAt: big(decoded.completedAt),

@@ -1,6 +1,6 @@
 import * as anchor from "@coral-xyz/anchor";
 import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
-import { Keypair, PublicKey } from "@solana/web3.js";
+import { Keypair, PublicKey, SystemProgram } from "@solana/web3.js";
 
 import type {
   Actor,
@@ -9,6 +9,7 @@ import type {
   ResolvedAccounts,
 } from "./actions";
 import type { AgreementAddresses, Fixture } from "./fixture";
+import { allocationFor } from "./model";
 
 /**
  * Turns a generated action into an actual transaction against the validator.
@@ -27,7 +28,33 @@ import type { AgreementAddresses, Fixture } from "./fixture";
 
 export type SequenceWorld = AgreementAddresses & {
   agreementId: anchor.BN;
+  /** This agreement's two tranche addresses, derived whether or not they exist. */
+  milestones: [PublicKey, PublicKey];
 };
+
+/**
+ * Which milestone account an action carries.
+ *
+ * `foreign` resolves to a real tranche of the fixture's unrelated milestone
+ * contract: a correctly formed `Milestone` in entirely the wrong relationship,
+ * which is the substitution PPV-M4 and PPV-P9 refuse. Deriving it from the
+ * fixture rather than from this world is the point — a client that quietly
+ * re-derived the canonical tranche would turn the attack into a legal call.
+ */
+function milestoneFor(
+  fixture: Fixture,
+  world: SequenceWorld,
+  action: GeneratedAction,
+): PublicKey {
+  switch (action.accounts.milestone) {
+    case "first":
+      return world.milestones[0];
+    case "second":
+      return world.milestones[1];
+    case "foreign":
+      return fixture.unrelatedMilestone;
+  }
+}
 
 function signerFor(fixture: Fixture, actor: Actor): Keypair {
   switch (actor) {
@@ -94,11 +121,25 @@ export function resolveAccounts(
     resolved.vault = vaultFor(fixture, world, action);
     resolved.funderTokenAccount = fixture.tokens[action.accounts.source];
   }
-  if (action.kind === "settle") {
+  if (action.kind === "settle" || action.kind === "refund" || action.kind === "resolve") {
     resolved.mint = mintFor(fixture, action);
     resolved.vault = vaultFor(fixture, world, action);
     resolved.vaultAuthority = authorityFor(fixture, world, action);
-    resolved.sellerTokenAccount = fixture.tokens[action.accounts.destination];
+    resolved.destination = fixture.tokens[action.accounts.destination];
+  }
+  if (
+    action.kind === "submitMilestone" ||
+    action.kind === "approveMilestone" ||
+    action.kind === "rejectMilestone"
+  ) {
+    resolved.milestone = milestoneFor(fixture, world, action);
+  }
+  if (action.kind === "settleMilestone") {
+    resolved.milestone = milestoneFor(fixture, world, action);
+    resolved.mint = mintFor(fixture, action);
+    resolved.vault = vaultFor(fixture, world, action);
+    resolved.vaultAuthority = authorityFor(fixture, world, action);
+    resolved.destination = fixture.tokens[action.accounts.destination];
   }
   return resolved;
 }
@@ -127,6 +168,8 @@ export function executeAction(
   fixture: Fixture,
   world: SequenceWorld,
   action: GeneratedAction,
+  /** The tranche index the agreement's counter is at, per the model. */
+  nextSlot = 0,
 ): Promise<ActionResult> {
   const { escrow } = fixture;
   const signer = signerFor(fixture, action.actor);
@@ -229,5 +272,105 @@ export function executeAction(
           .signers([signer])
           .rpc({ commitment: "confirmed" }),
       );
+
+    case "createMilestone": {
+      // `create_milestone` derives its account from the agreement's own
+      // counter, never from the caller: the harness cannot choose which
+      // tranche it creates, only ask for the next one. `nextSlot` is the
+      // model's view of that counter, passed in rather than kept as module
+      // state — a harness with hidden state is one whose failures cannot be
+      // replayed from a seed.
+      const slot = Math.min(nextSlot, world.milestones.length - 1);
+      return send(() =>
+        escrow.methods
+          .createMilestone(
+            new anchor.BN(allocationFor(action, nextSlot).toString()),
+            TRANCHE_TERMS,
+          )
+          .accounts({
+            creator: signer.publicKey,
+            agreement,
+            milestone: world.milestones[slot],
+            systemProgram: SystemProgram.programId,
+          })
+          .signers([signer])
+          .rpc({ commitment: "confirmed" }),
+      );
+    }
+
+    case "submitMilestone":
+      return send(() =>
+        escrow.methods
+          .submitMilestone()
+          .accounts({
+            signer: signer.publicKey,
+            agreement,
+            milestone: milestoneFor(fixture, world, action),
+          })
+          .signers([signer])
+          .rpc({ commitment: "confirmed" }),
+      );
+
+    case "approveMilestone":
+      return send(() =>
+        escrow.methods
+          .approveMilestone()
+          .accounts({
+            signer: signer.publicKey,
+            agreement,
+            milestone: milestoneFor(fixture, world, action),
+          })
+          .signers([signer])
+          .rpc({ commitment: "confirmed" }),
+      );
+
+    case "rejectMilestone":
+      return send(() =>
+        escrow.methods
+          .rejectMilestone()
+          .accounts({
+            signer: signer.publicKey,
+            agreement,
+            milestone: milestoneFor(fixture, world, action),
+          })
+          .signers([signer])
+          .rpc({ commitment: "confirmed" }),
+      );
+
+    case "settleMilestone":
+      return send(() =>
+        escrow.methods
+          .settleMilestone()
+          .accounts({
+            signer: signer.publicKey,
+            agreement,
+            milestone: milestoneFor(fixture, world, action),
+            mint: mintFor(fixture, action),
+            vault: vaultFor(fixture, world, action),
+            vaultAuthority: authorityFor(fixture, world, action),
+            sellerTokenAccount: fixture.tokens[action.accounts.destination],
+            settlementProof: null,
+            tokenProgram: TOKEN_PROGRAM_ID,
+          })
+          .signers([signer])
+          .rpc({ commitment: "confirmed" }),
+      );
+
+    case "selectWinner":
+      return send(() =>
+        escrow.methods
+          .selectCounterparty(
+            action.winner === "seller"
+              ? fixture.seller.publicKey
+              : // The sponsor naming itself, which the program refuses.
+                fixture.buyer.publicKey,
+          )
+          .accounts({ creator: signer.publicKey, agreement })
+          .signers([signer])
+          .rpc({ commitment: "confirmed" }),
+      );
   }
 }
+
+/** A non-zero terms hash: the program refuses an all-zero one. */
+const TRANCHE_TERMS = Array<number>(32).fill(3);
