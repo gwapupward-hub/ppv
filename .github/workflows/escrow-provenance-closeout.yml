@@ -1,0 +1,415 @@
+name: Escrow provenance closeout (read-only)
+
+# Finishes the ppv_escrow canonical evidence record, and does nothing else.
+#
+# ppv_escrow is deployed to devnet with its upgrade authority on the custody
+# vault, but the run that deployed it crashed before writing the release
+# record. The chain still holds every fact the record needs, so the record is
+# reconstructed from public reads plus an exact rebuild of the release source.
+# This job exists because the environment that maintains the repository cannot
+# reach any Solana RPC host; a GitHub runner can.
+#
+# Two commits are in play, and confusing them is the specific way this job
+# could produce a plausible lie:
+#
+#   DEPLOYED_SOURCE_SHA   231dceb — the source that built the deployed program.
+#   EVIDENCE_TOOLING_SHA  1b9d4c1 — the tooling that recovers the facts and
+#                                   built nothing that is deployed.
+#
+# So the workspace keeps them physically apart: the checkout is the tooling
+# commit, and the release source is a separate detached worktree that is built
+# and then read as data. The separation is asserted, not arranged and trusted —
+# see "Separate the release source from the evidence tooling", which proves the
+# two trees really are different code before either is used.
+#
+# It reads. It cannot do anything else, and that is enforced rather than
+# promised:
+#
+#   * `permissions: contents: read` — no write scope of any kind, so it cannot
+#     push a commit, open a release, or alter repository state.
+#   * No `environment:` key. The devnet environment holds the program keypair,
+#     the deployer keypair and the Squads configuration; a job that does not
+#     attach it cannot read them even by mistake.
+#   * No `secrets` reference anywhere. Nothing it runs takes a signer: the
+#     recovery, the collector and the verifier are all signer-free readers.
+#   * Every verdict fails closed. UNKNOWN is failure — a missing authority
+#     transfer, a hash that does not match, a verifier that reports anything
+#     but verified all stop the job rather than producing a record.
+#
+# scripts/test/escrow-provenance-closeout-workflow.test.mjs asserts every one of
+# those properties against this file, so a future edit that quietly adds a
+# secret, a write permission or a deployment command fails the suite rather than
+# shipping.
+on:
+  workflow_dispatch:
+
+# Read-only. Do not widen this.
+permissions:
+  contents: read
+
+env:
+  # The source that produced the deployed program.
+  DEPLOYED_SOURCE_SHA: 231dceb91c141e1afe6e57ef48fafb199da5c678
+  # The tooling that recovers the facts. Never the deployed source.
+  EVIDENCE_TOOLING_SHA: 1b9d4c1abaa33645477312007ac84829693faf79
+  # Where the release source is built, kept out of the tooling tree entirely.
+  RELEASE_TREE: release-source
+  # The independently established expectations for the rebuild. A build that
+  # produces anything else is not the deployed program.
+  EXPECTED_PROGRAM_ID: 7U1bCHQcr8Jg6J8G69JGaAWCRtsrZB1RYx4zo1sNEVF4
+  EXPECTED_BINARY_SHA256: 0acc61defeb2ee810cf3a4bc87f93f8ef457399fe6b52d170055ed7e0c96f9bf
+  EXPECTED_IDL_SHA256: d8eb433e4674d5335294c2110dba9c3a36972b5b90e42abe32f495ca98c15dcb
+  RPC_URL: https://api.devnet.solana.com
+  RECORD_PATH: deployments/evidence/ppv-escrow-devnet-231dceb.json
+
+jobs:
+  closeout:
+    name: Reconstruct the Escrow release record from live devnet
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    # No `environment:` — see the header. Attaching one would hand this job the
+    # deployment secrets it has no use for.
+
+    steps:
+      - name: Check out the dispatched ref
+        uses: actions/checkout@v4
+        with:
+          # Full history so both pinned commits below are reachable whatever ref
+          # this was dispatched from.
+          fetch-depth: 0
+          # The job needs no credentials: it clones, reads, and pushes nothing.
+          persist-credentials: false
+
+      - name: Pin the evidence tooling to its audited commit
+        run: |
+          # The closeout must run the reviewed tooling, not whatever the branch
+          # tip happens to hold. Committing this workflow necessarily moves the
+          # tip past the audited commit, so the job checks that commit out and
+          # then asserts it — rather than asserting the dispatched tip, which
+          # could never match once this file exists.
+          if ! git cat-file -e "${EVIDENCE_TOOLING_SHA}^{commit}" 2>/dev/null; then
+            echo "The evidence tooling commit ${EVIDENCE_TOOLING_SHA} is not reachable from this ref." >&2
+            echo "Dispatch this workflow from a ref that contains it." >&2
+            exit 1
+          fi
+          git checkout --quiet --detach "${EVIDENCE_TOOLING_SHA}"
+
+          head="$(git rev-parse HEAD)"
+          if [[ "${head}" != "${EVIDENCE_TOOLING_SHA}" ]]; then
+            echo "Refusing to run: HEAD is ${head}, expected ${EVIDENCE_TOOLING_SHA}." >&2
+            exit 1
+          fi
+          echo "EVIDENCE_TOOLING_HEAD=${head}"
+
+      - name: Lay out the release source in its own worktree
+        run: |
+          if ! git cat-file -e "${DEPLOYED_SOURCE_SHA}^{commit}" 2>/dev/null; then
+            echo "The deployed source ${DEPLOYED_SOURCE_SHA} is not reachable from this ref." >&2
+            exit 1
+          fi
+          # Detached, so nothing about the release source can be confused with a
+          # branch that might move, and separate, so building it cannot touch
+          # the tooling tree.
+          git worktree add --quiet --detach "${RELEASE_TREE}" "${DEPLOYED_SOURCE_SHA}"
+
+          release_head="$(git -C "${RELEASE_TREE}" rev-parse HEAD)"
+          if [[ "${release_head}" != "${DEPLOYED_SOURCE_SHA}" ]]; then
+            echo "Refusing to run: the release worktree is at ${release_head}, expected ${DEPLOYED_SOURCE_SHA}." >&2
+            exit 1
+          fi
+          echo "RELEASE_SOURCE_HEAD=${release_head}"
+
+      - name: Separate the release source from the evidence tooling
+        run: |
+          # The hazard this step exists for: the release source also contains a
+          # scripts/ directory, and running *its* collector would silently drop
+          # the provenance fields that keep a recovered record honest — while
+          # looking, in a log, exactly like a successful closeout.
+          #
+          # So the separation is proved rather than assumed. Three independent
+          # facts, each of which would have to be defeated deliberately:
+          mkdir -p closeout
+
+          tooling_collector="$(sha256sum scripts/collect-deployment-evidence.mjs | cut -d' ' -f1)"
+          release_collector="$(sha256sum "${RELEASE_TREE}/scripts/collect-deployment-evidence.mjs" | cut -d' ' -f1)"
+
+          # 1. The two trees carry different collectors. If these ever matched,
+          #    the distinction this job depends on would be meaningless.
+          if [[ "${tooling_collector}" == "${release_collector}" ]]; then
+            echo "The release source and the evidence tooling carry the same collector." >&2
+            echo "The provenance distinction this closeout rests on does not exist." >&2
+            exit 1
+          fi
+
+          # 2. The collector that will run is the recovery-aware one. The older
+          #    implementation cannot record which commit recovered the evidence,
+          #    so a record it wrote could not be told apart from one written by
+          #    its own deployment.
+          if ! grep -q "PPV_EVIDENCE_RECOVERY_COMMIT" scripts/collect-deployment-evidence.mjs; then
+            echo "The collector on PATH does not understand recovery provenance." >&2
+            echo "This is the ${DEPLOYED_SOURCE_SHA} implementation, not the audited one." >&2
+            exit 1
+          fi
+
+          # 3. The release source predates the recovery tooling entirely: the
+          #    recovery script does not exist there. A release source that
+          #    contained it would mean these commits are not what this job
+          #    believes they are.
+          if [[ -e "${RELEASE_TREE}/scripts/recover-escrow-evidence.mjs" ]]; then
+            echo "The release source contains the recovery tooling; the pinned commits are wrong." >&2
+            exit 1
+          fi
+          if [[ ! -f scripts/recover-escrow-evidence.mjs ]]; then
+            echo "The evidence tooling tree has no recovery script." >&2
+            exit 1
+          fi
+
+          {
+            echo "PROGRAM_ARTIFACTS_SOURCE=${DEPLOYED_SOURCE_SHA}"
+            echo "EVIDENCE_TOOLING_SOURCE=${EVIDENCE_TOOLING_SHA}"
+            echo "TOOLING_COLLECTOR_SHA256=${tooling_collector}"
+            echo "RELEASE_COLLECTOR_SHA256=${release_collector}"
+            echo "COLLECTORS_DISTINCT=YES"
+          } | tee closeout/workspace-separation.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          # No `cache: npm` and no install: the recovery, the collector and the
+          # verifier import only node: builtins and dependency-free files under
+          # scripts/lib. The evidence tooling therefore carries no third-party
+          # code at all, which is asserted below rather than assumed.
+
+      - name: Prove the evidence tooling needs no installed dependency
+        run: |
+          if [[ -d node_modules ]]; then
+            echo "node_modules is present; the evidence tooling is supposed to install nothing." >&2
+            exit 1
+          fi
+          node --input-type=module -e '
+            await import("./scripts/recover-escrow-evidence.mjs");
+            await import("./scripts/collect-deployment-evidence.mjs");
+            await import("./scripts/verify-deployed-program.mjs");
+            process.stdout.write("evidence tooling loads with no installed dependency\n");
+          '
+
+      - name: Install the pinned build toolchain
+        run: |
+          # Exactly the toolchain the release was built with. A different
+          # compiler produces different bytes, and different bytes here would
+          # read as "the deployed program is not this source".
+          rustup toolchain install 1.79.0 --profile minimal
+          rustup toolchain install nightly-2024-06-15 --profile minimal
+          sh -c "$(curl --proto '=https' --tlsv1.2 -sSfL https://release.anza.xyz/v1.18.17/install)"
+          echo "${HOME}/.local/share/solana/install/active_release/bin" >> "${GITHUB_PATH}"
+          sudo apt-get update
+          sudo apt-get install --yes libudev-dev pkg-config
+          cargo +1.79.0 install \
+            --git https://github.com/solana-foundation/anchor \
+            --tag v0.30.1 anchor-cli --locked --force
+
+      - name: Rebuild the release source from a clean tree
+        working-directory: ${{ env.RELEASE_TREE }}
+        run: |
+          # Clean first: a stale target/ is how a rebuild ends up proving the
+          # provenance of whatever was there before.
+          cargo clean
+          RUSTUP_TOOLCHAIN=nightly-2024-06-15 anchor build
+
+      - name: Assert the rebuild is the deployed program
+        id: rebuild
+        run: |
+          binary="${RELEASE_TREE}/target/deploy/ppv_escrow.so"
+          idl="${RELEASE_TREE}/target/idl/ppv_escrow.json"
+
+          built_id="$(node -e "process.stdout.write(require('./${idl}').address)")"
+          binary_hash="$(sha256sum "${binary}" | cut -d' ' -f1)"
+          idl_hash="$(sha256sum "${idl}" | cut -d' ' -f1)"
+
+          {
+            echo "BUILT_PROGRAM_ID=${built_id}"
+            echo "BINARY_SHA256=${binary_hash}"
+            echo "IDL_SHA256=${idl_hash}"
+          } | tee closeout/rebuild.txt
+
+          failed=0
+          if [[ "${built_id}" != "${EXPECTED_PROGRAM_ID}" ]]; then
+            echo "Built program id ${built_id} is not the permanent id ${EXPECTED_PROGRAM_ID}." >&2
+            failed=1
+          fi
+          if [[ "${binary_hash}" != "${EXPECTED_BINARY_SHA256}" ]]; then
+            echo "Rebuilt binary sha256 ${binary_hash} != expected ${EXPECTED_BINARY_SHA256}." >&2
+            failed=1
+          fi
+          if [[ "${idl_hash}" != "${EXPECTED_IDL_SHA256}" ]]; then
+            echo "Rebuilt IDL sha256 ${idl_hash} != expected ${EXPECTED_IDL_SHA256}." >&2
+            failed=1
+          fi
+          if [[ "${failed}" -ne 0 ]]; then
+            echo "SOURCE_REBUILD_MATCH=NO" >&2
+            echo "Do not redeploy and do not write a record; investigate provenance." >&2
+            exit 1
+          fi
+          echo "SOURCE_REBUILD_MATCH=YES"
+
+      - name: Read the live deployment facts from devnet
+        id: recover
+        run: |
+          # Signer-free reads. The authority transfer is identified by decoding
+          # loader instructions, never by transaction ordering, so an UNKNOWN
+          # here means no transaction proved the change — which is a failure,
+          # not a field to fill in from somewhere else.
+          set +e
+          node scripts/recover-escrow-evidence.mjs --rpc "${RPC_URL}" --json > closeout/recovery.json 2> closeout/recovery.err
+          code=$?
+          set -e
+
+          if [[ -s closeout/recovery.json ]]; then
+            cat closeout/recovery.json
+          else
+            echo "(the recovery produced no JSON output)"
+          fi
+          if [[ -s closeout/recovery.err ]]; then
+            echo "--- stderr ---" >&2
+            cat closeout/recovery.err >&2
+          fi
+          if [[ "${code}" -ne 0 ]]; then
+            echo "ONCHAIN_PROGRAM_VERIFICATION=NOT_PROVEN" >&2
+            exit "${code}"
+          fi
+
+          # Both signatures must be present and distinct facts. UNKNOWN is
+          # failure: a record with a guessed transfer signature is worse than no
+          # record, because every later verification would trust it.
+          #
+          # Written straight to GITHUB_OUTPUT by the checker itself. An earlier
+          # shape read the values back through `eval "$(node ...)"`, which
+          # reports the status of `eval` rather than of node — so a refusal
+          # would have produced empty signatures and carried on.
+          node --input-type=module -e '
+            import { appendFileSync, readFileSync } from "node:fs";
+            const r = JSON.parse(readFileSync("closeout/recovery.json", "utf8"));
+            const fail = (m) => { process.stderr.write(`${m}\n`); process.exit(1); };
+            if (!r.deploymentVerified) fail("the deployment transaction was not verified");
+            if (!r.authorityTransferVerified) fail("no transaction proved the authority transfer");
+            if (!r.authorityMatch) fail(`live upgrade authority ${r.upgradeAuthority} is not the custody vault`);
+            const deploy = r.deploymentSignature;
+            const transfer = r.authorityTransferSignature;
+            if (!deploy || !transfer) fail("a required signature is missing");
+            if (deploy === transfer) fail("one signature is recorded as both the deploy and the transfer");
+            appendFileSync(process.env.GITHUB_OUTPUT, `deploy_signature=${deploy}\ntransfer_signature=${transfer}\n`);
+            process.stdout.write(`deployment ${deploy}\nauthority transfer ${transfer}\n`);
+          '
+          echo "ONCHAIN_PROGRAM_VERIFICATION=PROVEN"
+
+      - name: Resolve the frozen custody governance
+        id: governance
+        run: |
+          # Read from the canonical frozen record, never transcribed from the
+          # previous recovery report. A field copied from an earlier artifact is
+          # a field this record did not establish.
+          node --input-type=module -e '
+            import { appendFileSync } from "node:fs";
+            import { ESCROW_CUSTODY_GOVERNANCE } from "./scripts/lib/identity.mjs";
+            const g = ESCROW_CUSTODY_GOVERNANCE;
+            if (!g) { process.stderr.write("no custody governance is frozen for ppv_escrow\n"); process.exit(1); }
+            appendFileSync(process.env.GITHUB_OUTPUT, `members=${g.members.join(",")}\nthreshold=${g.threshold}\nvault=${g.vault}\n`);
+            process.stdout.write(`custody vault ${g.vault}, ${g.threshold}-of-${g.members.length}\n`);
+          '
+
+      - name: Write the canonical evidence record
+        env:
+          PPV_PROGRAM: ppv_escrow
+          # The deployed source. Not HEAD, which is the tooling commit.
+          PPV_RELEASE_COMMIT: ${{ env.DEPLOYED_SOURCE_SHA }}
+          # The tooling commit, in its own field. The collector refuses this if
+          # it equals the release commit.
+          PPV_EVIDENCE_RECOVERY_COMMIT: ${{ env.EVIDENCE_TOOLING_SHA }}
+          PPV_RECOVERY_WORKFLOW_RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          PPV_EVIDENCE_WORKFLOW_RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          PPV_DEPLOY_SIGNATURE: ${{ steps.recover.outputs.deploy_signature }}
+          PPV_AUTHORITY_TRANSFER_SIGNATURE: ${{ steps.recover.outputs.transfer_signature }}
+          PPV_UPGRADE_AUTHORITY_MEMBERS: ${{ steps.governance.outputs.members }}
+          PPV_UPGRADE_AUTHORITY_THRESHOLD: ${{ steps.governance.outputs.threshold }}
+          # The artifacts come from the release worktree; the code reading them
+          # comes from this tree. That is the whole arrangement, in one variable.
+          PPV_BUILD_DIR: release-source/target
+          PPV_RPC_URL: https://api.devnet.solana.com
+        run: |
+          mkdir -p "$(dirname "${RECORD_PATH}")"
+          node scripts/collect-deployment-evidence.mjs "${RECORD_PATH}"
+          cp "${RECORD_PATH}" closeout/
+          echo "CANONICAL_EVIDENCE_WRITTEN=YES"
+
+      - name: Verify the record against the chain
+        run: |
+          # An independent pass: the collector wrote the record, this reads it
+          # back and re-checks every claim against devnet. Exit status is the
+          # verdict.
+          node scripts/verify-deployed-program.mjs "${RECORD_PATH}" | tee closeout/verification.txt
+
+      - name: Confirm the closeout carries no secret material
+        run: |
+          # The artifact is public. Nothing signed anything here, but anchor
+          # build creates an unused ephemeral program keypair under target/, so
+          # the upload is confined to closeout/ and that is checked rather than
+          # trusted.
+          if find closeout -name '*keypair*' -o -name '*.pem' -o -name 'id.json' | grep -q .; then
+            echo "The closeout directory contains something that looks like key material." >&2
+            exit 1
+          fi
+          node --input-type=module -e '
+            import { readdirSync, readFileSync } from "node:fs";
+            const bad = [/(\d+,\s*){20,}\d+/, /secretKey/i, /mnemonic/i, /PRIVATE KEY/i];
+            for (const name of readdirSync("closeout")) {
+              const body = readFileSync(`closeout/${name}`, "utf8");
+              for (const pattern of bad) {
+                if (pattern.test(body)) { process.stderr.write(`${name} matches ${pattern}\n`); process.exit(1); }
+              }
+            }
+            process.stdout.write("closeout artifact carries no key material\n");
+          '
+
+      - name: Report the closeout verdict
+        run: |
+          # Reached only when every step above passed, each of which failed
+          # closed. Nothing here re-derives a verdict from a maybe.
+          {
+            echo "PPV_ESCROW_PROVENANCE_CLOSEOUT"
+            echo "DEPLOYED_SOURCE_SHA=${DEPLOYED_SOURCE_SHA}"
+            echo "EVIDENCE_RECOVERY_SHA=${EVIDENCE_TOOLING_SHA}"
+            echo "SOURCE_REBUILD_MATCH=YES"
+            echo "ARTIFACT_HASH_MATCH=YES"
+            echo "ONCHAIN_PROGRAM_VERIFICATION=VERIFIED"
+            echo "SIGNER_FREE_VERIFICATION=YES"
+            echo "CANONICAL_EVIDENCE_WRITTEN=YES"
+            echo "ESCROW_REDEPLOYED=NO"
+            echo "AUTHORITY_CHANGED=NO"
+            echo "result=closed"
+          } | tee closeout/verdict.txt
+
+      - name: Report a failed closeout
+        if: failure()
+        run: |
+          # A refusal is evidence too, and an operator reading a red run should
+          # find the verdict rather than infer it. This does not change the job
+          # result: the step that failed already decided it.
+          {
+            echo "PPV_ESCROW_PROVENANCE_CLOSEOUT"
+            echo "DEPLOYED_SOURCE_SHA=${DEPLOYED_SOURCE_SHA}"
+            echo "EVIDENCE_RECOVERY_SHA=${EVIDENCE_TOOLING_SHA}"
+            echo "CANONICAL_EVIDENCE_WRITTEN=NO"
+            echo "result=refused"
+            echo "See the failing step above; UNKNOWN is failure by design."
+          } | tee closeout/verdict.txt
+
+      - name: Upload the closeout evidence
+        # Runs even on refusal, because the recovery's rejected candidates and
+        # the rebuild hashes are exactly what is needed to work out why.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ppv-escrow-provenance-closeout
+          path: closeout/
+          if-no-files-found: warn
+          retention-days: 90
