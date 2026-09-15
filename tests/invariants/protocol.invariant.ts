@@ -194,9 +194,40 @@ describe("PPV protocol invariants (property-based)", function () {
       coverage.disputes > 0,
       "no dispute was ever opened — PPV-D1 and PPV-D2 were never exercised",
     );
+    // PPV-D5, floored on the whole concession surface rather than on one
+    // total. Seed 20260913 passed every floor that existed before these and
+    // still resolved nothing: `resolutions` was the only dispute-outcome
+    // number, and a generator that reached `Disputed` only by coincidence
+    // could clear it on a lucky seed and miss on an unlucky one. Each of the
+    // five below names a distinct way the dispute path can quietly die.
     assert.ok(
       coverage.resolutions > 0,
       "no dispute was ever resolved — PPV-D5 was never exercised",
+    );
+    assert.ok(
+      coverage.resolutionAttempts > 0,
+      "no resolution was ever attempted — PPV-D5 was never reached",
+    );
+    assert.ok(
+      coverage.invalidResolutionAttempts > 0,
+      "every resolution attempted was legal — the wrong-role, wrong-account and " +
+        "wrong-state attacks on a concession were never generated",
+    );
+    // Both legal edges out of `Disputed`. A run that only ever conceded toward
+    // the seller left `Disputed -> Refunded` unexercised, which is what every
+    // seed did before the dispute path was generated.
+    assert.ok(
+      coverage.resolutionsToSeller > 0,
+      "no dispute was ever conceded to the seller — the Disputed -> Settled edge was never taken",
+    );
+    assert.ok(
+      coverage.resolutionsToBuyer > 0,
+      "no dispute was ever conceded to the buyer — the Disputed -> Refunded edge was never taken",
+    );
+    assert.ok(
+      coverage.postResolutionAttempts > 0,
+      "nothing was attempted after a dispute was conceded — the replay surface " +
+        "specific to a resolved agreement was never attacked",
     );
     // RR-1's closure condition, stated as a gate rather than as a claim.
     //

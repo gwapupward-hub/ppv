@@ -14,6 +14,7 @@ export const READINESS = join(REPO, "scripts", "verify-devnet-readiness.sh");
 
 export const CORE_ID = "9cWE41ZDNQChvFrRoVuPQDeoVLg46ACTiZRCZaBZzfwU";
 export const COMMERCE_ID = "GmRDoFuPrBrsxnvTX751WK5rLu14JXe4sgjh6vNwHzr3";
+export const ESCROW_ID = "7U1bCHQcr8Jg6J8G69JGaAWCRtsrZB1RYx4zo1sNEVF4";
 
 /**
  * A real off-curve address, derived under the Squads V4 program id — the shape
@@ -35,6 +36,10 @@ const FIXTURE_FILES = [
   ".gitignore",
   "programs/ppv_core/src/lib.rs",
   "programs/ppv_commerce/src/lib.rs",
+  // Escrow joined the identity preflight with the Sprint 4 freeze. Leaving it
+  // out of the fixture would make the readiness suite pass against a repository
+  // shape that no longer exists.
+  "programs/ppv_escrow/src/lib.rs",
 ];
 
 /**

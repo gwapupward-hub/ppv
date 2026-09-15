@@ -45,6 +45,21 @@ export type Coverage = {
   refunds: number;
   disputes: number;
   resolutions: number;
+  /**
+   * The dispute path, counted finely rather than as one total.
+   *
+   * `resolutions` alone hid two things. A run could clear its floor on a
+   * handful of accidental in-state hits while the generator had effectively
+   * stopped reaching `Disputed` — which is what seed 20260913 exposed — and a
+   * run could resolve only ever toward the seller, leaving the
+   * `Disputed -> Refunded` edge unexercised in every seed. Both are now their
+   * own floor.
+   */
+  resolutionAttempts: number;
+  invalidResolutionAttempts: number;
+  resolutionsToSeller: number;
+  resolutionsToBuyer: number;
+  postResolutionAttempts: number;
   postTerminalAttempts: number;
   sequences: number;
   /** Sequences opened per agreement type, so an unreached flavour is visible. */
@@ -79,6 +94,11 @@ export function emptyCoverage(): Coverage {
     refunds: 0,
     disputes: 0,
     resolutions: 0,
+    resolutionAttempts: 0,
+    invalidResolutionAttempts: 0,
+    resolutionsToSeller: 0,
+    resolutionsToBuyer: 0,
+    postResolutionAttempts: 0,
     postTerminalAttempts: 0,
     sequences: 0,
     escrowSequences: 0,
@@ -235,6 +255,8 @@ export class InvariantRunner {
       if (flavour === "milestone") coverage.milestoneSequences += 1;
       if (flavour === "bounty") coverage.bountySequences += 1;
       let settlementCount = 0;
+      /** Set once this sequence has had a dispute conceded. */
+      let resolvedInSequence = false;
 
       for (let index = 0; index < sequence.length; index += 1) {
         const action = sequence[index];
@@ -244,6 +266,7 @@ export class InvariantRunner {
         // a state added to one and not the other is how PPV-P2 stops being
         // checked on the paths that were added last.
         const wasTerminal = TERMINAL_STATES.has(model.state);
+        const wasResolved = resolvedInSequence;
 
         // The tranche `create_milestone` would address next, from the model's
         // own count of what has been scheduled. The chain decides whether the
@@ -288,6 +311,13 @@ export class InvariantRunner {
         model = expected;
 
         coverage.attempted += 1;
+        // Counted whether or not it succeeded: the refused ones are the
+        // wrong-role, wrong-account and wrong-state attacks on the concession,
+        // and a run that stopped producing them has stopped attacking it.
+        if (action.kind === "resolve") {
+          coverage.resolutionAttempts += 1;
+          if (!result.succeeded) coverage.invalidResolutionAttempts += 1;
+        }
         if (result.succeeded) {
           coverage.succeeded += 1;
           if (action.kind === "fund") coverage.fundings += 1;
@@ -298,7 +328,16 @@ export class InvariantRunner {
           if (action.kind === "dispute") coverage.disputes += 1;
           if (action.kind === "resolve") {
             coverage.resolutions += 1;
-            if (action.accounts.destination === "seller") coverage.settlements += 1;
+            if (action.accounts.destination === "seller") {
+              coverage.resolutionsToSeller += 1;
+              coverage.settlements += 1;
+            } else {
+              // A concession to the buyer refunds the escrow: the other legal
+              // edge out of `Disputed`, and the one no seed ever reached
+              // before the dispute path existed.
+              coverage.resolutionsToBuyer += 1;
+            }
+            resolvedInSequence = true;
           }
           if (action.kind === "createMilestone") coverage.milestonesScheduled += 1;
           if (action.kind === "settleMilestone") {
@@ -346,6 +385,11 @@ export class InvariantRunner {
           }
         }
         if (wasTerminal) coverage.postTerminalAttempts += 1;
+        // Anything attempted after a dispute was conceded. A resolution moves
+        // the agreement to `Settled` or `Refunded`, so this is the replay and
+        // double-spend surface specific to the dispute path — counted apart
+        // from the general terminal attacks so it cannot be satisfied by them.
+        if (wasResolved) coverage.postResolutionAttempts += 1;
       }
       coverage.sequences += 1;
     } finally {
