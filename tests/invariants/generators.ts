@@ -163,6 +163,37 @@ const KIND_WEIGHTS: Record<AgreementFlavour, Partial<Record<ActionKind, number>>
   },
 };
 
+/**
+ * How often the directed prefix walks the dispute path instead of the
+ * settlement path.
+ *
+ * The two paths compete for one sequence budget, and the flavours do not have
+ * the same slack. An ordinary escrow reaches `Settled` in three actions and a
+ * bounty in four, so a dispute prefix costs them almost nothing. A milestone
+ * contract needs nine — schedule, schedule, fund, then submit/approve/release
+ * twice — and giving any share of that to a second path measurably starved its
+ * tranche coverage: at one dispute in three the wrong-destination release
+ * attempts fell to 1 and at one in six to 3, against a reachability floor of 5.
+ * `reachability.test.ts` caught both, which is what it is for.
+ *
+ * So the directed dispute prefix is for escrow and bounty only. Milestone
+ * contracts keep the whole budget for their own lifecycle and still reach
+ * disputes the way they always did, through the randomized tail — `dispute`
+ * and `resolve` remain in their kind weights and the measured milestone
+ * dispute count is unchanged. Nothing is lost by sampling the concession where
+ * the budget is cheap: the guards `resolve` has to clear are the same three
+ * lines of the model for every flavour.
+ */
+function pathArbitrary(flavour: AgreementFlavour): fc.Arbitrary<LifecyclePath> {
+  if (flavour === "milestone") return fc.constant<LifecyclePath>("settlement");
+  // `settlement` is first so fast-check still shrinks a counterexample toward
+  // the original path.
+  return fc.oneof(
+    { arbitrary: fc.constant<LifecyclePath>("settlement"), weight: 2 },
+    { arbitrary: fc.constant<LifecyclePath>("dispute"), weight: 1 },
+  );
+}
+
 function kindArbitrary(flavour: AgreementFlavour): fc.Arbitrary<ActionKind> {
   const weights = KIND_WEIGHTS[flavour];
   return fc.oneof(
@@ -260,6 +291,33 @@ function actionArbitrary(flavour: AgreementFlavour): fc.Arbitrary<GeneratedActio
 }
 
 /**
+ * Which lifecycle the directed prefix walks.
+ *
+ * `settlement` is the original path: fund, complete, settle (and the tranche
+ * releases for a milestone contract). `dispute` walks to escrowed money and
+ * then opens and concedes a dispute.
+ *
+ * The second path exists because `Disputed` was reachable only by coincidence.
+ * The generator draws `kind` without looking at the state, so a `resolve` is
+ * drawn about ninety times per hundred sequences and lands while the agreement
+ * is actually disputed about eleven times — measured across all five CI seeds:
+ * 11, 12, 12, 14, 9 in-state attempts, of which 0, 9, 6, 3 and 3 succeeded.
+ * Roughly a hundred and fifty action slots per seed are *spent* in `Disputed`,
+ * and about ninety `resolve` actions are generated, but the two rarely
+ * intersect. So the PPV-D5 floor rested on a sample of about eleven Bernoulli
+ * trials, and seed 20260913 was simply the tail of that binomial: no invariant
+ * was violated, the run just never resolved anything.
+ *
+ * More iterations was the wrong fix — the budget was not the constraint. This
+ * is the same closure RR-1 used for milestones and bounties: let a directed
+ * prefix *establish* the state, and let the randomized tail attack it.
+ */
+type LifecyclePath = "settlement" | "dispute";
+
+/** Which way a conceded dispute sends the escrow. Both are legal. */
+type Concession = "toSeller" | "toBuyer";
+
+/**
  * The canonical lifecycle of each flavour, in order.
  *
  * Directed setup, then randomized attack. A pure random walk reaches shallow
@@ -284,14 +342,19 @@ function actionArbitrary(flavour: AgreementFlavour): fc.Arbitrary<GeneratedActio
 function canonicalPrefix(
   flavour: AgreementFlavour,
   order: readonly [MilestoneRef, MilestoneRef],
+  path: LifecyclePath = "settlement",
+  concession: Concession = "toSeller",
 ): GeneratedAction[] {
-  const accounts = (milestone: MilestoneRef = "first"): AccountVariant => ({
+  const accounts = (
+    milestone: MilestoneRef = "first",
+    destination: TokenAccountRef = "seller",
+  ): AccountVariant => ({
     agreement: "canonical",
     mint: "canonical",
     vault: "canonical",
     vaultAuthority: "canonical",
     source: "buyer",
-    destination: "seller",
+    destination,
     milestone,
   });
   const act = (kind: ActionKind, milestone: MilestoneRef = "first"): GeneratedAction =>
@@ -302,6 +365,52 @@ function canonicalPrefix(
       amount: "planned",
       winner: "seller",
     }) as GeneratedAction;
+
+  /**
+   * The concession itself.
+   *
+   * A resolution is a party giving the escrow to the *other* party, so the
+   * signer and the destination are chosen together: the buyer can only concede
+   * to the seller, the seller only to the buyer. Generating the direction is
+   * what reaches both legal outcomes — `Disputed -> Settled` and
+   * `Disputed -> Refunded` — which the model has always permitted and the
+   * random tail had never once produced (measured: zero buyer-destination
+   * resolutions across all five seeds).
+   */
+  const resolveAct = (): GeneratedAction =>
+    ({
+      kind: "resolve",
+      actor: concession === "toSeller" ? "buyer" : "seller",
+      accounts: accounts("first", concession === "toSeller" ? "seller" : "buyer"),
+      amount: "planned",
+      winner: "seller",
+    }) as GeneratedAction;
+
+  // The lifecycle up to the point where money is escrowed and a payee exists,
+  // which is exactly the precondition `dispute` needs.
+  const escrowed = (): GeneratedAction[] => {
+    switch (flavour) {
+      case "escrow":
+        return [act("fund")];
+      case "bounty":
+        return [act("selectWinner"), act("fund")];
+      case "milestone":
+        return [act("createMilestone", "first"), act("createMilestone", "second"), act("fund")];
+    }
+  };
+
+  if (path === "dispute") {
+    // Funded, completed, disputed, conceded. `complete` is included so the
+    // dispute is opened from `Completed` rather than always from `Funded` —
+    // the model allows both and the deeper one is the less obvious. A
+    // milestone contract has no `complete`, so it disputes from `Funded`;
+    // `pathArbitrary` does not currently route milestones here, but the shape
+    // is kept correct so that re-enabling them is a one-line change rather
+    // than a silently wrong prefix.
+    const toDispute =
+      flavour === "milestone" ? [...escrowed()] : [...escrowed(), act("complete")];
+    return [...toDispute, act("dispute"), resolveAct()];
+  }
 
   switch (flavour) {
     case "escrow":
@@ -360,28 +469,49 @@ export function scenarioArbitrary(maxActions: number): fc.Arbitrary<Scenario> {
     fc
       .record({
         order: fc.constantFrom(...orders),
-        // Uniform over the lifecycle, not `fc.nat`, which is biased toward
-        // small values: with it, long prefixes were rare and the deep states
-        // — a tranche approved, one tranche released with balance still owed —
-        // were under-sampled by the very run meant to reach them. Measured at
-        // three affordable repeat releases in two hundred sequences, against
-        // nine expected. `constantFrom` still shrinks toward its first entry,
-        // so a counterexample minimizes to the shortest setup as before.
-        prefixLength: fc.constantFrom(
-          ...Array.from({ length: canonicalPrefix(flavour, orders[0]).length + 1 }, (_, i) => i),
+        path: pathArbitrary(flavour),
+        // Both directions a concession may send the escrow. `toSeller` shrinks
+        // to first place because it pairs with the default destination, but
+        // `toBuyer` is what reaches `Disputed -> Refunded`, a legal edge the
+        // model has always had and the random tail produced exactly zero times
+        // across every seed.
+        concession: fc.oneof(
+          { arbitrary: fc.constant<Concession>("toSeller"), weight: 1 },
+          { arbitrary: fc.constant<Concession>("toBuyer"), weight: 1 },
         ),
+        prefixLength: fc.nat(),
         tail: fc.array(actionArbitrary(flavour), {
           minLength: 1,
           maxLength: maxActions,
           size: "max",
         }),
       })
-      .map(({ order, prefixLength, tail }) => ({
-        flavour,
-        actions: [...canonicalPrefix(flavour, order).slice(0, prefixLength), ...tail].slice(
-          0,
-          maxActions,
-        ),
-      })),
+      .map(({ order, path, concession, prefixLength, tail }) => {
+        const prefix = canonicalPrefix(flavour, order, path, concession);
+        // Uniform over this path's own length, not `fc.nat`, which is biased
+        // toward small values: with it, long prefixes were rare and the deep
+        // states — a tranche approved, one tranche released with balance still
+        // owed — were under-sampled by the very run meant to reach them.
+        //
+        // The dispute path is cut differently. Truncating it short of the
+        // `dispute` leaves an ordinary funded agreement, which the settlement
+        // path already produces in quantity, and the whole reason this path
+        // exists is to establish `Disputed` reliably rather than by
+        // coincidence. So it always runs at least to the dispute, and includes
+        // the concession about half the time — the rest of the time the tail
+        // inherits a live dispute to attack. Cut uniformly instead, the
+        // concession landed in roughly one escrow-or-bounty sequence in
+        // fifteen, and `resolutionsToBuyer` came out at 0 on seed 20260914:
+        // the same coin-flip floor this change exists to remove, moved one
+        // step along.
+        const taken =
+          path === "dispute"
+            ? prefix.length - 1 + (prefixLength % 2)
+            : prefixLength % (prefix.length + 1);
+        return {
+          flavour,
+          actions: [...prefix.slice(0, taken), ...tail].slice(0, maxActions),
+        };
+      }),
   );
 }

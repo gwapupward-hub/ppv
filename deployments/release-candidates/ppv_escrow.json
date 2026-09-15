@@ -2,7 +2,7 @@
   "program": "ppv_escrow",
   "programId": "7U1bCHQcr8Jg6J8G69JGaAWCRtsrZB1RYx4zo1sNEVF4",
   "cluster": "devnet",
-  "status": "blocked-invariant-coverage",
+  "status": "awaiting-approvals",
   "requiredGates": [
     "cargo fmt --all -- --check",
     "cargo test --workspace --locked",
@@ -27,8 +27,5 @@
     "BJmFM4k7Q32CiCYSdoYkAhXdD5Sk3BegMh2cbEAsgSwJ"
   ],
   "sharedSignerExceptionScope": "devnet",
-  "notes": "DO NOT COLLECT APPROVALS YET. Declares ppv_escrow queued for its initial devnet release. Its upgradeAuthority is the DEDICATED CUSTODY VAULT, not the B6tcsTrMCKTZV5vi3rRCnA3FMPeeWACSHuuTSz5XQgnX vault that holds Core and Commerce \u2014 escrow is the one program that holds value and the custody gate requires separate governance. Approvals for this release must come from two distinct custodyMembers above; the Core/Commerce signer set cannot approve it. One custody signer (BJmFM4k7Q32CiCYSdoYkAhXdD5Sk3BegMh2cbEAsgSwJ) is intentionally shared with Core/Commerce governance and the other two are distinct; that exception is approved for devnet only. Presence of this file makes CI run the release-tier invariant budget on any pull request that touches it, and lets scripts/prepare-release-candidate.mjs emit the approval message. It carries no commit sha: the candidate commit is whatever the operator dispatches, and the deploy workflow binds it from its own checkout rather than from input. DECLARING A CANDIDATE IS NOT AUTHORIZING A DEPLOYMENT: the custody gate in docs/deployment-gates.md is closed on its remaining requirements, RR-13 (no independent security review) among them. Delete this file once the release record lands in deployments/evidence/.",
-  "blockedBy": [
-    "PPV_INVARIANT_TIER=pr and release both fail on seed 20260913: the coverage floor 'no dispute was ever resolved \u2014 PPV-D5 was never exercised'. No invariant is violated \u2014 the property test passes all 100 sequences \u2014 but the suite refuses to claim coverage it did not reach, so SECURITY_INVARIANTS_GREEN cannot be asserted for this commit. Reproduced deterministically on a clean checkout of 6cfb057f17872758588651d2ae316581e941afd3."
-  ]
+  "notes": "Declares ppv_escrow queued for its initial devnet release. It carries no commit sha by design: the candidate commit is whatever the operator dispatches, and the deploy workflow binds it from its own checkout rather than from input, so the approval message must name the merged main sha that carries this file rather than any branch sha. Its upgradeAuthority is the DEDICATED CUSTODY VAULT, not the B6tcsTrMCKTZV5vi3rRCnA3FMPeeWACSHuuTSz5XQgnX vault that holds Core and Commerce \u2014 escrow is the one program that holds value and the custody gate requires separate governance. Approvals for this release must come from two distinct custodyMembers above; the Core/Commerce signer set cannot approve it. One custody signer (BJmFM4k7Q32CiCYSdoYkAhXdD5Sk3BegMh2cbEAsgSwJ) is intentionally shared with Core/Commerce governance and the other two are distinct; that exception is approved for devnet only. Presence of this file makes CI run the release-tier invariant budget on any pull request that touches it, and lets scripts/prepare-release-candidate.mjs emit the approval message. It carries no commit sha: the candidate commit is whatever the operator dispatches, and the deploy workflow binds it from its own checkout rather than from input. DECLARING A CANDIDATE IS NOT AUTHORIZING A DEPLOYMENT: the custody gate in docs/deployment-gates.md is closed on its remaining requirements, RR-13 (no independent security review) among them. Delete this file once the release record lands in deployments/evidence/."
 }
