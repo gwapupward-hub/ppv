@@ -1,0 +1,144 @@
+name: Recover Escrow evidence (read-only)
+
+# Post-deployment recovery for ppv_escrow, and nothing else.
+#
+# ppv_escrow deployed to devnet and transferred its upgrade authority to the
+# custody vault, and then the evidence recorder crashed — so the canonical
+# release record was never written. A deployment cannot be repeated to produce
+# its own evidence, so the facts are read back off the chain instead. This
+# workflow exists because the environment that maintains the repository cannot
+# reach Solana; a GitHub runner can.
+#
+# It reads. It cannot do anything else, and that is enforced rather than
+# promised:
+#
+#   * `permissions: contents: read` — no write scope of any kind, so it cannot
+#     push a commit, open a release, or alter repository state.
+#   * No `environment:` key. The devnet environment holds the program keypair,
+#     the deployer keypair and the Squads configuration; a job that does not
+#     attach it cannot read them even by mistake.
+#   * No `secrets` reference anywhere. Nothing it runs takes a signer.
+#   * The only project command it runs is `scripts/recover-escrow-evidence.mjs`,
+#     which signs nothing and calls no state-changing RPC method.
+#
+# scripts/test/recover-workflow.test.mjs asserts every one of those properties
+# against this file, so a future edit that quietly adds a secret, a write
+# permission or a deployment command fails the suite rather than shipping.
+on:
+  workflow_dispatch:
+
+# Read-only. Do not widen this.
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    name: Read live Escrow deployment facts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # No `environment:` — see the header. Attaching one would hand this job the
+    # deployment secrets it has no use for.
+
+    steps:
+      - name: Check out the dispatched ref
+        uses: actions/checkout@v4
+        with:
+          # Full history so the audited commit below is reachable whatever ref
+          # this was dispatched from.
+          fetch-depth: 0
+          # The job needs no credentials: it clones, reads, and pushes nothing.
+          persist-credentials: false
+
+      - name: Pin the ceremony to its audited commit
+        env:
+          AUDITED_SHA: fbb81bf0d5c64588f1fe8712e9ff2c3af4707852
+        run: |
+          # The recovery must run the reviewed script, not whatever the branch
+          # tip happens to hold. Committing this workflow necessarily moves the
+          # tip past the audited commit, so the job checks that commit out and
+          # then asserts it — rather than asserting the dispatched tip, which
+          # could never match once this file exists.
+          #
+          # The refusal is still real: a ref that does not contain the audited
+          # commit cannot produce it, and the job stops.
+          if ! git cat-file -e "${AUDITED_SHA}^{commit}" 2>/dev/null; then
+            echo "The audited commit ${AUDITED_SHA} is not reachable from this ref." >&2
+            echo "Dispatch this workflow from a ref that contains it." >&2
+            exit 1
+          fi
+          git checkout --quiet --detach "${AUDITED_SHA}"
+
+          head="$(git rev-parse HEAD)"
+          if [[ "${head}" != "${AUDITED_SHA}" ]]; then
+            echo "Refusing to run: HEAD is ${head}, expected ${AUDITED_SHA}." >&2
+            exit 1
+          fi
+          echo "HEAD=${head}"
+          echo "Running the audited recovery script."
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          # No `cache: npm` and no `npm ci`: the recovery script imports only
+          # node:crypto and three dependency-free files under scripts/lib. It
+          # needs no package installed, so none is fetched and the job carries
+          # no third-party code at all.
+
+      - name: Prove the recovery needs no installed dependency
+        run: |
+          # Asserted rather than assumed. If the script ever grows a package
+          # import, this fails here instead of pulling a registry into a job
+          # that was meant to have no supply chain.
+          if [[ -d node_modules ]]; then
+            echo "node_modules is present; this job is supposed to install nothing." >&2
+            exit 1
+          fi
+          node --input-type=module -e '
+            await import("./scripts/recover-escrow-evidence.mjs");
+            process.stdout.write("recovery script loads with no installed dependency\n");
+          '
+
+      - name: Read the live Escrow deployment facts
+        id: recover
+        run: |
+          # The script's exit code is the verdict and is preserved exactly:
+          # 0 only when the deployment transaction is verified AND the authority
+          # transfer is *proved* by decoding, never by position. An UNKNOWN
+          # transfer exits non-zero and this job fails with it. Do not add `||
+          # true`, and do not convert UNKNOWN into success.
+          set +e
+          node scripts/recover-escrow-evidence.mjs \
+            --rpc https://api.devnet.solana.com \
+            --json > recovery.json 2> recovery.err
+          code=$?
+          set -e
+
+          echo "--- recovery.json ---"
+          # Guarded rather than `|| true`: the script may have died before
+          # writing anything, and a blanket failure-swallow is the habit that
+          # lets a real failure through somewhere else later.
+          if [[ -s recovery.json ]]; then
+            cat recovery.json
+          else
+            echo "(the recovery produced no JSON output)"
+          fi
+          if [[ -s recovery.err ]]; then
+            echo "--- stderr ---" >&2
+            cat recovery.err >&2
+          fi
+          echo "exit_code=${code}" >> "${GITHUB_OUTPUT}"
+          exit "${code}"
+
+      - name: Upload the recovered facts
+        # Runs even when the recovery refused, because a refusal and its list of
+        # rejected candidate signatures is exactly the evidence needed to work
+        # out why nothing proved the authority change.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ppv-escrow-recovery
+          path: |
+            recovery.json
+            recovery.err
+          if-no-files-found: warn
+          retention-days: 30
