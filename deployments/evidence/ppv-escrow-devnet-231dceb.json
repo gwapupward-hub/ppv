@@ -1,0 +1,52 @@
+{
+  "cluster": "devnet",
+  "genesisHash": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+  "program": "ppv_escrow",
+  "programId": "7U1bCHQcr8Jg6J8G69JGaAWCRtsrZB1RYx4zo1sNEVF4",
+  "programDataAddress": "2bWfopyJ8LxJ6azd9ZhaGmfs9S2gGRQKx6TX88ddULAa",
+  "programOwner": "BPFLoaderUpgradeab1e11111111111111111111111",
+  "programDataOwner": "BPFLoaderUpgradeab1e11111111111111111111111",
+  "programExecutable": true,
+  "releaseCommit": "231dceb91c141e1afe6e57ef48fafb199da5c678",
+  "deploymentSignature": "5xDmBitgkrQ1R9zVhvU3714VFE7arNeMJnhkimMWvP16cFmZVPytGad9j3XMa9CPMvTeoiRzAMJHPb3wmyazEzuA",
+  "deploymentSlot": 498656161,
+  "deploymentStatus": "finalized",
+  "lastDeploySlot": 498656161,
+  "authorityTransferSignature": "4sQs3LJqPzPHNUZC8T2KAKmfRLwGgVj6uc35Rgr2fKBVsnXuGrW9y7Mu3HFJsnwsLeqC4s6pv18K3YadAN81Bu5S",
+  "authorityTransferSlot": 498656235,
+  "authorityTransferStatus": "finalized",
+  "upgradeAuthority": "FD2spnsMVgsuddPSRWAe3ee4DMbgDx5ivpvVfvKcNrLE",
+  "upgradeAuthorityKind": "squads-multisig",
+  "upgradeAuthorityThreshold": 2,
+  "upgradeAuthorityMembers": [
+    "HDkMBufpYfm1LN6apVkeV3aA2dhMk57PmBujwJ4j4Ecx",
+    "5y12g4GKbba3k6WDUyZT8eUfeBdboxxGrjkdjM4kX2Wo",
+    "BJmFM4k7Q32CiCYSdoYkAhXdD5Sk3BegMh2cbEAsgSwJ"
+  ],
+  "binaryLength": 587736,
+  "binaryHash": "sha256:0acc61defeb2ee810cf3a4bc87f93f8ef457399fe6b52d170055ed7e0c96f9bf",
+  "builtBinaryHash": "sha256:0acc61defeb2ee810cf3a4bc87f93f8ef457399fe6b52d170055ed7e0c96f9bf",
+  "onChainBinaryHash": "sha256:0acc61defeb2ee810cf3a4bc87f93f8ef457399fe6b52d170055ed7e0c96f9bf",
+  "binaryHashesMatch": true,
+  "programDataLength": 587781,
+  "programDataPaddingLength": 0,
+  "idlAddress": "7U1bCHQcr8Jg6J8G69JGaAWCRtsrZB1RYx4zo1sNEVF4",
+  "idlHash": "sha256:d8eb433e4674d5335294c2110dba9c3a36972b5b90e42abe32f495ca98c15dcb",
+  "toolchain": {
+    "anchor": "0.30.1",
+    "solana": "1.18.17",
+    "rustHost": "1.85.1",
+    "rustSbf": "1.75.0"
+  },
+  "verificationMethod": "raw-solana-json-rpc-read-only",
+  "verificationRpc": "https://api.devnet.solana.com",
+  "verificationTimestamp": "2026-09-15T19:52:39.676Z",
+  "sourceWorkflowRun": null,
+  "evidenceWorkflowRun": "https://github.com/gwapupward-hub/ppv/actions/runs/35015108852",
+  "evidenceRecovery": {
+    "recoveredAfterFailedRecording": true,
+    "recoveryCommit": "1b9d4c1abaa33645477312007ac84829693faf79",
+    "recoveryWorkflowRun": "https://github.com/gwapupward-hub/ppv/actions/runs/35015108852",
+    "note": "Evidence reconstructed from public chain state after the deployment run's evidence step failed. releaseCommit is the deployed source; recoveryCommit is the tooling that recovered the facts and built nothing that is deployed."
+  }
+}
