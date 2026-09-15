@@ -355,6 +355,27 @@ jobs:
           program="${{ inputs.program }}"
           program_id="$(solana-keygen pubkey "target/deploy/${program}-keypair.json")"
 
+          # First, the repository's own record of what is already on devnet.
+          #
+          # This check exists because the evidence-record check below was not
+          # enough. ppv_escrow deployed successfully, transferred its authority,
+          # and then its evidence recorder crashed — so no release record was
+          # ever committed, and for that window the only thing standing between
+          # this workflow and a second initial deployment of a live program was
+          # an RPC call. DEVNET_DEPLOYED_PROGRAMS is updated from the chain and
+          # committed, so the refusal survives a failed recorder and does not
+          # depend on the network being reachable.
+          already_deployed="$(node --input-type=module -e '
+            import { DEVNET_DEPLOYED_PROGRAMS } from "./scripts/lib/identity.mjs";
+            process.stdout.write(String(DEVNET_DEPLOYED_PROGRAMS.includes(process.argv[1])));
+          ' -- "${program}")"
+          if [[ "${already_deployed}" == "true" ]]; then
+            echo "${program} is recorded as deployed to devnet in DEVNET_DEPLOYED_PROGRAMS." >&2
+            echo "Its initial deployment is COMPLETE and cannot be repeated." >&2
+            echo "A change to a deployed program is an upgrade through its Squads governance." >&2
+            exit 1
+          fi
+
           # A program with a committed devnet release record has already had its
           # initial deployment. This is checked before the chain, and off a file
           # in the repository, so the refusal does not depend on an RPC call

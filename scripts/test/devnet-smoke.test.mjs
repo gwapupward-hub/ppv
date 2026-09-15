@@ -58,6 +58,9 @@ function programDataAccount(authority) {
 }
 
 const CORE_DATA = "6ASf5EcmiEXZoc4LGdxHTqLA1ykMuVjNoJDbNSuGf5Nr";
+/** Escrow's real ProgramData address and its dedicated custody vault. */
+const ESCROW_DATA = "2bWfopyJ8LxJ6azd9ZhaGmfs9S2gGRQKx6TX88ddULAa";
+const CUSTODY_VAULT = "FD2spnsMVgsuddPSRWAe3ee4DMbgDx5ivpvVfvKcNrLE";
 const COMMERCE_DATA = "DyqdftdT3vo2SMvHaKVU2Pmb1zBfJ8wCpYYJQ7idnoAR";
 
 let server;
@@ -70,8 +73,15 @@ function defaultState() {
     accounts: {
       [PERMANENT_PROGRAM_IDS.ppv_core]: programAccount(CORE_DATA),
       [PERMANENT_PROGRAM_IDS.ppv_commerce]: programAccount(COMMERCE_DATA),
+      // Escrow joined DEVNET_DEPLOYED_PROGRAMS when it was deployed, so the
+      // identity phase demands it on chain like the other two. Its authority is
+      // the dedicated custody vault, not the vault holding Core and Commerce —
+      // a fixture that reused VAULT here would let a smoke suite pass while the
+      // escrow authority was wrong, which is the one thing it must catch.
+      [PERMANENT_PROGRAM_IDS.ppv_escrow]: programAccount(ESCROW_DATA),
       [CORE_DATA]: programDataAccount(VAULT),
       [COMMERCE_DATA]: programDataAccount(VAULT),
+      [ESCROW_DATA]: programDataAccount(CUSTODY_VAULT),
     },
   };
 }
@@ -542,4 +552,33 @@ test("the deployed bytes are checked against the release record, not assumed", a
 
   // A record with no binary recorded is skipped rather than silently passed.
   assert.equal(await checkDeployedBinary(client, "ppv_core", {}), null);
+});
+
+test("escrow governed by the Core/Commerce vault is a SECURITY failure", async () => {
+  // The whole point of the custody gate is that escrow is governed separately.
+  // Before the expected authority became per-program, this exact state — escrow
+  // pointing at the non-custodial vault — would have *passed*, because the
+  // suite compared every program against one authority.
+  state.accounts[ESCROW_DATA] = programDataAccount(VAULT);
+  await assert.rejects(
+    runIdentityPhase(rpc(endpoint), {
+      expectedAuthority: VAULT,
+      expectedGenesis: DEVNET_GENESIS,
+      encodeBase58: encodeBase58Sdk,
+    }),
+    (error) => {
+      assert.match(error.message, /SECURITY: ppv_escrow upgrade authority/);
+      assert.match(error.message, new RegExp(CUSTODY_VAULT));
+      return true;
+    },
+  );
+  state = defaultState();
+});
+
+test("the expected authority is resolved per program, not globally", async () => {
+  const { expectedAuthorityFor } = await import("../devnet-smoke.mjs");
+  assert.equal(expectedAuthorityFor("ppv_escrow", VAULT), CUSTODY_VAULT);
+  assert.equal(expectedAuthorityFor("ppv_core", VAULT), VAULT);
+  assert.equal(expectedAuthorityFor("ppv_commerce", VAULT), VAULT);
+  assert.notEqual(expectedAuthorityFor("ppv_escrow", VAULT), expectedAuthorityFor("ppv_core", VAULT));
 });

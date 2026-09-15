@@ -26,7 +26,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { PERMANENT_PROGRAM_IDS, UPGRADEABLE_LOADER_ID, DEVNET_DEPLOYED_PROGRAMS } from "./lib/identity.mjs";
+import { PERMANENT_PROGRAM_IDS, UPGRADEABLE_LOADER_ID, DEVNET_DEPLOYED_PROGRAMS, ESCROW_CUSTODY_GOVERNANCE } from "./lib/identity.mjs";
 import { PROOF_RECORD_DISCRIMINATOR, PROOF_RECORD_LEN, decodeProofRecord } from "./lib/core-accounts.mjs";
 import { encodeBase58, isAddress, isProgramDerived } from "./lib/pubkey.mjs";
 import {
@@ -157,6 +157,25 @@ export async function assertDevnet(client, expectedGenesis) {
 }
 
 /** Identity and custody of one deployed program, read straight from the chain. */
+/**
+ * The upgrade authority a given program is supposed to have.
+ *
+ * Not one value for the whole protocol. `ppv_escrow` is governed by its own
+ * custody multisig, separate from the vault holding Core and Commerce — that
+ * separation is the custody gate's central requirement, so a suite that assumed
+ * a single authority would raise a SECURITY failure against a correctly
+ * governed escrow. The tempting repair at that point is to relax the
+ * comparison, which would silently stop checking the one program that holds
+ * value. Reading escrow's expected authority from the frozen governance record
+ * keeps the check strict and makes it right.
+ */
+export function expectedAuthorityFor(name, fallback) {
+  if (name === "ppv_escrow" && ESCROW_CUSTODY_GOVERNANCE) {
+    return ESCROW_CUSTODY_GOVERNANCE.vault;
+  }
+  return fallback;
+}
+
 export async function checkProgram(client, name, expectedId, expectedAuthority, encodeBase58) {
   const account = await client.accountInfo(expectedId);
   if (!account) {
@@ -279,7 +298,13 @@ export async function runIdentityPhase(
       process.stdout.write(`  n/a   ${name}: no devnet release record — not expected on chain yet\n`);
       continue;
     }
-    programs[name] = await checkProgram(client, name, id, expectedAuthority, encodeBase58);
+    programs[name] = await checkProgram(
+      client,
+      name,
+      id,
+      expectedAuthorityFor(name, expectedAuthority),
+      encodeBase58,
+    );
     await checkDeployedBinary(client, name, expected[name]);
   }
   return { genesis, programs, notReleased };

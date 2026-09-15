@@ -151,15 +151,23 @@ test("the placeholder id is never represented as an approved permanent identity"
   assert.match(VERDICT, /RR-12 CLOSED/);
 });
 
-test("an identity is not a deployment, and the verdict says so", () => {
-  // The dangerous misreading of this freeze is "escrow has an id, so escrow
-  // shipped". Both the document and the code must refuse it.
-  assert.match(VERDICT, /Having an identity is not being deployed/);
-  assert.match(VERDICT, /PPV ESCROW DEPLOYED: NO. PPV ESCROW CUSTODY GATE: CLOSED/);
+test("deployment is recorded truthfully, and is not mistaken for approval", () => {
+  // The misreading to prevent has moved. It was "escrow has an id, so escrow
+  // shipped"; now escrow really has shipped to devnet, and the misreading is
+  // "escrow is deployed, so the custody gate is open". The document has to
+  // state both halves.
+  assert.match(VERDICT, /PPV ESCROW DEPLOYED: YES \(devnet/);
+  assert.match(VERDICT, /PPV ESCROW CUSTODY GATE: CLOSED/);
+  assert.match(VERDICT, /Deployment is not the gate/);
+  assert.match(VERDICT, /RR-13/);
+
+  // And the code agrees: escrow is in the deployed list because the address is
+  // occupied, which is a claim about the chain rather than about readiness.
   const identity = read("scripts", "lib", "identity.mjs");
   const deployed = identity.match(/DEVNET_DEPLOYED_PROGRAMS = Object\.freeze\(\[([\s\S]*?)\]\)/);
   assert.ok(deployed, "identity.mjs declares no deployed-program list");
-  assert.ok(!deployed[1].includes("ppv_escrow"), "escrow is listed as deployed to devnet");
+  assert.ok(deployed[1].includes("ppv_escrow"), "escrow is deployed but not listed as such");
+  assert.ok(deployed[1].includes("ppv_core") && deployed[1].includes("ppv_commerce"));
 });
 
 test("the cross-program invariants are recorded as not applicable, not as passing", () => {
@@ -193,8 +201,13 @@ test("Core and Commerce are recorded as verified and unchanged", () => {
   assert.match(VERDICT, /Neither was redeployed/);
 });
 
-test("escrow is recorded as undeployed with the custody gate closed", () => {
-  assert.match(VERDICT, /\*\*PPV ESCROW DEPLOYED: NO\. PPV ESCROW CUSTODY GATE: CLOSED\.\*\*/);
+test("escrow is recorded as deployed with the custody gate still closed", () => {
+  // These were one sentence — "DEPLOYED: NO. CUSTODY GATE: CLOSED." — and that
+  // coupling is exactly what had to be broken when escrow shipped to devnet.
+  // The gate's state does not follow from the deployment's state, in either
+  // direction, so they are now asserted independently.
+  assert.match(VERDICT, /\*\*PPV ESCROW DEPLOYED: YES \(devnet, 2026-09-15\)\.\*\*/);
+  assert.match(VERDICT, /\*\*PPV ESCROW CUSTODY GATE: CLOSED\.\*\*/);
   // The gate document must point at the verdict, or an operator reading the
   // gates never learns one was issued.
   assert.match(GATES, /PPV ESCROW DEVNET DEPLOYMENT READINESS: GO/);

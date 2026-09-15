@@ -150,8 +150,8 @@ outside this release. Passing the Foundation gates does not approve custody.
 | --- | --- |
 | Permanent Escrow identity | ESTABLISHED (`7U1bCHQcr8Jg6J8G69JGaAWCRtsrZB1RYx4zo1sNEVF4`) |
 | Dedicated custody governance | ESTABLISHED (devnet) |
-| Escrow deployed | NO |
-| Escrow authority transferred | NO |
+| Escrow deployed | YES — devnet, 2026-09-15, run 34940712181 |
+| Escrow authority transferred | YES — to the custody vault `FD2spnsMVgsuddPSRWAe3ee4DMbgDx5ivpvVfvKcNrLE` |
 | Independent security review | NOT DONE (RR-13) |
 | Legal review | NOT DONE |
 | **Custody gate** | **CLOSED** |
