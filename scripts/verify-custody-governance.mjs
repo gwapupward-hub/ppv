@@ -107,6 +107,8 @@ export function checkPolicy({
   nonCustodyVault = NON_CUSTODY_VAULT,
   nonCustodyMembers = NON_CUSTODY_MEMBERS,
   allowSharedSigners = false,
+  vaultIndex = 0,
+  squadsProgramId = SQUADS_V4_PROGRAM_ID,
 }) {
   const failures = [];
   const fail = (detail) => failures.push(detail);
@@ -152,6 +154,25 @@ export function checkPolicy({
   }
   if (isAddress(vault) && !isProgramDerived(vault)) {
     fail(`the vault ${vault} is not program-derived`);
+  }
+
+  // The vault must be *this* multisig's vault, at the declared index.
+  //
+  // Offline and exact: a Squads vault address is `find_program_address` over
+  // ["multisig", multisig, "vault", index] under the Squads V4 program, so a
+  // declared pair that does not derive is a configuration naming somebody
+  // else's vault — or a vault at a different index, which is a different
+  // account holding different money. This is what replaced the chain-side
+  // "does an account exist at the vault" check, which could not answer the
+  // question and answered it wrongly; see `checkChain`.
+  if (isAddress(multisig) && isAddress(vault)) {
+    const derived = deriveVault(multisig, vaultIndex, squadsProgramId);
+    if (derived.address !== vault) {
+      fail(
+        `vault index ${vaultIndex} of multisig ${multisig} derives to ${derived.address}, ` +
+          `not the declared vault ${vault}`,
+      );
+    }
   }
 
   // The vault cannot be one of its own signers, and neither can the multisig
@@ -224,14 +245,31 @@ export async function checkChain(
     failures.push(`cluster genesis is ${genesisHash}, expected devnet ${DEVNET_GENESIS}`);
     return { failures, genesisHash, squads: null };
   }
+  // Whether an account exists at the vault address is *reported*, not required.
+  //
+  // This check used to fail the run on a missing account, on the reasoning that
+  // "a vault that has never been created cannot hold authority". Running it
+  // against the live custody vault for the first time showed the premise is
+  // false: a Squads V4 vault is a pure signer PDA. It holds no account unless
+  // somebody funds it, and it does not need one — the BPF loader stores the
+  // authority as a bare pubkey, and Squads signs with `invoke_signed`, which
+  // needs a derivation and a seed, not lamports.
+  //
+  // `FD2spnsMVgsuddPSRWAe3ee4DMbgDx5ivpvVfvKcNrLE` is the live upgrade
+  // authority of the deployed `ppv_escrow` program — read from ProgramData in
+  // the same run that reported "no account exists" here — so the check was
+  // producing a false negative about the single most important fact in this
+  // file. Its absence disproves nothing, and its presence would have proved
+  // nothing either: anyone can send a lamport to any address.
+  //
+  // What replaces it is strictly stronger and lives in `checkPolicy`: the vault
+  // must *derive* from the multisig at the declared index. That is a fact about
+  // the two addresses, it needs no network, and it cannot be faked by funding
+  // an account.
   const account = await client.accountInfo(vault);
-  if (!account) {
-    failures.push(
-      `no account exists at the vault ${vault}; a vault that has never been created cannot hold authority`,
-    );
-  }
+  const vaultAccountExists = Boolean(account);
 
-  if (!liveSquads) return { failures, genesisHash, squads: null };
+  if (!liveSquads) return { failures, genesisHash, squads: null, vaultAccountExists };
 
   // RR-7: stop treating the threshold and the member set as declared facts.
   let decoded;
@@ -240,7 +278,7 @@ export async function checkChain(
   } catch (error) {
     if (error instanceof SquadsDecodeError) {
       failures.push(`the live Squads multisig could not be read: ${error.message}`);
-      return { failures, genesisHash, squads: null };
+      return { failures, genesisHash, squads: null, vaultAccountExists };
     }
     throw error;
   }
@@ -256,7 +294,7 @@ export async function checkChain(
     }),
   );
 
-  return { failures, genesisHash, squads: decoded };
+  return { failures, genesisHash, squads: decoded, vaultAccountExists };
 }
 
 export async function verify({ argv = [], client = null, out = process.stdout } = {}) {
@@ -294,6 +332,10 @@ export async function verify({ argv = [], client = null, out = process.stdout } 
     failures.push(...chain.failures);
     squads = chain.squads;
     out.write(`  cluster   ${chain.genesisHash}\n`);
+    // Reported because it is interesting, never required: see checkChain.
+    out.write(
+      `  vault acct ${chain.vaultAccountExists ? "exists" : "none (a Squads vault is a pure signer PDA)"}\n`,
+    );
     if (squads) {
       const derived = deriveVault(config.multisig, 0);
       out.write("\nLive Squads multisig, decoded from chain state\n");

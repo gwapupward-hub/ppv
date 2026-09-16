@@ -54,7 +54,6 @@ import { fileURLToPath } from "node:url";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 
 import { PERMANENT_PROGRAM_IDS, ESCROW_CUSTODY_GOVERNANCE } from "./lib/identity.mjs";
-import { encodeBase58 } from "./lib/pubkey.mjs";
 import { DEVNET_GENESIS, readDeployedProgram, rpc } from "./lib/rpc.mjs";
 import {
   PERMISSION_ALL,
@@ -64,10 +63,8 @@ import {
   readMultisig,
 } from "./lib/squads.mjs";
 import {
-  AGREEMENT_STATE,
   ESCROW_PROGRAM_ID,
   CORE_PROGRAM_ID,
-  MILESTONE_STATE,
   TOKEN_PROGRAM_ID,
   cancelInstruction,
   coreProofId,
@@ -2073,7 +2070,6 @@ function finish(ctx, handle, negatives, scenarioKey) {
 export async function reconstruct(ctx) {
   log("\nPhase 12 — live events and history reconstruction");
   const { httpChainSource, replayAgreement, ReceiptStore } = await import("@gwap/ppv-indexer");
-  const { reconstructAgreementLifecycle } = await import("@gwap/ppv-sdk");
 
   const source = httpChainSource(ctx.endpoint);
   const results = {};
@@ -2160,7 +2156,6 @@ export async function reconstruct(ctx) {
       `${key}: ${replay.events.length} events reconstruct ${replay.lifecycle.state}`,
       `${replay.transactionsScanned} transactions scanned`,
     );
-    void reconstructAgreementLifecycle;
   }
 
   return results;
@@ -2511,4 +2506,4 @@ if (process.argv[1] && process.argv[1].endsWith("devnet-escrow-custody.mjs")) {
     });
 }
 
-export { AGREEMENT_STATE, MILESTONE_STATE, CustodyDefect, CustodyHarnessFailure };
+export { CustodyDefect, CustodyHarnessFailure };
