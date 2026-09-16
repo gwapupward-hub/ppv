@@ -25,14 +25,27 @@ export const PROGRAM_NAMES = Object.freeze(Object.keys(PERMANENT_PROGRAM_IDS));
  * devnet. They were identical until the `ppv_escrow` freeze, and every on-chain
  * check quietly took the identity table to mean "deployed" — so the moment
  * escrow gained an identity, the smoke suite began demanding an account that
- * must not exist, and would have reported a correctly-undeployed escrow as a
- * broken deployment.
+ * must not exist.
  *
- * `ppv_escrow` is absent because it is not deployed, and the custody gate in
- * `docs/deployment-gates.md` is closed. Adding it here is a claim about the
- * chain, not a way to quiet a failing check.
+ * Membership here is a claim about the chain, never a way to quiet a failing
+ * check — and it now carries a second duty. An address on this list has had its
+ * one initial deployment, so the initial-deployment workflow must refuse it.
+ * That refusal used to rest solely on a committed evidence record, which is
+ * exactly what `ppv_escrow` did not have when its recorder crashed after a
+ * successful deploy: for a window, the repository still believed the address
+ * was free. Listing it closes that window without depending on an RPC call or
+ * on a file that failed to be written.
  */
-export const DEVNET_DEPLOYED_PROGRAMS = Object.freeze(["ppv_core", "ppv_commerce"]);
+export const DEVNET_DEPLOYED_PROGRAMS = Object.freeze([
+  "ppv_core",
+  "ppv_commerce",
+  // Deployed 2026-09-15 by workflow run 34940712181: program deployed, upgrade
+  // authority transferred to the custody vault, and the run's own JSON-RPC read
+  // confirmed the authority, `executable` and the upgradeable-loader owner
+  // before its evidence step failed. Listed here because it is occupied — which
+  // is also what makes the initial-deployment path refuse it.
+  "ppv_escrow",
+]);
 
 /**
  * Workspace programs that deliberately have no permanent id yet.

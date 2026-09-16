@@ -87,7 +87,16 @@ so a change that makes one of them untrue fails CI rather than going unnoticed.
 `ppv_escrow` is absent from `[programs.devnet]`, from the devnet deploy
 workflow's program choices, from `record-deployment.sh`, and from the permanent
 program-identity table. The deploy workflow holds no escrow signing material of
-any kind. **PPV ESCROW DEPLOYED: NO. PPV ESCROW CUSTODY GATE: CLOSED.**
+any kind.
+
+**PPV ESCROW DEPLOYED: YES (devnet, 2026-09-15).** The program is live at
+`7U1bCHQcr8Jg6J8G69JGaAWCRtsrZB1RYx4zo1sNEVF4` with its upgrade authority held
+by the dedicated custody vault `FD2spnsMVgsuddPSRWAe3ee4DMbgDx5ivpvVfvKcNrLE`.
+
+**PPV ESCROW CUSTODY GATE: CLOSED.** Deployment is not the gate. The gate's
+remaining requirements — an independent security review (**RR-13**), legal
+review, and live devnet custody validation — are unmet, and being deployed to
+devnet neither satisfies nor weakens them.
 
 ### `7BECot7zFqH2oCxTu9uLmmwvzQSBtxWro47jMa2MqUdR` is a build/local placeholder
 
@@ -105,9 +114,11 @@ No `ppv_escrow` keypair exists anywhere in this repository. The permanent
 keypair lives in the `PPV_ESCROW_PROGRAM_KEYPAIR` repository secret, and only
 the public address appears in any document, log or record.
 
-**Having an identity is not being deployed.** `ppv_escrow` is absent from
-`DEVNET_DEPLOYED_PROGRAMS`, and the custody gate remains closed on its
-remaining requirements — an independent security review (**RR-13**) among them.
+**Having an identity is not being deployed, and being deployed is not being
+approved.** `ppv_escrow` entered `DEVNET_DEPLOYED_PROGRAMS` when it was
+deployed on 2026-09-15; that list is a claim about the chain. The custody gate
+remains closed on its remaining requirements — an independent security review
+(**RR-13**) among them.
 
 ### PPV-X1, PPV-X2 and PPV-X3 are NOT APPLICABLE — they do not pass
 

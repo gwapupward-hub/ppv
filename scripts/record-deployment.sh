@@ -99,12 +99,36 @@ program_id="$(node -e "process.stdout.write(require('./${idl}').address)")"
 
 # The built artifact must name the permanent identity, or the manifest would
 # record a deployment of something else under this program's name.
-declare -A PERMANENT_IDS=(
-  [ppv_core]="9cWE41ZDNQChvFrRoVuPQDeoVLg46ACTiZRCZaBZzfwU"
-  [ppv_commerce]="GmRDoFuPrBrsxnvTX751WK5rLu14JXe4sgjh6vNwHzr3"
-)
-if [[ "${program_id}" != "${PERMANENT_IDS[${program}]}" ]]; then
-  echo "Built ${program} IDL names ${program_id}, permanent id is ${PERMANENT_IDS[${program}]}." >&2
+#
+# Read from scripts/lib/identity.mjs rather than from a table declared here.
+# This script used to carry its own `declare -A PERMANENT_IDS` holding Core and
+# Commerce, which is how a program could pass every deployment gate and then
+# fail at the last step: `ppv_escrow` was added to the canonical identity table,
+# to `declare_id!`, to both `Anchor.toml` sections and to this script's own
+# accepted-program list, and this second table was missed. Under `set -u` the
+# lookup was an unbound variable, so the recorder died *after* the program was
+# deployed and its authority transferred — the worst possible moment, because
+# the deployment cannot be repeated to produce the evidence.
+#
+# One source of truth, queried, is the fix. A program with no frozen identity is
+# refused by name rather than expanding to the empty string, so an unknown or
+# unreleased program can never silently satisfy the comparison below.
+permanent_id="$(node --input-type=module -e '
+  import { PERMANENT_PROGRAM_IDS } from "./scripts/lib/identity.mjs";
+  const name = process.argv[1];
+  const id = PERMANENT_PROGRAM_IDS[name];
+  if (!id) {
+    console.error(`no permanent identity is frozen for ${name}`);
+    process.exit(1);
+  }
+  process.stdout.write(id);
+' -- "${program}")"
+if [[ -z "${permanent_id}" ]]; then
+  echo "Could not resolve the permanent identity for ${program}." >&2
+  exit 1
+fi
+if [[ "${program_id}" != "${permanent_id}" ]]; then
+  echo "Built ${program} IDL names ${program_id}, permanent id is ${permanent_id}." >&2
   exit 1
 fi
 

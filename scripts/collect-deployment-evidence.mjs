@@ -20,6 +20,13 @@
  *   PPV_UPGRADE_AUTHORITY_THRESHOLD=2 \
  *   node scripts/collect-deployment-evidence.mjs <output.json>
  *
+ * When the record is being reconstructed after a deployment's own evidence step
+ * failed, set PPV_EVIDENCE_RECOVERY_COMMIT to the commit carrying the recovery
+ * tooling (and optionally PPV_RECOVERY_WORKFLOW_RUN). It is written to its own
+ * field and is refused if it equals PPV_RELEASE_COMMIT: the recovery tooling
+ * did not build what is deployed, and a record saying otherwise would falsify
+ * the release history in the one place a reader would trust it.
+ *
  * PPV_BUILD_DIR points at the build output to compare (default `target`), so
  * the tooling and the release checkout it verifies can be separate trees.
  *
@@ -59,6 +66,42 @@ export async function collect({ client, env, buildDir = "target", now = () => ne
   if (!/^[0-9a-f]{40}$/.test(releaseCommit)) {
     throw new Error(`PPV_RELEASE_COMMIT ${releaseCommit} is not a full 40-character git sha`);
   }
+
+  // Recovery provenance, present only when this record is being reconstructed
+  // after the fact rather than written by the deployment that produced it.
+  //
+  // `releaseCommit` means one thing and must keep meaning it: the source that
+  // produced the deployed program. When evidence is recovered later, a second
+  // commit exists — the one carrying the recovery tooling — and the two are
+  // easy to confuse precisely because the recovery is what is running. Recording
+  // the recovery commit in its own field is how a reader can tell which is
+  // which; the refusal below is how the record cannot claim the recovery
+  // tooling built the program.
+  const recoveryCommit = env.PPV_EVIDENCE_RECOVERY_COMMIT || null;
+  if (recoveryCommit && !/^[0-9a-f]{40}$/.test(recoveryCommit)) {
+    throw new Error(
+      `PPV_EVIDENCE_RECOVERY_COMMIT ${recoveryCommit} is not a full 40-character git sha`,
+    );
+  }
+  if (recoveryCommit && recoveryCommit === releaseCommit) {
+    throw new Error(
+      "PPV_EVIDENCE_RECOVERY_COMMIT equals PPV_RELEASE_COMMIT. The recovery tooling did not " +
+        "produce the deployed program; recording it as the deployed source would falsify the " +
+        "release history.",
+    );
+  }
+  const recovery = recoveryCommit
+    ? {
+        recoveredAfterFailedRecording: true,
+        recoveryCommit,
+        recoveryWorkflowRun: env.PPV_RECOVERY_WORKFLOW_RUN || null,
+        note:
+          "Evidence reconstructed from public chain state after the deployment run's evidence " +
+          "step failed. releaseCommit is the deployed source; recoveryCommit is the tooling that " +
+          "recovered the facts and built nothing that is deployed.",
+      }
+    : null;
+
 
   const members = env.PPV_UPGRADE_AUTHORITY_MEMBERS.split(",").map((m) => m.trim()).filter(Boolean);
   const threshold = Number(env.PPV_UPGRADE_AUTHORITY_THRESHOLD);
@@ -199,6 +242,7 @@ export async function collect({ client, env, buildDir = "target", now = () => ne
     verificationTimestamp: now().toISOString(),
     sourceWorkflowRun: env.PPV_SOURCE_WORKFLOW_RUN || null,
     evidenceWorkflowRun: env.PPV_EVIDENCE_WORKFLOW_RUN || null,
+    evidenceRecovery: recovery,
   };
 }
 
@@ -217,6 +261,9 @@ async function main() {
     PPV_UPGRADE_AUTHORITY_THRESHOLD: required("PPV_UPGRADE_AUTHORITY_THRESHOLD"),
     PPV_SOURCE_WORKFLOW_RUN: process.env.PPV_SOURCE_WORKFLOW_RUN || "",
     PPV_EVIDENCE_WORKFLOW_RUN: process.env.PPV_EVIDENCE_WORKFLOW_RUN || "",
+    // Set only when reconstructing a record the deployment failed to write.
+    PPV_EVIDENCE_RECOVERY_COMMIT: process.env.PPV_EVIDENCE_RECOVERY_COMMIT || "",
+    PPV_RECOVERY_WORKFLOW_RUN: process.env.PPV_RECOVERY_WORKFLOW_RUN || "",
   };
   assertPublicData(Object.values(env));
 

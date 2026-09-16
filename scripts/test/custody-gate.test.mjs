@@ -221,3 +221,57 @@ test("the devnet-only shared-signer exception is documented where the gate is re
     "the shared signer is not named in the gate document",
   );
 });
+
+/* ------------------------------- the initial-deployment path, retired */
+
+test("escrow is recorded as deployed to devnet", () => {
+  // Deployed 2026-09-15 (workflow run 34940712181). The list is a claim about
+  // the chain, and it is what makes the refusals below repository-local.
+  const identity = read("scripts", "lib", "identity.mjs");
+  const deployed = identity.match(/DEVNET_DEPLOYED_PROGRAMS = Object\.freeze\(\[([\s\S]*?)\]\)/);
+  assert.ok(deployed, "identity.mjs declares no deployed-program list");
+  for (const program of ["ppv_core", "ppv_commerce", "ppv_escrow"]) {
+    assert.ok(deployed[1].includes(program), `${program} is deployed but not listed`);
+  }
+});
+
+test("the initial-deployment path refuses an already-deployed program", () => {
+  // The gap this closes is specific. ppv_escrow deployed, transferred its
+  // authority, and then its evidence recorder crashed — so no release record
+  // was committed, and the older refusal below (which reads those records) had
+  // nothing to match. For that window the only guard against a second initial
+  // deployment of a live program was an RPC call. This one is committed.
+  assert.match(DEPLOY, /DEVNET_DEPLOYED_PROGRAMS/);
+  assert.match(DEPLOY, /is recorded as deployed to devnet in DEVNET_DEPLOYED_PROGRAMS/);
+  assert.match(DEPLOY, /Its initial deployment is COMPLETE and cannot be repeated/);
+  assert.match(DEPLOY, /an upgrade through its Squads governance/);
+});
+
+test("the repository refusal is checked before the chain is consulted", () => {
+  // Order matters: a refusal that runs only after an RPC read inherits that
+  // read's failure modes. The committed check must come first.
+  const step = DEPLOY.slice(DEPLOY.indexOf("Refuse an existing program address"));
+  const repoCheck = step.indexOf("DEVNET_DEPLOYED_PROGRAMS");
+  const chainCheck = step.indexOf("query-chain.mjs");
+  assert.ok(repoCheck > -1 && chainCheck > -1);
+  assert.ok(repoCheck < chainCheck, "the chain is consulted before the committed record");
+});
+
+test("both older refusals survive alongside the new one", () => {
+  // Defence in depth, not replacement: a committed evidence record and an
+  // occupied on-chain address each still refuse on their own.
+  assert.match(DEPLOY, /has a committed devnet release record/);
+  assert.match(DEPLOY, /already exists\. This initial-deployment workflow will not upgrade it/);
+});
+
+test("no code path treats a deployed escrow as undeployed", () => {
+  const identity = read("scripts", "lib", "identity.mjs");
+  // UNRELEASED_PROGRAMS stayed empty at the identity freeze and must not regain
+  // escrow now that it is not merely released but live.
+  assert.match(identity, /UNRELEASED_PROGRAMS = Object\.freeze\(\[\]\)/);
+  // And the smoke suite's expected authority is resolved per program, so escrow
+  // is checked against its own custody vault rather than Core and Commerce's.
+  const smoke = read("scripts", "devnet-smoke.mjs");
+  assert.match(smoke, /export function expectedAuthorityFor/);
+  assert.match(smoke, /ESCROW_CUSTODY_GOVERNANCE\.vault/);
+});
