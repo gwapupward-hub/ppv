@@ -357,6 +357,7 @@ import {
   checkDeployedBinary,
   coverageLabel,
   releasedPrograms,
+  reportCoverage,
   runCoreReadPhase,
   runSdkTargetingPhase,
 } from "../devnet-smoke.mjs";
@@ -517,7 +518,7 @@ test("a step's label follows what is released, so it cannot go stale", () => {
     "no step may remain untestable-until-commerce once Commerce is released",
   );
 
-  // Escrow is not released in this sprint, and its steps must keep saying so.
+  // Against a repository that has not released escrow, its steps say so.
   const escrowSteps = LIFECYCLE_COVERAGE.filter((entry) => entry.requires === "ppv_escrow");
   assert.ok(escrowSteps.length > 0);
   for (const entry of escrowSteps) {
@@ -581,4 +582,119 @@ test("the expected authority is resolved per program, not globally", async () =>
   assert.equal(expectedAuthorityFor("ppv_core", VAULT), VAULT);
   assert.equal(expectedAuthorityFor("ppv_commerce", VAULT), VAULT);
   assert.notEqual(expectedAuthorityFor("ppv_escrow", VAULT), expectedAuthorityFor("ppv_core", VAULT));
+});
+
+/* ------------------------------ a release record is not an execution record */
+
+/**
+ * The overclaim this guards against, in one sentence: `ppv_escrow` gained a
+ * committed release record, and every custody row in the coverage table turned
+ * LIVE VERIFIED without a single escrow transaction having been sent.
+ *
+ * The table derives its labels rather than hand-maintaining them, which is the
+ * right design and is exactly why the bug was silent — the same derivation that
+ * stops "NOT TESTABLE UNTIL COMMERCE" going stale also promoted six custody
+ * rows the moment a JSON file landed in `deployments/evidence/`. The fix is not
+ * to hand-write the labels back. It is to make the derivation depend on the run
+ * as well as on the repository.
+ */
+
+const RELEASED_ALL = new Set(["ppv_core", "ppv_commerce", "ppv_escrow"]);
+
+test("an escrow release record alone does not turn a custody row green", () => {
+  const custodyRows = LIFECYCLE_COVERAGE.filter((entry) => entry.executes === "custody");
+  assert.ok(custodyRows.length >= 6, "the custody lifecycle rows must still exist");
+
+  for (const entry of custodyRows) {
+    const label = coverageLabel(entry, RELEASED_ALL, new Set());
+    assert.notEqual(
+      label,
+      "LIVE VERIFIED",
+      `${entry.step} claims LIVE VERIFIED with no execution behind it`,
+    );
+    assert.equal(label, "LIVE PROGRAM VERIFIED — CUSTODY LIFECYCLE NOT RUN");
+  }
+});
+
+test("a custody row goes green only for the exact step the run executed", () => {
+  const custodyRows = LIFECYCLE_COVERAGE.filter((entry) => entry.executes === "custody");
+  const [first, ...rest] = custodyRows;
+
+  const executed = new Set([first.step]);
+  assert.equal(coverageLabel(first, RELEASED_ALL, executed), "LIVE VERIFIED");
+  for (const entry of rest) {
+    assert.equal(
+      coverageLabel(entry, RELEASED_ALL, executed),
+      "LIVE PROGRAM VERIFIED — CUSTODY LIFECYCLE NOT RUN",
+      `executing ${first.step} must not promote ${entry.step}`,
+    );
+  }
+});
+
+test("a custody row is still untestable when escrow has no release record", () => {
+  const coreCommerce = new Set(["ppv_core", "ppv_commerce"]);
+  const everyCustodyStep = new Set(
+    LIFECYCLE_COVERAGE.filter((entry) => entry.executes === "custody").map((entry) => entry.step),
+  );
+  for (const entry of LIFECYCLE_COVERAGE.filter((e) => e.executes === "custody")) {
+    assert.equal(
+      coverageLabel(entry, coreCommerce, everyCustodyStep),
+      "NOT TESTABLE UNTIL ESCROW",
+      "claiming execution against an unreleased program must not override the release gate",
+    );
+  }
+});
+
+test("the identity rows escrow's deployment did make true are reported as live", () => {
+  const identityRows = LIFECYCLE_COVERAGE.filter(
+    (entry) => entry.requires === "ppv_escrow" && !entry.executes,
+  );
+  assert.ok(identityRows.length >= 5, "escrow identity and custody-authority rows must exist");
+  for (const entry of identityRows) {
+    assert.equal(coverageLabel(entry, RELEASED_ALL, new Set()), "LIVE VERIFIED");
+  }
+});
+
+test("the smoke suite reports no custody execution, because it performs none", () => {
+  const source = readFileSync(join(REPO, "scripts", "devnet-smoke.mjs"), "utf8");
+  assert.match(
+    source,
+    /reportCoverage\(notReleased, Object\.keys\(released\), \[\]\)/,
+    "devnet-smoke.mjs must pass an explicitly empty executed set; it sends no escrow instruction",
+  );
+  assert.equal(
+    /devnet-escrow-custody/.test(source) ? "referenced" : "unreferenced",
+    "referenced",
+    "the report must name the harness that would establish the custody rows",
+  );
+  // And it must really send no escrow instruction.
+  assert.ok(
+    !/PERMANENT_PROGRAM_IDS\.ppv_escrow[\s\S]{0,200}TransactionInstruction/.test(source),
+    "devnet-smoke.mjs must not build escrow instructions",
+  );
+});
+
+test("the printed table never shows LIVE VERIFIED for an unexecuted custody row", () => {
+  const printed = [];
+  const original = process.stdout.write;
+  process.stdout.write = (chunk) => {
+    printed.push(String(chunk));
+    return true;
+  };
+  try {
+    reportCoverage([], ["ppv_core", "ppv_commerce", "ppv_escrow"], []);
+  } finally {
+    process.stdout.write = original;
+  }
+  const text = printed.join("");
+  for (const entry of LIFECYCLE_COVERAGE.filter((e) => e.executes === "custody")) {
+    const row = text.split("\n").find((line) => line.includes(`  ${entry.step} — `));
+    assert.ok(row, `${entry.step} is missing from the printed table`);
+    assert.ok(
+      row.includes("LIVE PROGRAM VERIFIED — CUSTODY LIFECYCLE NOT RUN"),
+      `${entry.step} printed as: ${row.trim()}`,
+    );
+  }
+  assert.match(text, /custody row\(s\) describe behaviour this run did not execute/);
+  assert.match(text, /scripts\/devnet-escrow-custody\.mjs/);
 });

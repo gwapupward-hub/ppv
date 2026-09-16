@@ -105,6 +105,32 @@ claim made about it and the evidence for that claim are in
 with what remains unresolved in
 [security/ppv-escrow-residual-risk.md](security/ppv-escrow-residual-risk.md).
 
+## Current state — `ppv_escrow` on devnet
+
+Read this before anything else on this page. Anything elsewhere in this
+document that describes `ppv_escrow` as undeployed, or its custody vault as an
+*intended future* authority, is **historical** — true when it was written,
+false now, and kept only so the sequence of events stays legible.
+
+| | |
+| --- | --- |
+| Escrow deployed | YES — devnet, 2026-09-15 |
+| Program ID | `7U1bCHQcr8Jg6J8G69JGaAWCRtsrZB1RYx4zo1sNEVF4` |
+| ProgramData | `2bWfopyJ8LxJ6azd9ZhaGmfs9S2gGRQKx6TX88ddULAa` |
+| Upgrade authority | `FD2spnsMVgsuddPSRWAe3ee4DMbgDx5ivpvVfvKcNrLE` (custody vault) |
+| Authority transfer | FINALIZED |
+| Deployment provenance | CLOSED — `deployments/evidence/ppv-escrow-devnet-231dceb.json` |
+| Live devnet custody validation | NOT RUN |
+| Independent security review (RR-13) | OPEN |
+| Legal review | OPEN |
+| **Custody gate** | **CLOSED** |
+| Mainnet authorized | NO |
+
+Deployed and provenance-closed is not custody-verified. The deployment proved
+that the reviewed bytes are the bytes the loader holds and that the dedicated
+custody vault holds the upgrade authority. It proved nothing about how the
+program behaves with real tokens in it. The gate stays closed.
+
 Before any cluster deployment of `ppv_escrow`:
 
 - Independent Solana security review of the custody path, with all critical and
@@ -124,9 +150,16 @@ Before any cluster deployment of `ppv_escrow`:
   RR-11). A dedicated Squads V4 2-of-3 exists on devnet:
   multisig `GEE6nE9xN4GsHGo8QHvyqNLH7eM7yLBrtFtfsmH9ip46`, vault
   `FD2spnsMVgsuddPSRWAe3ee4DMbgDx5ivpvVfvKcNrLE`. Recorded in
-  `ESCROW_CUSTODY_GOVERNANCE`. The vault is the *intended future* upgrade
-  authority; **no authority has been transferred**, because escrow is not
-  deployed.
+  `ESCROW_CUSTODY_GOVERNANCE`. The vault **is** the live upgrade authority of
+  the deployed `ppv_escrow` program: the transfer was executed on devnet on
+  2026-09-15 and is finalized, and `deployments/evidence/ppv-escrow-devnet-231dceb.json`
+  records both the deployment and the authority-transfer signatures.
+
+  *Historical note.* Until the Sprint 4 deployment this bullet said the vault
+  was the *intended future* authority and that no authority had been
+  transferred. That was true when written and is no longer true; it is kept
+  here as history so the sequence of events stays legible, not as a statement
+  about the present.
 
   **Approved exception — one shared signer, devnet only.** One custody signer is
   intentionally shared with Core/Commerce governance

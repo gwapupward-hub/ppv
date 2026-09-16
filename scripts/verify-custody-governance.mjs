@@ -24,6 +24,15 @@
 import { isAddress, isOnCurve, isProgramDerived } from "./lib/pubkey.mjs";
 import { MIN_SQUADS_THRESHOLD } from "./lib/identity.mjs";
 import { DEVNET_GENESIS, MAINNET_GENESIS, rpc } from "./lib/rpc.mjs";
+import {
+  PERMISSION_ALL,
+  SQUADS_V4_PROGRAM_ID,
+  SquadsDecodeError,
+  compareToPolicy,
+  deriveVault,
+  permissionNames,
+  readMultisig,
+} from "./lib/squads.mjs";
 
 /**
  * The vault governing the non-custodial programs. A custody vault equal to it
@@ -49,6 +58,20 @@ export const NON_CUSTODY_MEMBERS = Object.freeze([
   "BJmFM4k7Q32CiCYSdoYkAhXdD5Sk3BegMh2cbEAsgSwJ",
 ]);
 
+/**
+ * How many custody signers may also govern the non-custodial programs, even
+ * when the overlap is deliberately accepted.
+ *
+ * One is the approved devnet exception, and the arithmetic is the whole reason
+ * it is tolerable: one shared key cannot reach a 2-of-3 threshold by itself, so
+ * compromising the people who govern Core and Commerce still does not reach the
+ * custody vault. Two shared keys in a 2-of-3 ends that property completely —
+ * the "separate" multisig would fall to exactly the same compromise. So
+ * `--allow-shared-signers` accepts the approved overlap; it does not accept
+ * however many overlaps a future configuration happens to contain.
+ */
+export const MAX_APPROVED_SHARED_SIGNERS = 1;
+
 export class GovernanceFailure extends Error {}
 
 function parseArgs(argv) {
@@ -59,6 +82,10 @@ function parseArgs(argv) {
     const key = token.slice(2);
     if (key === "allow-shared-signers") {
       args.allowSharedSigners = true;
+      continue;
+    }
+    if (key === "live-squads") {
+      args.liveSquads = true;
       continue;
     }
     args[key] = argv[i + 1];
@@ -157,12 +184,35 @@ export function checkPolicy({
         "Pass --allow-shared-signers to accept this deliberately.",
     );
   }
+  // The override accepts the approved exception, not an arbitrary overlap. Two
+  // shared signers in a 2-of-3 is one compromise away from the vault, which is
+  // the exact property the separate multisig exists to provide.
+  if (shared.length > MAX_APPROVED_SHARED_SIGNERS) {
+    fail(
+      `${shared.length} member(s) also govern the non-custodial programs: ${shared.join(", ")}. ` +
+        `At most ${MAX_APPROVED_SHARED_SIGNERS} shared signer is approved, and ` +
+        "--allow-shared-signers does not raise that limit: a second shared key can reach a " +
+        "2-of-3 threshold together with the first, which ends the separation entirely.",
+    );
+  }
 
   return failures;
 }
 
-/** The on-chain half: the cluster is devnet and the vault really exists. */
-export async function checkChain(client, { vault }) {
+/**
+ * The on-chain half: the cluster is devnet, the vault really exists, and —
+ * when asked — the multisig really says what the configuration claims.
+ *
+ * The live decode is opt-in (`--live-squads`) rather than automatic because it
+ * is a strictly stronger check that needs a reachable RPC endpoint, and a
+ * verifier that silently degraded from "read from chain" to "took your word for
+ * it" whenever the network was unavailable would be the worst of both. When it
+ * is requested and cannot be completed, that is a failure, not a skip.
+ */
+export async function checkChain(
+  client,
+  { multisig, vault, threshold, members, liveSquads = false, vaultIndex = 0 },
+) {
   const failures = [];
   const genesisHash = await client.genesisHash();
   if (genesisHash === MAINNET_GENESIS) {
@@ -172,7 +222,7 @@ export async function checkChain(client, { vault }) {
   }
   if (genesisHash !== DEVNET_GENESIS) {
     failures.push(`cluster genesis is ${genesisHash}, expected devnet ${DEVNET_GENESIS}`);
-    return { failures, genesisHash };
+    return { failures, genesisHash, squads: null };
   }
   const account = await client.accountInfo(vault);
   if (!account) {
@@ -180,7 +230,33 @@ export async function checkChain(client, { vault }) {
       `no account exists at the vault ${vault}; a vault that has never been created cannot hold authority`,
     );
   }
-  return { failures, genesisHash };
+
+  if (!liveSquads) return { failures, genesisHash, squads: null };
+
+  // RR-7: stop treating the threshold and the member set as declared facts.
+  let decoded;
+  try {
+    decoded = await readMultisig(client, multisig);
+  } catch (error) {
+    if (error instanceof SquadsDecodeError) {
+      failures.push(`the live Squads multisig could not be read: ${error.message}`);
+      return { failures, genesisHash, squads: null };
+    }
+    throw error;
+  }
+
+  failures.push(
+    ...compareToPolicy(decoded, {
+      multisig,
+      threshold,
+      members,
+      vault,
+      vaultIndex,
+      requiredPermissionMask: PERMISSION_ALL,
+    }),
+  );
+
+  return { failures, genesisHash, squads: decoded };
 }
 
 export async function verify({ argv = [], client = null, out = process.stdout } = {}) {
@@ -195,6 +271,7 @@ export async function verify({ argv = [], client = null, out = process.stdout } 
     threshold: Number(args.threshold),
     members,
     allowSharedSigners: Boolean(args.allowSharedSigners),
+    liveSquads: Boolean(args.liveSquads),
   };
 
   out.write("PPV custody governance\n");
@@ -205,10 +282,42 @@ export async function verify({ argv = [], client = null, out = process.stdout } 
   out.write("\n");
 
   const failures = checkPolicy(config);
+  let squads = null;
   if (client) {
-    const chain = await checkChain(client, { vault: config.vault });
+    const chain = await checkChain(client, {
+      multisig: config.multisig,
+      vault: config.vault,
+      threshold: config.threshold,
+      members,
+      liveSquads: config.liveSquads,
+    });
     failures.push(...chain.failures);
-    out.write(`  cluster   ${chain.genesisHash}\n\n`);
+    squads = chain.squads;
+    out.write(`  cluster   ${chain.genesisHash}\n`);
+    if (squads) {
+      const derived = deriveVault(config.multisig, 0);
+      out.write("\nLive Squads multisig, decoded from chain state\n");
+      out.write(`  program    ${SQUADS_V4_PROGRAM_ID}\n`);
+      out.write(`  account    ${config.multisig}\n`);
+      out.write(`  threshold  ${squads.threshold} of ${squads.members.length} member(s)\n`);
+      for (const member of squads.members) {
+        out.write(
+          `    member   ${member.key}  mask ${member.mask} ` +
+            `(${member.permissions.join(" + ") || "none"})\n`,
+        );
+      }
+      out.write(`  vault[0]   ${derived.address} (bump ${derived.bump})\n`);
+      out.write(`  timeLock   ${squads.timeLock}\n`);
+    } else if (config.liveSquads) {
+      out.write("  squads    NOT DECODED\n");
+    }
+    out.write("\n");
+  } else if (config.liveSquads) {
+    out.write("  cluster   not checked (no RPC endpoint given)\n\n");
+    failures.push(
+      "--live-squads was requested but no RPC endpoint was given (set PPV_RPC_URL); " +
+        "a live decode that did not happen is not a live decode",
+    );
   } else {
     out.write("  cluster   not checked (no RPC endpoint given)\n\n");
   }
@@ -217,15 +326,24 @@ export async function verify({ argv = [], client = null, out = process.stdout } 
     out.write("GOVERNANCE POLICY NOT SATISFIED\n");
     for (const failure of failures) out.write(`  ${failure}\n`);
     out.write("\nDo not give this configuration authority over ppv_escrow.\n");
-    return { ok: false, failures };
+    return { ok: false, failures, squads };
   }
 
   out.write("PPV_CUSTODY_GOVERNANCE_VALID\n");
   out.write(`custody_vault=${config.vault}\n`);
   out.write(`threshold=${config.threshold}\n`);
   out.write(`members=${members.length}\n`);
+  // The distinction RR-7 is about: whether the two numbers above were read off
+  // the chain or handed to this process on the command line.
+  out.write(`squads_live_decode=${squads ? "read-from-chain" : "declared-only"}\n`);
+  if (squads) {
+    out.write(`squads_live_threshold=${squads.threshold}\n`);
+    out.write(`squads_live_members=${squads.members.map((m) => m.key).join(",")}\n`);
+    out.write(`squads_live_permissions=${squads.members.map((m) => m.mask).join(",")}\n`);
+    out.write(`squads_vault_derived=${deriveVault(config.multisig, 0).address}\n`);
+  }
   out.write("result=valid\n");
-  return { ok: true, failures: [] };
+  return { ok: true, failures: [], squads };
 }
 
 const invokedDirectly = process.argv[1]?.endsWith("verify-custody-governance.mjs");

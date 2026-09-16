@@ -55,6 +55,23 @@ const ENCODER = new TextEncoder();
  *
  * A step that is only proven on a local validator is not proven on devnet, and
  * a green checkmark that blurs the two is worse than no checkmark at all.
+ *
+ * `requires` and `executes` are two different questions, and conflating them is
+ * how this table lied for one sprint. `requires` asks whether the program is
+ * deployed — a property of the repository's release records. `executes` asks
+ * whether *this run* sent the transaction and asserted what it did — a property
+ * of the run. A row that needs a transaction becomes LIVE VERIFIED only when
+ * both are satisfied, and `executes` is satisfied only by a runner reporting
+ * the step by name.
+ *
+ * The specific failure: every escrow row below carried `coverage: "live"` and
+ * `requires: "ppv_escrow"`, so the day `deployments/evidence/` gained an escrow
+ * release record, "funding", "settlement", "refund", "milestone release",
+ * "concession / dispute" and "bounty counterparty selection" all started
+ * printing LIVE VERIFIED. Nothing had run them. This suite does Core and
+ * Commerce transactions and has never sent an escrow instruction; a committed
+ * release record proves the program is deployed and says nothing whatsoever
+ * about how it behaves with tokens in it.
  */
 export const LIFECYCLE_COVERAGE = [
   { step: "devnet cluster identity", coverage: "live", how: "getGenesisHash equals the devnet genesis" },
@@ -92,13 +109,19 @@ export const LIFECYCLE_COVERAGE = [
   { step: "normalized reputation event", coverage: "validator", how: "SDK normalizeChainEvent over the emitted events" },
   { step: "receipt / credential derivation", coverage: "validator", how: "SDK receipts and seal state from those events" },
 
-  { step: "funding", requires: "ppv_escrow", coverage: "live", how: "requires ppv_escrow custody" },
-  { step: "approval", requires: "ppv_escrow", coverage: "live", how: "requires ppv_escrow approve_proof" },
-  { step: "milestone release", requires: "ppv_escrow", coverage: "live", how: "requires ppv_escrow milestones" },
-  { step: "settlement", requires: "ppv_escrow", coverage: "live", how: "requires ppv_escrow settle" },
-  { step: "refund", requires: "ppv_escrow", coverage: "live", how: "requires ppv_escrow refund" },
-  { step: "concession / dispute", requires: "ppv_escrow", coverage: "live", how: "requires ppv_escrow disputes" },
-  { step: "bounty counterparty selection", requires: "ppv_escrow", coverage: "live", how: "requires ppv_escrow bounties" },
+  { step: "ppv_escrow permanent identity", requires: "ppv_escrow", coverage: "live", how: "program account at the permanent id" },
+  { step: "ppv_escrow executable + loader owner", requires: "ppv_escrow", coverage: "live", how: "account flags and owner read from chain" },
+  { step: "ppv_escrow ProgramData", requires: "ppv_escrow", coverage: "live", how: "resolved from the Program account and read" },
+  { step: "ppv_escrow custody-vault upgrade authority", requires: "ppv_escrow", coverage: "live", how: "ProgramData authority equals the dedicated custody vault" },
+  { step: "ppv_escrow deployed bytes", requires: "ppv_escrow", coverage: "live", how: "live ProgramData bytes hashed and compared to the release record" },
+
+  { step: "funding", requires: "ppv_escrow", coverage: "live", executes: "custody", how: "ppv_escrow fund moves exactly the agreed amount into the per-agreement vault" },
+  { step: "approval", requires: "ppv_escrow", coverage: "live", executes: "custody", how: "ppv_escrow approve_proof by the other party, moving no value" },
+  { step: "milestone release", requires: "ppv_escrow", coverage: "live", executes: "custody", how: "ppv_escrow settle_milestone pays one approved tranche" },
+  { step: "settlement", requires: "ppv_escrow", coverage: "live", executes: "custody", how: "ppv_escrow settle empties the vault to the seller" },
+  { step: "refund", requires: "ppv_escrow", coverage: "live", executes: "custody", how: "ppv_escrow refund returns the remainder to the buyer" },
+  { step: "concession / dispute", requires: "ppv_escrow", coverage: "live", executes: "custody", how: "ppv_escrow open_dispute then resolve_dispute by concession" },
+  { step: "bounty counterparty selection", requires: "ppv_escrow", coverage: "live", executes: "custody", how: "ppv_escrow select_counterparty, once, then settlement to the selected wallet" },
 ];
 
 const COVERAGE_LABELS = Object.freeze({
@@ -106,6 +129,23 @@ const COVERAGE_LABELS = Object.freeze({
   validator: "LOCAL-VALIDATOR VERIFIED",
   "need-wallet": "NOT RUN — REQUIRES FUNDED DEVNET TEST WALLET",
 });
+
+/**
+ * What a row says when the program is deployed but the run did not exercise it.
+ *
+ * Two labels rather than one, because the two situations are different and a
+ * reader deciding whether to trust the custody path needs to know which they
+ * are looking at. "LIVE PROGRAM VERIFIED — CUSTODY LIFECYCLE NOT RUN" says the
+ * deployed program was read and matched, and its behaviour was not tested.
+ * "NOT RUN — REQUIRES DEVNET CUSTODY HARNESS" says nothing about this row has
+ * been established live at all.
+ */
+export const EXECUTION_PENDING_LABELS = Object.freeze({
+  custody: "LIVE PROGRAM VERIFIED — CUSTODY LIFECYCLE NOT RUN",
+});
+
+/** The label a row gets when its program is deployed but nothing executed it. */
+export const NOT_RUN_LABEL = "NOT RUN — REQUIRES DEVNET CUSTODY HARNESS";
 
 /**
  * What a step's coverage actually is, given which programs are released.
@@ -117,9 +157,16 @@ const COVERAGE_LABELS = Object.freeze({
  * editing this file. A hand-maintained table is exactly how a stale
  * "NOT TESTABLE UNTIL COMMERCE" survives the sprint that deployed Commerce.
  */
-export function coverageLabel(entry, releasedPrograms) {
+export function coverageLabel(entry, releasedPrograms, executedSteps = new Set()) {
   if (entry.requires && !releasedPrograms.has(entry.requires)) {
     return `NOT TESTABLE UNTIL ${entry.requires.replace("ppv_", "").toUpperCase()}`;
+  }
+  // A release record proves a program is deployed. It proves nothing about
+  // behaviour, so a row describing behaviour must be executed by the run that
+  // reports it — by name, not by category, so that running one scenario cannot
+  // turn a neighbouring row green.
+  if (entry.executes && !executedSteps.has(entry.step)) {
+    return EXECUTION_PENDING_LABELS[entry.executes] ?? NOT_RUN_LABEL;
   }
   return COVERAGE_LABELS[entry.coverage] ?? entry.coverage;
 }
@@ -552,16 +599,33 @@ export async function runCommerceTargetingPhase(programId = PERMANENT_PROGRAM_ID
   return { agreement: agreement.toBase58(), programId };
 }
 
-export function reportCoverage(notReleased = [], released = []) {
+export function reportCoverage(notReleased = [], released = [], executed = []) {
   process.stdout.write("\nCoverage — what this run actually verified\n");
   const releasedSet = new Set(released);
-  const rows = LIFECYCLE_COVERAGE.map((entry) => [coverageLabel(entry, releasedSet), entry]);
+  const executedSet = new Set(executed);
+  const rows = LIFECYCLE_COVERAGE.map((entry) => [
+    coverageLabel(entry, releasedSet, executedSet),
+    entry,
+  ]);
   const width = Math.max(...rows.map(([label]) => label.length));
   for (const [label, entry] of rows) {
     process.stdout.write(`  ${label.padEnd(width)}  ${entry.step} — ${entry.how}\n`);
   }
   for (const name of notReleased) {
     process.stdout.write(`\n  ${name} has no devnet release record; nothing above claims to test it live.\n`);
+  }
+  const pending = LIFECYCLE_COVERAGE.filter(
+    (entry) =>
+      entry.executes &&
+      !executedSet.has(entry.step) &&
+      (!entry.requires || releasedSet.has(entry.requires)),
+  );
+  if (pending.length > 0) {
+    process.stdout.write(
+      `\n  ${pending.length} custody row(s) describe behaviour this run did not execute. ` +
+        "The deployed program was read and matched; its custody behaviour was not tested here.\n" +
+        "  Run scripts/devnet-escrow-custody.mjs against devnet to establish them.\n",
+    );
   }
 }
 
@@ -595,7 +659,10 @@ async function main() {
   }
   await runSeparationPhase(encodeBase58Sdk);
 
-  reportCoverage(notReleased, Object.keys(released));
+  // Explicitly empty. This suite sends Core and Commerce transactions and no
+  // escrow instruction at all, so it has executed no custody step and must not
+  // report one. The custody harness reports its own.
+  reportCoverage(notReleased, Object.keys(released), []);
 
   if (identityOnly) {
     process.stdout.write("\nLive Core verification passed. No transaction was sent (--identity-only).\n");

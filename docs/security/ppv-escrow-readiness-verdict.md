@@ -18,9 +18,15 @@ open, and none of them is code:
 - the separate custody multisig the gate requires does not exist (**RR-11**),
 - no independent security review has been done (**RR-13**).
 
-`ppv_escrow` was not deployed during Sprint 3.1, is not deployed now, and the
-custody gate in [deployment-gates.md](../deployment-gates.md) is closed and did
-not move. **SECURITY QUALIFICATION GO is not READY TO DEPLOY.**
+`ppv_escrow` was not deployed during Sprint 3.1. It **was** deployed to devnet
+on 2026-09-15, in the separately controlled Sprint 4 deployment this verdict
+authorised, and the custody gate in
+[deployment-gates.md](../deployment-gates.md) is closed and did not move.
+**SECURITY QUALIFICATION GO is not READY TO DEPLOY**, and a completed devnet
+deployment is not READY FOR MAINNET.
+
+*Historical note.* The three blockers listed above are as Sprint 3.1 recorded
+them. **RR-11** and **RR-12** were closed in Sprint 4; **RR-13** is open.
 
 ## Why the verdict changed
 
@@ -82,12 +88,14 @@ These are the facts this sprint establishes. They are asserted by
 `scripts/test/custody-gate.test.mjs` and `scripts/test/attack-matrix.test.mjs`,
 so a change that makes one of them untrue fails CI rather than going unnoticed.
 
-### PPV Escrow is not deployed and cannot be deployed by this repository
+### PPV Escrow is deployed to devnet, and to nothing else
 
-`ppv_escrow` is absent from `[programs.devnet]`, from the devnet deploy
+*Historical, Sprint 3.1.* This section originally read "PPV Escrow is not
+deployed and cannot be deployed by this repository", on the grounds that
+`ppv_escrow` was absent from `[programs.devnet]`, from the devnet deploy
 workflow's program choices, from `record-deployment.sh`, and from the permanent
-program-identity table. The deploy workflow holds no escrow signing material of
-any kind.
+program-identity table. Sprint 4 deliberately changed each of those, under the
+deployment controls this verdict authorised.
 
 **PPV ESCROW DEPLOYED: YES (devnet, 2026-09-15).** The program is live at
 `7U1bCHQcr8Jg6J8G69JGaAWCRtsrZB1RYx4zo1sNEVF4` with its upgrade authority held
