@@ -3,9 +3,9 @@
 Every security claim this repository makes about `ppv_escrow`, and the
 executable evidence for it. A claim with no test is listed as having no test.
 
-**Nothing here authorises a deployment.** `ppv_escrow` is not deployed to any
-cluster, and the custody gate in [deployment-gates.md](../deployment-gates.md)
-is closed. The readiness verdict is
+**Nothing here authorises a deployment.** `ppv_escrow` is deployed to devnet
+and to no other cluster; mainnet is not authorized, and the custody gate in
+[deployment-gates.md](../deployment-gates.md) is closed. The readiness verdict is
 [**GO**](ppv-escrow-readiness-verdict.md) as of Sprint 3.1 — which authorises a
 separately controlled deployment sprint and nothing else. A matrix of passing
 rows is not a verdict, and this one is not read as one.
@@ -23,8 +23,18 @@ always available:
 | **STATICALLY VERIFIED** | Asserted about the repository — a workflow, a manifest, a constant — rather than about running code. |
 | **NOT COVERED** | No executable evidence. Named here so it appears in the residual-risk register rather than in nobody's list. |
 
-`ppv_escrow` is not deployed, so **no row is LIVE DEVNET VERIFIED and none can
-be.** Sprint 3 is qualification for deployment, not proof from one.
+**No row here is LIVE DEVNET VERIFIED.** Not because the program is undeployed
+— it is deployed, as of 2026-09-15 — but because no row's behaviour has been
+executed and asserted against the deployed devnet program. Sprint 3 is
+qualification for deployment, not proof from one, and a deployment is not proof
+either. `scripts/devnet-escrow-custody.mjs` is the harness that would produce
+LIVE DEVNET VERIFIED rows; it has not been run against devnet. Until a run
+exists, its evidence is committed, and each row is mapped to a transaction in
+it, the correct level for every row below is the one it already carries.
+
+*Historical note.* This paragraph previously read "`ppv_escrow` is not
+deployed, so no row is LIVE DEVNET VERIFIED and none can be." The premise is no
+longer true; the conclusion still is, for a different reason.
 
 ## Authorization
 

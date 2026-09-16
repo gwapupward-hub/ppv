@@ -121,7 +121,11 @@ from; replacing it does not migrate anything, it creates a different protocol.
 
 ## Explicitly out of scope
 
-PPV Escrow is not deployed and is not part of this assessment. Its custody gate
-is closed, and Commerce readiness must not be read as authorising any Escrow
-work. `ppv_escrow` remains absent from `[programs.devnet]` and from the deploy
-workflow's program choices.
+PPV Escrow is not part of this assessment. Its custody gate is closed, and
+Commerce readiness must not be read as authorising any Escrow work.
+
+*Historical, as assessed.* At the time of this assessment `ppv_escrow` was not
+deployed and was absent from `[programs.devnet]` and from the deploy workflow's
+program choices. It was deployed to devnet on 2026-09-15 under separate
+controls; see [../deployment-gates.md](../deployment-gates.md) for current
+state. Nothing in this assessment changed as a result.

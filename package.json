@@ -14,6 +14,7 @@
     "replay": "npm run build --silent && node --import tsx scripts/replay-agreement.mts",
     "test": "npm run typecheck && npm run test:sdk && npm run test:indexer && npm run test:release && npm run test:generators",
     "test:anchor": "node --import tsx ./node_modules/mocha/bin/mocha.js",
+    "test:devnet:custody": "npm run build --silent && node scripts/devnet-escrow-custody.mjs",
     "test:devnet:smoke": "npm run build:sdk --silent && node scripts/devnet-smoke.mjs",
     "test:f1": "./scripts/verify-f1.sh",
     "test:generators": "node --import tsx --test tests/invariants/*.test.ts",
@@ -24,6 +25,7 @@
     "test:release": "node --test scripts/test/*.test.mjs",
     "test:sdk": "npm run test --workspace @gwap/ppv-sdk",
     "typecheck": "npm run typecheck --workspace @gwap/ppv-sdk && npm run build:sdk && npm run typecheck --workspace @gwap/ppv-indexer && npm run build:indexer && tsc --noEmit -p tsconfig.json && tsc --noEmit -p scripts/tsconfig.json",
+    "verify:custody-preflight": "npm run build:sdk --silent && node scripts/devnet-escrow-custody.mjs",
     "verify:devnet-readiness": "./scripts/verify-devnet-readiness.sh",
     "verify:idl-build": "./scripts/verify-idl-build.sh"
   },

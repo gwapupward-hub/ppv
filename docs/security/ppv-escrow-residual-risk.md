@@ -16,6 +16,35 @@ What Sprint 3 did not resolve, classified honestly. Every entry here is
 referenced from the [attack matrix](ppv-escrow-attack-matrix.md), so a risk
 cannot exist in one document and not the other.
 
+## Current state — `ppv_escrow` on devnet
+
+Read this before anything else on this page. Anything elsewhere in this
+document that describes `ppv_escrow` as undeployed, or its custody vault as an
+*intended future* authority, is **historical** — true when it was written,
+false now, and kept only so the sequence of events stays legible.
+
+| | |
+| --- | --- |
+| Escrow deployed | YES — devnet, 2026-09-15 |
+| Program ID | `7U1bCHQcr8Jg6J8G69JGaAWCRtsrZB1RYx4zo1sNEVF4` |
+| ProgramData | `2bWfopyJ8LxJ6azd9ZhaGmfs9S2gGRQKx6TX88ddULAa` |
+| Upgrade authority | `FD2spnsMVgsuddPSRWAe3ee4DMbgDx5ivpvVfvKcNrLE` (custody vault) |
+| Authority transfer | FINALIZED |
+| Deployment provenance | CLOSED — `deployments/evidence/ppv-escrow-devnet-231dceb.json` |
+| Live devnet read-only preflight | PASS — https://github.com/gwapupward-hub/ppv/actions/runs/35053809296 |
+| RR-6 event/history reconstruction | OPEN — written, not run live |
+| RR-7 live Squads decode | CLOSED for the custody multisig; OPEN for Core/Commerce |
+| Live devnet custody validation | NOT RUN |
+| Independent security review (RR-13) | OPEN |
+| Legal review | OPEN |
+| **Custody gate** | **CLOSED** |
+| Mainnet authorized | NO |
+
+Deployed and provenance-closed is not custody-verified. The deployment proved
+that the reviewed bytes are the bytes the loader holds and that the dedicated
+custody vault holds the upgrade authority. It proved nothing about how the
+program behaves with real tokens in it. The gate stays closed.
+
 **Classification rule.** A risk is CRITICAL or HIGH if a path to it ends with
 value moving to someone not entitled to it, value moving twice, or value that
 cannot be recovered. It is MEDIUM or LOW if it ends with a weaker claim than
@@ -184,7 +213,26 @@ compares it to chain state.
 *Why it is not HIGH:* this is an observability claim, not a custody one. A
 reconstruction gap cannot move money; it can mislead whoever reads the index.
 
-### RR-7 — The Squads threshold is declared, not read from chain
+*Progress, not closure (this sprint).* `scripts/devnet-escrow-custody.mjs`
+reconstructs each lifecycle family — ordinary escrow, cancellation, refund,
+dispute to either party, milestone contract, bounty and proofs — from devnet
+transactions through the indexer's `replayAgreement`, and compares the projected
+state against the live account rather than against what the harness remembers
+doing. It also asserts duplicate-delivery idempotence and reversed-delivery
+convergence per family, and that the events' own accounting of what was paid out
+equals the agreement's `settled_total`.
+
+**RR-6 remains OPEN.** That code has not been run against devnet: the
+environment that maintains this repository has no route to any Solana RPC host,
+and the run is `workflow_dispatch` only. Writing the reconstruction is not the
+same as proving it, and the entry closes only when a live run has reconstructed
+every family named above and the evidence is committed under
+`deployments/validation/`. Decoding cleanly is explicitly not sufficient — RR-6
+is about complete projection agreeing with chain state, and an indexer that
+decodes every event and projects the wrong lifecycle is worse than one that
+fails loudly.
+
+### RR-7 — The Squads threshold is declared, not read from chain — **CLOSED for the Escrow custody multisig; NARROWED to Core/Commerce governance**
 
 Verification proves the upgrade authority is the recorded vault address and is
 off-curve (so it is a PDA rather than a wallet). It does not read the Squads
@@ -193,13 +241,75 @@ threshold and member list come from the deployment environment and are checked
 against policy — at least 2, enough distinct members, no duplicates, and the
 vault is not its own member, the last two added this sprint.
 
-*Why it is not HIGH for Escrow specifically:* Escrow is not deployed and has no
-upgrade authority yet. This is inherited from the Core and Commerce releases
-and applies to them today.
+*Why it is not HIGH for Escrow specifically:* the custody vault
+`FD2spnsMVgsuddPSRWAe3ee4DMbgDx5ivpvVfvKcNrLE` is now the live upgrade
+authority of the deployed `ppv_escrow` program, so this applies to Escrow as
+well as to Core and Commerce. It stays MEDIUM because the gap is epistemic
+rather than exploitable: a wrong declared threshold does not let anyone move
+custody, it lets the repository overstate how hard an upgrade is to push. No
+value is escrowed on devnet outside disposable test material, and mainnet is
+not authorized.
 
-*What would close it:* deriving and decoding the Squads multisig account.
+*Historical note.* This entry previously read "Escrow is not deployed and has
+no upgrade authority yet." True until 2026-09-15; false now.
+
+*What would close it:* deriving and decoding the Squads multisig account from
+live chain state — the threshold, the exact member set, and each member's
+permission mask — rather than accepting them as deployment-environment inputs.
 Attempted in Sprint 1 against two candidate program ids without a match; not
 guessed at since.
+
+*Closed for Escrow, with evidence.* `scripts/lib/squads.mjs` decodes the Squads
+V4 `Multisig` account, and `scripts/verify-custody-governance.mjs --live-squads`
+compares the decoded account against the declared configuration. It has been
+run against the live account. From chain state, not from a declaration:
+
+| | read from `GEE6nE9xN4GsHGo8QHvyqNLH7eM7yLBrtFtfsmH9ip46` |
+| --- | --- |
+| Squads program | `SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf` |
+| Threshold | 2 |
+| Members | exactly 3: `HDkMBufpYfm1LN6apVkeV3aA2dhMk57PmBujwJ4j4Ecx`, `5y12g4GKbba3k6WDUyZT8eUfeBdboxxGrjkdjM4kX2Wo`, `BJmFM4k7Q32CiCYSdoYkAhXdD5Sk3BegMh2cbEAsgSwJ` |
+| Permissions | mask 7 (Initiate + Vote + Execute) for each |
+| Vault index 0 | derives to `FD2spnsMVgsuddPSRWAe3ee4DMbgDx5ivpvVfvKcNrLE` |
+| Time lock | 0 |
+| Shared signers with Core/Commerce governance | exactly 1 (the approved devnet exception) |
+
+Evidence: https://github.com/gwapupward-hub/ppv/actions/runs/35053809296 — the verifier printed `squads_live_decode=read-from-chain`, and
+the same run read `FD2spnsMVgsuddPSRWAe3ee4DMbgDx5ivpvVfvKcNrLE` out of
+`ppv_escrow`'s ProgramData as its live upgrade authority. The two halves of the
+claim therefore come from the same reading of the same chain: the account that
+holds authority over the custody program **is** the 2-of-3 this repository
+records. `verify-escrow-custody-preflight.yml` re-establishes it on every pull
+request that touches the decoder, the verifier or the evidence records, so the
+answer cannot go stale without a failing check.
+
+The decoder is hand-written so the read-only verifiers stay dependency-free, and
+`scripts/test/squads-decode.test.mjs` checks it field for field against the
+pinned `@sqds/multisig` 2.1.4 serializer, and asserts refusal of a wrong
+threshold, a wrong member set, a wrong permission mask, a vault that does not
+derive, a vault at the wrong index, an account under another program's
+ownership, and a truncated account.
+
+*What this does not close.* RR-7 was never only about Escrow. The vault
+governing the non-custodial programs, `B6tcsTrMCKTZV5vi3rRCnA3FMPeeWACSHuuTSz5XQgnX`,
+is still verified from declared facts: this repository does not record the
+address of the multisig that owns it, so there is nothing to decode. That
+remainder is **OPEN** and MEDIUM for the same reason the whole entry was —
+a wrong declared threshold there does not let anyone move custody, it lets the
+repository overstate how hard a Core or Commerce upgrade is to push.
+
+*A finding from running it.* The first live run failed, and the failure was in
+the verifier rather than in the configuration. `checkChain` required an account
+to exist at the vault address, reasoning that "a vault that has never been
+created cannot hold authority". A Squads V4 vault is a pure signer PDA: the BPF
+loader stores an authority as a bare pubkey and Squads signs with
+`invoke_signed`, so a vault nobody has funded has no account and holds authority
+perfectly well. In the same run that reported "no account exists at the vault
+FD2spns…", the preflight read that address out of ProgramData as the live
+upgrade authority. The check has been replaced by one that is strictly stronger
+and needs no network: the vault must *derive* from the multisig at the declared
+index. It had never fired before because the verifier is normally run without an
+RPC endpoint.
 
 ### RR-8 — The property suite is not mutation-qualified — **CLOSED**
 
@@ -300,10 +410,17 @@ taken per run with `--allow-shared-signers`, never by changing the policy, and
 become the default. One shared key cannot reach a 2-of-3 threshold alone — that
 arithmetic is what makes one overlap tolerable and a second one not.
 
-*What this does not close:* the vault holds nothing. Escrow is not deployed and
-no upgrade authority has been transferred to it, so this is governance that
-exists and is verified, not governance that is yet exercising anything. RR-13
-is untouched.
+*What this does not close:* RR-13 is untouched. The vault now holds the live
+upgrade authority over the deployed `ppv_escrow` program — the transfer is
+finalized and recorded in
+`deployments/evidence/ppv-escrow-devnet-231dceb.json` — so this is governance
+that exists, is verified, and is exercising something. It is still not a
+security review, and the custody gate is closed on RR-13 and legal review, not
+on governance.
+
+*Historical note.* This paragraph previously read "the vault holds nothing.
+Escrow is not deployed and no upgrade authority has been transferred to it."
+True until 2026-09-15; false now.
 
 ### RR-12 — No permanent Escrow identity exists — **CLOSED**
 

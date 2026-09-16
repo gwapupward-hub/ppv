@@ -3,8 +3,43 @@
 Derived from the code, not from the design documents. Where the two disagreed,
 this file follows `programs/ppv_escrow/src/`.
 
-`ppv_escrow` is **not deployed to any cluster.** This describes what the
-program does, not what it does in production, because it has no production.
+`ppv_escrow` **is deployed to devnet** at
+`7U1bCHQcr8Jg6J8G69JGaAWCRtsrZB1RYx4zo1sNEVF4`, under the custody vault's
+upgrade authority. It is deployed to no other cluster, and mainnet is not
+authorized. This file still describes what the program does rather than what it
+does in production, because devnet is not production and no real value has ever
+entered a PPV vault.
+
+*Historical note.* This paragraph previously read "`ppv_escrow` is not deployed
+to any cluster." That was true until the Sprint 4 devnet deployment on
+2026-09-15.
+
+## Current state — `ppv_escrow` on devnet
+
+Read this before anything else on this page. Anything elsewhere in this
+document that describes `ppv_escrow` as undeployed, or its custody vault as an
+*intended future* authority, is **historical** — true when it was written,
+false now, and kept only so the sequence of events stays legible.
+
+| | |
+| --- | --- |
+| Escrow deployed | YES — devnet, 2026-09-15 |
+| Program ID | `7U1bCHQcr8Jg6J8G69JGaAWCRtsrZB1RYx4zo1sNEVF4` |
+| ProgramData | `2bWfopyJ8LxJ6azd9ZhaGmfs9S2gGRQKx6TX88ddULAa` |
+| Upgrade authority | `FD2spnsMVgsuddPSRWAe3ee4DMbgDx5ivpvVfvKcNrLE` (custody vault) |
+| Authority transfer | FINALIZED |
+| Deployment provenance | CLOSED — `deployments/evidence/ppv-escrow-devnet-231dceb.json` |
+| Live devnet read-only preflight | PASS — https://github.com/gwapupward-hub/ppv/actions/runs/35053809296 |
+| Live devnet custody validation | NOT RUN |
+| Independent security review (RR-13) | OPEN |
+| Legal review | OPEN |
+| **Custody gate** | **CLOSED** |
+| Mainnet authorized | NO |
+
+Deployed and provenance-closed is not custody-verified. The deployment proved
+that the reviewed bytes are the bytes the loader holds and that the dedicated
+custody vault holds the upgrade authority. It proved nothing about how the
+program behaves with real tokens in it. The gate stays closed.
 
 ## The state graph, as implemented
 

@@ -1,0 +1,149 @@
+name: Live DEVNET custody validation (ppv_escrow)
+
+# Manual only, and deliberately so.
+#
+# This is the one PPV workflow that sends value-moving transactions against a
+# deployed program. There is no `push`, no `pull_request` and no `schedule`
+# trigger here by design: a custody run must be something a person decided to
+# do, not a side effect of merging code or of a clock. `scripts/test/
+# escrow-custody-workflow.test.mjs` asserts that property against this file, so
+# a future edit that adds an automatic trigger fails the suite rather than
+# quietly turning custody testing into CI.
+#
+# What it does:
+#
+#   * refuses any cluster that is not devnet, by genesis hash, before a keypair
+#     is loaded or an instruction is built — mainnet by name first;
+#   * creates disposable wallets and a disposable Classic SPL Token mint with no
+#     economic value whatsoever;
+#   * runs the full escrow custody scenario matrix and its negative suite;
+#   * reconstructs every history from the chain and checks it against live
+#     account state;
+#   * writes one public evidence record containing addresses, signatures and
+#     balances, and refuses to serialize anything key-shaped.
+#
+# What it cannot do:
+#
+#   * deploy, upgrade, close, or set the upgrade authority of any program. It
+#     runs one script, and that script calls no loader instruction.
+#   * touch mainnet. There is no endpoint input; the RPC URL is fixed below, and
+#     the harness refuses a mainnet genesis hash regardless.
+#   * open the custody gate. RR-13 and legal review are unaffected by a passing
+#     run, and the evidence record says so in its own gates block.
+#
+# The funder secret is a disposable devnet wallet that pays rent and fees for
+# the throwaway wallets each run creates. It is not the deployer, it holds no
+# authority over anything, and the harness only ever reads it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Type ppv_escrow to confirm a live devnet custody run
+        required: true
+        type: string
+      preflight_only:
+        description: "Run the read-only preflight and stop before any transaction"
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  # One custody run at a time. Two concurrent runs would share the funder
+  # wallet and race on its balance and blockhashes.
+  group: devnet-escrow-custody-validation
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Live devnet custody validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: devnet-custody-validation
+    env:
+      # Fixed. Not an input, because an endpoint input is the one thing that
+      # could point this at another cluster.
+      PPV_CUSTODY_RPC_URL: https://api.devnet.solana.com
+
+    steps:
+      - name: Confirm the run
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.confirm }}" != "ppv_escrow" ]; then
+            echo "confirmation did not match ppv_escrow; refusing" >&2
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build the SDK and indexer the harness reads through
+        run: npm run build
+
+      - name: Deterministic harness checks
+        # The offline suite before the live one. Every refusal the live run will
+        # never take — mainnet, a wrong authority, a wrong binary, a wrong
+        # threshold, a refusal that changed something, an evidence record with a
+        # key in it — is exercised here first.
+        run: npm run test:release
+
+      - name: Read-only preflight
+        run: node scripts/devnet-escrow-custody.mjs
+
+      - name: Live custody run
+        if: ${{ !inputs.preflight_only }}
+        env:
+          PPV_COMMIT_SHA: ${{ github.sha }}
+          PPV_CUSTODY_FUNDER: ${{ runner.temp }}/custody-funder.json
+          PPV_CUSTODY_FUNDER_SECRET: ${{ secrets.PPV_CUSTODY_FUNDER_KEYPAIR }}
+        run: |
+          set -euo pipefail
+          if [ -z "${PPV_CUSTODY_FUNDER_SECRET}" ]; then
+            echo "PPV_CUSTODY_FUNDER_KEYPAIR is not configured for this environment" >&2
+            exit 1
+          fi
+          # Written with no shell echo, read by the harness, removed in the
+          # cleanup step below whatever happens.
+          printf '%s' "${PPV_CUSTODY_FUNDER_SECRET}" > "${PPV_CUSTODY_FUNDER}"
+          chmod 600 "${PPV_CUSTODY_FUNDER}"
+          node scripts/devnet-escrow-custody.mjs --execute
+
+      - name: Remove the funder keypair
+        if: always()
+        run: rm -f "${{ runner.temp }}/custody-funder.json"
+
+      - name: Refuse to publish an artifact containing key material
+        if: ${{ !inputs.preflight_only }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          records=(deployments/validation/*.json)
+          if [ ${#records[@]} -eq 0 ]; then
+            echo "no evidence record was produced" >&2
+            exit 1
+          fi
+          for record in "${records[@]}"; do
+            if grep -Eq '"(secretKey|secret_key|privateKey|private_key|keypair|mnemonic|seedPhrase)"' "${record}"; then
+              echo "${record} contains a secret-shaped field; refusing to publish it" >&2
+              exit 1
+            fi
+          done
+
+      - name: Upload the validation evidence
+        if: ${{ !inputs.preflight_only }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ppv-escrow-devnet-custody-validation
+          path: deployments/validation/*.json
+          if-no-files-found: error

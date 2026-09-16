@@ -11,6 +11,7 @@ import {
 } from "../verify-custody-governance.mjs";
 import { rpc, DEVNET_GENESIS, MAINNET_GENESIS } from "../lib/rpc.mjs";
 import { isAddress } from "../lib/pubkey.mjs";
+import { deriveVault } from "../lib/squads.mjs";
 import { makeRpcTransport, MEMBERS, VAULT_PDA } from "./helpers.mjs";
 
 /**
@@ -29,9 +30,38 @@ import { makeRpcTransport, MEMBERS, VAULT_PDA } from "./helpers.mjs";
  * the ceremony as well as after it.
  */
 
-/** A second program-derived address, for "the custody vault is a different PDA". */
-const CUSTODY_VAULT = "FfEQrpiQSzxUErCBkXCukbt26JivKiExA6HswMpQkiSA";
+/**
+ * A multisig and *its own* vault.
+ *
+ * These used to be two unrelated off-curve addresses, which was enough while
+ * the policy only asked whether the vault was program-derived. It now asks
+ * whether the vault is program-derived **from this multisig**, so an arbitrary
+ * pair is exactly the misconfiguration the check exists to catch and cannot
+ * stand in for a valid one. `HtQ44K…` is index 0 of `3cFRkT…` under the Squads
+ * V4 program, asserted below rather than pasted and hoped for.
+ */
 const CUSTODY_MULTISIG = "3cFRkTFrpmNXetfLJka5q1owRffk1tjWVo8SDLPyWB7w";
+const CUSTODY_VAULT = "HtQ44K1pxtvsXQFs2T5H4raTJd1GpCTGESBQJjSvoXwD";
+
+test("the fixture vault really is the fixture multisig's vault at index 0", () => {
+  assert.equal(deriveVault(CUSTODY_MULTISIG, 0).address, CUSTODY_VAULT);
+});
+
+test("a vault that is not this multisig's is refused", () => {
+  // The check that replaced "does an account exist at the vault address",
+  // which could not answer the question and answered it wrongly: a Squads
+  // vault is a pure signer PDA and holds no account until somebody funds it.
+  const failures = checkPolicy(valid({ vault: "FfEQrpiQSzxUErCBkXCukbt26JivKiExA6HswMpQkiSA" }));
+  assert.ok(
+    failures.some((failure) => /derives to .*, not the declared vault/.test(failure)),
+    `expected a derivation failure, got ${JSON.stringify(failures)}`,
+  );
+});
+
+test("the right vault at the wrong index is refused", () => {
+  const failures = checkPolicy(valid({ vaultIndex: 1 }));
+  assert.ok(failures.some((failure) => /vault index 1 of multisig/.test(failure)));
+});
 
 /** A valid dedicated custody configuration, which every test perturbs. */
 function valid(overrides = {}) {
@@ -140,12 +170,30 @@ test("mainnet is refused outright rather than reported as one failed check", asy
   );
 });
 
-test("a vault that does not exist on chain is reported", async () => {
+test("a vault with no account on chain is reported, not refused", async () => {
+  // This assertion is inverted from what it used to be, and the inversion is
+  // the point. It used to require an account at the vault address, on the
+  // reasoning that "a vault that has never been created cannot hold
+  // authority". Running the verifier against the live custody vault for the
+  // first time showed the premise is false: a Squads V4 vault is a pure signer
+  // PDA with no account of its own, and
+  // `FD2spnsMVgsuddPSRWAe3ee4DMbgDx5ivpvVfvKcNrLE` demonstrably holds the
+  // upgrade authority of the deployed ppv_escrow program while having none.
+  //
+  // So the check was a false negative about the most important fact this file
+  // is concerned with. Presence would have proved nothing either — anyone can
+  // send a lamport to any address. The real question, "is this the multisig's
+  // vault", is answered offline by derivation in `checkPolicy`.
   const client = rpc("https://stub.invalid", {
     fetchImpl: makeRpcTransport({ genesis: DEVNET_GENESIS, accounts: {} }),
   });
-  const { failures } = await checkChain(client, { vault: CUSTODY_VAULT });
-  assert.ok(failures.some((failure) => /no account exists at the vault/.test(failure)));
+  const { failures, vaultAccountExists } = await checkChain(client, { vault: CUSTODY_VAULT });
+  assert.equal(vaultAccountExists, false);
+  assert.deepEqual(
+    failures,
+    [],
+    "an unfunded Squads vault is normal and must not fail the governance verdict",
+  );
 });
 
 test("the verifier exits non-zero and says so when policy is not satisfied", async () => {

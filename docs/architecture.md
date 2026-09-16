@@ -157,12 +157,18 @@ executable form of the protocol's success criterion, and
 Local and devnet placeholders are not deployment identities. Every deployed
 program receives its own controlled keypair and upgrade authority.
 
-`ppv_escrow` is not deployed to any cluster. It carries a build-only placeholder
-id, is absent from `[programs.devnet]` and from the devnet deploy workflow, and
-reaches a cluster only after the custody gate in
-[deployment-gates.md](deployment-gates.md). Its upgrade authority must be a
-Squads multisig separate from the non-custodial programs, so that a compromise
-of one authority cannot reach value held by the other.
+`ppv_escrow` is deployed to devnet at
+`7U1bCHQcr8Jg6J8G69JGaAWCRtsrZB1RYx4zo1sNEVF4`, and to no other cluster. Its
+upgrade authority is the dedicated custody vault
+`FD2spnsMVgsuddPSRWAe3ee4DMbgDx5ivpvVfvKcNrLE` — a Squads multisig separate
+from the one governing the non-custodial programs, so that a compromise of one
+authority cannot reach value held by the other. Reaching any further cluster
+requires the custody gate in [deployment-gates.md](deployment-gates.md), which
+is closed.
+
+*Historical.* Until 2026-09-15 this read "`ppv_escrow` is not deployed to any
+cluster", with a build-only placeholder id and no entry in
+`[programs.devnet]`.
 
 
 ## Events

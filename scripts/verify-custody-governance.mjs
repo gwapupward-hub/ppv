@@ -24,6 +24,15 @@
 import { isAddress, isOnCurve, isProgramDerived } from "./lib/pubkey.mjs";
 import { MIN_SQUADS_THRESHOLD } from "./lib/identity.mjs";
 import { DEVNET_GENESIS, MAINNET_GENESIS, rpc } from "./lib/rpc.mjs";
+import {
+  PERMISSION_ALL,
+  SQUADS_V4_PROGRAM_ID,
+  SquadsDecodeError,
+  compareToPolicy,
+  deriveVault,
+  permissionNames,
+  readMultisig,
+} from "./lib/squads.mjs";
 
 /**
  * The vault governing the non-custodial programs. A custody vault equal to it
@@ -49,6 +58,20 @@ export const NON_CUSTODY_MEMBERS = Object.freeze([
   "BJmFM4k7Q32CiCYSdoYkAhXdD5Sk3BegMh2cbEAsgSwJ",
 ]);
 
+/**
+ * How many custody signers may also govern the non-custodial programs, even
+ * when the overlap is deliberately accepted.
+ *
+ * One is the approved devnet exception, and the arithmetic is the whole reason
+ * it is tolerable: one shared key cannot reach a 2-of-3 threshold by itself, so
+ * compromising the people who govern Core and Commerce still does not reach the
+ * custody vault. Two shared keys in a 2-of-3 ends that property completely —
+ * the "separate" multisig would fall to exactly the same compromise. So
+ * `--allow-shared-signers` accepts the approved overlap; it does not accept
+ * however many overlaps a future configuration happens to contain.
+ */
+export const MAX_APPROVED_SHARED_SIGNERS = 1;
+
 export class GovernanceFailure extends Error {}
 
 function parseArgs(argv) {
@@ -59,6 +82,10 @@ function parseArgs(argv) {
     const key = token.slice(2);
     if (key === "allow-shared-signers") {
       args.allowSharedSigners = true;
+      continue;
+    }
+    if (key === "live-squads") {
+      args.liveSquads = true;
       continue;
     }
     args[key] = argv[i + 1];
@@ -80,6 +107,8 @@ export function checkPolicy({
   nonCustodyVault = NON_CUSTODY_VAULT,
   nonCustodyMembers = NON_CUSTODY_MEMBERS,
   allowSharedSigners = false,
+  vaultIndex = 0,
+  squadsProgramId = SQUADS_V4_PROGRAM_ID,
 }) {
   const failures = [];
   const fail = (detail) => failures.push(detail);
@@ -127,6 +156,25 @@ export function checkPolicy({
     fail(`the vault ${vault} is not program-derived`);
   }
 
+  // The vault must be *this* multisig's vault, at the declared index.
+  //
+  // Offline and exact: a Squads vault address is `find_program_address` over
+  // ["multisig", multisig, "vault", index] under the Squads V4 program, so a
+  // declared pair that does not derive is a configuration naming somebody
+  // else's vault — or a vault at a different index, which is a different
+  // account holding different money. This is what replaced the chain-side
+  // "does an account exist at the vault" check, which could not answer the
+  // question and answered it wrongly; see `checkChain`.
+  if (isAddress(multisig) && isAddress(vault)) {
+    const derived = deriveVault(multisig, vaultIndex, squadsProgramId);
+    if (derived.address !== vault) {
+      fail(
+        `vault index ${vaultIndex} of multisig ${multisig} derives to ${derived.address}, ` +
+          `not the declared vault ${vault}`,
+      );
+    }
+  }
+
   // The vault cannot be one of its own signers, and neither can the multisig
   // account: either makes the threshold unsatisfiable by people, or satisfiable
   // by whatever can make those accounts sign.
@@ -157,12 +205,35 @@ export function checkPolicy({
         "Pass --allow-shared-signers to accept this deliberately.",
     );
   }
+  // The override accepts the approved exception, not an arbitrary overlap. Two
+  // shared signers in a 2-of-3 is one compromise away from the vault, which is
+  // the exact property the separate multisig exists to provide.
+  if (shared.length > MAX_APPROVED_SHARED_SIGNERS) {
+    fail(
+      `${shared.length} member(s) also govern the non-custodial programs: ${shared.join(", ")}. ` +
+        `At most ${MAX_APPROVED_SHARED_SIGNERS} shared signer is approved, and ` +
+        "--allow-shared-signers does not raise that limit: a second shared key can reach a " +
+        "2-of-3 threshold together with the first, which ends the separation entirely.",
+    );
+  }
 
   return failures;
 }
 
-/** The on-chain half: the cluster is devnet and the vault really exists. */
-export async function checkChain(client, { vault }) {
+/**
+ * The on-chain half: the cluster is devnet, the vault really exists, and —
+ * when asked — the multisig really says what the configuration claims.
+ *
+ * The live decode is opt-in (`--live-squads`) rather than automatic because it
+ * is a strictly stronger check that needs a reachable RPC endpoint, and a
+ * verifier that silently degraded from "read from chain" to "took your word for
+ * it" whenever the network was unavailable would be the worst of both. When it
+ * is requested and cannot be completed, that is a failure, not a skip.
+ */
+export async function checkChain(
+  client,
+  { multisig, vault, threshold, members, liveSquads = false, vaultIndex = 0 },
+) {
   const failures = [];
   const genesisHash = await client.genesisHash();
   if (genesisHash === MAINNET_GENESIS) {
@@ -172,15 +243,58 @@ export async function checkChain(client, { vault }) {
   }
   if (genesisHash !== DEVNET_GENESIS) {
     failures.push(`cluster genesis is ${genesisHash}, expected devnet ${DEVNET_GENESIS}`);
-    return { failures, genesisHash };
+    return { failures, genesisHash, squads: null };
   }
+  // Whether an account exists at the vault address is *reported*, not required.
+  //
+  // This check used to fail the run on a missing account, on the reasoning that
+  // "a vault that has never been created cannot hold authority". Running it
+  // against the live custody vault for the first time showed the premise is
+  // false: a Squads V4 vault is a pure signer PDA. It holds no account unless
+  // somebody funds it, and it does not need one — the BPF loader stores the
+  // authority as a bare pubkey, and Squads signs with `invoke_signed`, which
+  // needs a derivation and a seed, not lamports.
+  //
+  // `FD2spnsMVgsuddPSRWAe3ee4DMbgDx5ivpvVfvKcNrLE` is the live upgrade
+  // authority of the deployed `ppv_escrow` program — read from ProgramData in
+  // the same run that reported "no account exists" here — so the check was
+  // producing a false negative about the single most important fact in this
+  // file. Its absence disproves nothing, and its presence would have proved
+  // nothing either: anyone can send a lamport to any address.
+  //
+  // What replaces it is strictly stronger and lives in `checkPolicy`: the vault
+  // must *derive* from the multisig at the declared index. That is a fact about
+  // the two addresses, it needs no network, and it cannot be faked by funding
+  // an account.
   const account = await client.accountInfo(vault);
-  if (!account) {
-    failures.push(
-      `no account exists at the vault ${vault}; a vault that has never been created cannot hold authority`,
-    );
+  const vaultAccountExists = Boolean(account);
+
+  if (!liveSquads) return { failures, genesisHash, squads: null, vaultAccountExists };
+
+  // RR-7: stop treating the threshold and the member set as declared facts.
+  let decoded;
+  try {
+    decoded = await readMultisig(client, multisig);
+  } catch (error) {
+    if (error instanceof SquadsDecodeError) {
+      failures.push(`the live Squads multisig could not be read: ${error.message}`);
+      return { failures, genesisHash, squads: null, vaultAccountExists };
+    }
+    throw error;
   }
-  return { failures, genesisHash };
+
+  failures.push(
+    ...compareToPolicy(decoded, {
+      multisig,
+      threshold,
+      members,
+      vault,
+      vaultIndex,
+      requiredPermissionMask: PERMISSION_ALL,
+    }),
+  );
+
+  return { failures, genesisHash, squads: decoded, vaultAccountExists };
 }
 
 export async function verify({ argv = [], client = null, out = process.stdout } = {}) {
@@ -195,6 +309,7 @@ export async function verify({ argv = [], client = null, out = process.stdout } 
     threshold: Number(args.threshold),
     members,
     allowSharedSigners: Boolean(args.allowSharedSigners),
+    liveSquads: Boolean(args.liveSquads),
   };
 
   out.write("PPV custody governance\n");
@@ -205,10 +320,46 @@ export async function verify({ argv = [], client = null, out = process.stdout } 
   out.write("\n");
 
   const failures = checkPolicy(config);
+  let squads = null;
   if (client) {
-    const chain = await checkChain(client, { vault: config.vault });
+    const chain = await checkChain(client, {
+      multisig: config.multisig,
+      vault: config.vault,
+      threshold: config.threshold,
+      members,
+      liveSquads: config.liveSquads,
+    });
     failures.push(...chain.failures);
-    out.write(`  cluster   ${chain.genesisHash}\n\n`);
+    squads = chain.squads;
+    out.write(`  cluster   ${chain.genesisHash}\n`);
+    // Reported because it is interesting, never required: see checkChain.
+    out.write(
+      `  vault acct ${chain.vaultAccountExists ? "exists" : "none (a Squads vault is a pure signer PDA)"}\n`,
+    );
+    if (squads) {
+      const derived = deriveVault(config.multisig, 0);
+      out.write("\nLive Squads multisig, decoded from chain state\n");
+      out.write(`  program    ${SQUADS_V4_PROGRAM_ID}\n`);
+      out.write(`  account    ${config.multisig}\n`);
+      out.write(`  threshold  ${squads.threshold} of ${squads.members.length} member(s)\n`);
+      for (const member of squads.members) {
+        out.write(
+          `    member   ${member.key}  mask ${member.mask} ` +
+            `(${member.permissions.join(" + ") || "none"})\n`,
+        );
+      }
+      out.write(`  vault[0]   ${derived.address} (bump ${derived.bump})\n`);
+      out.write(`  timeLock   ${squads.timeLock}\n`);
+    } else if (config.liveSquads) {
+      out.write("  squads    NOT DECODED\n");
+    }
+    out.write("\n");
+  } else if (config.liveSquads) {
+    out.write("  cluster   not checked (no RPC endpoint given)\n\n");
+    failures.push(
+      "--live-squads was requested but no RPC endpoint was given (set PPV_RPC_URL); " +
+        "a live decode that did not happen is not a live decode",
+    );
   } else {
     out.write("  cluster   not checked (no RPC endpoint given)\n\n");
   }
@@ -217,15 +368,24 @@ export async function verify({ argv = [], client = null, out = process.stdout } 
     out.write("GOVERNANCE POLICY NOT SATISFIED\n");
     for (const failure of failures) out.write(`  ${failure}\n`);
     out.write("\nDo not give this configuration authority over ppv_escrow.\n");
-    return { ok: false, failures };
+    return { ok: false, failures, squads };
   }
 
   out.write("PPV_CUSTODY_GOVERNANCE_VALID\n");
   out.write(`custody_vault=${config.vault}\n`);
   out.write(`threshold=${config.threshold}\n`);
   out.write(`members=${members.length}\n`);
+  // The distinction RR-7 is about: whether the two numbers above were read off
+  // the chain or handed to this process on the command line.
+  out.write(`squads_live_decode=${squads ? "read-from-chain" : "declared-only"}\n`);
+  if (squads) {
+    out.write(`squads_live_threshold=${squads.threshold}\n`);
+    out.write(`squads_live_members=${squads.members.map((m) => m.key).join(",")}\n`);
+    out.write(`squads_live_permissions=${squads.members.map((m) => m.mask).join(",")}\n`);
+    out.write(`squads_vault_derived=${deriveVault(config.multisig, 0).address}\n`);
+  }
   out.write("result=valid\n");
-  return { ok: true, failures: [] };
+  return { ok: true, failures: [], squads };
 }
 
 const invokedDirectly = process.argv[1]?.endsWith("verify-custody-governance.mjs");

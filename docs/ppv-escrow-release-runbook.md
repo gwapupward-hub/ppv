@@ -150,10 +150,16 @@ The freeze is committed. The public facts it recorded:
 | Creation tx | `PAr6UEy3Am4HDjZFLwWKCiG3jVMh2pE9vCfKxAq3SACyFs9wwheGCwLDRV57kE7GHZPyCJEqQBJByR1574spqR5` |
 | Network | devnet |
 
-The vault is the **intended future** upgrade authority. **No authority has been
-transferred and escrow is not deployed** — `ppv_escrow` is absent from
-`DEVNET_DEPLOYED_PROGRAMS` for exactly that reason, and the custody gate is
-closed on its remaining requirements.
+*Historical, at the time of the freeze.* The vault was then the **intended
+future** upgrade authority, no authority had been transferred, and
+`ppv_escrow` was absent from `DEVNET_DEPLOYED_PROGRAMS` for exactly that
+reason.
+
+**Current.** `ppv_escrow` is deployed to devnet and the vault **is** its live
+upgrade authority; the transfer is finalized and recorded in
+`deployments/evidence/ppv-escrow-devnet-231dceb.json`. The custody gate remains
+closed on its remaining requirements — independent security review (RR-13) and
+legal review — neither of which deployment touched.
 
 One thing this freeze changed that is worth stating plainly: the custody gate
 used to be enforced by escrow's *absence* from every deployment path, and it is
