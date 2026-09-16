@@ -66,8 +66,7 @@ test("a live run requires an explicit confirmation and is not the default", () =
   assert.match(CODE, /required: true/);
   // preflight_only defaults to true: dispatching with everything left alone
   // reads the chain and sends nothing.
-  const preflight = CODE.match(/preflight_only:\n([\s\S]*?)\n\s{4}\w|preflight_only:\n([\s\S]*)$/);
-  assert.ok(preflight, "there is no preflight_only input");
+  assert.match(CODE, /preflight_only:/, "there is no preflight_only input");
   assert.match(CODE, /preflight_only:[\s\S]*?default: true/);
   assert.match(CODE, /if: \$\{\{ !inputs\.preflight_only \}\}/);
 });
