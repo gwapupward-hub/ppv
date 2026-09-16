@@ -131,6 +131,48 @@ that the reviewed bytes are the bytes the loader holds and that the dedicated
 custody vault holds the upgrade authority. It proved nothing about how the
 program behaves with real tokens in it. The gate stays closed.
 
+### Live devnet custody validation
+
+Deployment established identity: the bytes the loader holds are the reviewed
+bytes, and the account that can replace them is the dedicated custody vault.
+Neither fact says anything about what the program does with tokens in it, and
+until this sprint the repository had no way to find out — every custody claim it
+makes is proved against a model, a local validator, or the source.
+
+`scripts/devnet-escrow-custody.mjs` is the harness that closes that gap. It puts
+disposable, economically worthless Classic SPL Token units through real
+per-agreement vaults on devnet and asserts, as arithmetic over observed
+balances rather than as transaction statuses:
+
+- funding moves exactly the agreement amount into the vault the protocol derives;
+- settlement, refund, milestone release and dispute concession each move exactly
+  the remaining amount to exactly the party the protocol names, with every other
+  watched account moving by zero;
+- every unauthorized signer, wrong destination, wrong mint, double payment,
+  post-terminal mutation, foreign milestone, foreign proof and self-directed
+  concession is refused **and leaves the state and every balance unchanged**;
+- the events the deployed program emits reconstruct each lifecycle family, and
+  the reconstruction agrees with live account state.
+
+The run is `workflow_dispatch` only
+(`.github/workflows/devnet-escrow-custody-validation.yml`): never on push, never
+on a pull request, never on a schedule, and with no endpoint input. The harness
+refuses any cluster that is not devnet, by genesis hash, before a keypair is
+loaded or an instruction is built. Its evidence lands in
+`deployments/validation/` and can hold public facts only — the generator fails
+rather than redacts if anything key-shaped reaches it.
+
+**Status: NOT RUN.** The harness and its deterministic refusal suite exist and
+pass; no live custody run has happened, because the environment that maintains
+this repository has no route to any Solana RPC host. Until a run exists and its
+evidence is committed, the correct reading of every custody claim in this
+repository is the one it already carries.
+
+**A passing run would not open this gate.** It would close the coverage rows in
+the smoke suite's table and could close RR-6 and RR-7. The gate's remaining
+requirements — an independent Solana security review (**RR-13**) and legal
+review — are untouched by it, which is why they are listed separately below.
+
 Before any cluster deployment of `ppv_escrow`:
 
 - Independent Solana security review of the custody path, with all critical and

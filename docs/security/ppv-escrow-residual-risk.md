@@ -210,6 +210,25 @@ compares it to chain state.
 *Why it is not HIGH:* this is an observability claim, not a custody one. A
 reconstruction gap cannot move money; it can mislead whoever reads the index.
 
+*Progress, not closure (this sprint).* `scripts/devnet-escrow-custody.mjs`
+reconstructs each lifecycle family — ordinary escrow, cancellation, refund,
+dispute to either party, milestone contract, bounty and proofs — from devnet
+transactions through the indexer's `replayAgreement`, and compares the projected
+state against the live account rather than against what the harness remembers
+doing. It also asserts duplicate-delivery idempotence and reversed-delivery
+convergence per family, and that the events' own accounting of what was paid out
+equals the agreement's `settled_total`.
+
+**RR-6 remains OPEN.** That code has not been run against devnet: the
+environment that maintains this repository has no route to any Solana RPC host,
+and the run is `workflow_dispatch` only. Writing the reconstruction is not the
+same as proving it, and the entry closes only when a live run has reconstructed
+every family named above and the evidence is committed under
+`deployments/validation/`. Decoding cleanly is explicitly not sufficient — RR-6
+is about complete projection agreeing with chain state, and an indexer that
+decodes every event and projects the wrong lifecycle is worse than one that
+fails loudly.
+
 ### RR-7 — The Squads threshold is declared, not read from chain
 
 Verification proves the upgrade authority is the recorded vault address and is
