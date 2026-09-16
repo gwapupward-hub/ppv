@@ -1,0 +1,104 @@
+name: Verify Escrow custody preflight (read-only)
+
+# The read-only half of the custody validation harness, and nothing else.
+#
+# `scripts/devnet-escrow-custody.mjs` has two modes. With `--execute` it signs
+# value-moving transactions, and that mode lives in
+# `devnet-escrow-custody-validation.yml`, which is workflow_dispatch only. This
+# workflow runs the other mode: the preflight, which reads.
+#
+# It exists because the preflight is the part that answers RR-7. Decoding the
+# Squads V4 multisig account — the live threshold, the exact member set, each
+# member's permission mask, and the vault index 0 derives to — is what turns
+# "the repository declares a 2-of-3" into "the account that can replace the
+# custody program's code is a 2-of-3". That claim needs a Solana RPC host, and
+# the environment that maintains this repository cannot reach one. A GitHub
+# runner can, which is the same reason the evidence-recovery workflows exist.
+#
+# Running on pull requests is safe here in a way it would never be for the
+# execute mode, and the difference is enforced rather than promised:
+#
+#   * `permissions: contents: read` — no write scope of any kind.
+#   * No `environment:` key and no `secrets` reference anywhere. The job has no
+#     keypair, so it could not sign a transaction if its code changed to try.
+#   * The script is invoked with no arguments, so it takes the preflight branch
+#     and exits before a funder is read.
+#   * No RPC endpoint input. The URL is fixed to devnet, and the harness refuses
+#     a mainnet genesis hash regardless of what it is pointed at.
+#
+# `scripts/test/escrow-custody-workflow.test.mjs` asserts every one of those
+# against this file, so an edit that quietly adds `--execute`, a secret, or a
+# write permission fails the suite rather than shipping.
+#
+# It fails closed. A genesis that is not devnet, an upgrade authority that is
+# not the custody vault, bytes that are not the reviewed binary, or a live
+# multisig that disagrees with the recorded configuration all stop the run.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - scripts/devnet-escrow-custody.mjs
+      - scripts/lib/custody-runner.mjs
+      - scripts/lib/custody-invariants.mjs
+      - scripts/lib/escrow-instructions.mjs
+      - scripts/lib/squads.mjs
+      - scripts/lib/rpc.mjs
+      - scripts/verify-custody-governance.mjs
+      - deployments/evidence/**
+      - .github/workflows/verify-escrow-custody-preflight.yml
+
+# Read-only. Do not widen this.
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-escrow-custody-preflight-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  preflight:
+    name: Read the deployed Escrow program and its custody multisig
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # No `environment:` — see the header. Attaching one would hand a read-only
+    # job the deployment secrets it has no use for.
+    env:
+      PPV_CUSTODY_RPC_URL: https://api.devnet.solana.com
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The job reads, and pushes nothing.
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build the SDK the harness reads through
+        run: npm run build
+
+      - name: Deterministic harness checks
+        run: node --test scripts/test/escrow-custody-harness.test.mjs scripts/test/escrow-instructions.test.mjs scripts/test/squads-decode.test.mjs scripts/test/escrow-custody-workflow.test.mjs
+
+      - name: Read-only preflight against devnet
+        # No arguments: the harness takes the preflight branch and sends nothing.
+        run: node scripts/devnet-escrow-custody.mjs
+
+      - name: Live custody governance, decoded from chain state
+        # The same facts a second way, through the verifier an operator runs,
+        # so a disagreement between the two is visible rather than averaged.
+        env:
+          PPV_RPC_URL: https://api.devnet.solana.com
+        run: |
+          node scripts/verify-custody-governance.mjs \
+            --multisig GEE6nE9xN4GsHGo8QHvyqNLH7eM7yLBrtFtfsmH9ip46 \
+            --vault FD2spnsMVgsuddPSRWAe3ee4DMbgDx5ivpvVfvKcNrLE \
+            --threshold 2 \
+            --members HDkMBufpYfm1LN6apVkeV3aA2dhMk57PmBujwJ4j4Ecx,5y12g4GKbba3k6WDUyZT8eUfeBdboxxGrjkdjM4kX2Wo,BJmFM4k7Q32CiCYSdoYkAhXdD5Sk3BegMh2cbEAsgSwJ \
+            --allow-shared-signers \
+            --live-squads

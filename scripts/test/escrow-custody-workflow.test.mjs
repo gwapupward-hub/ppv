@@ -185,3 +185,77 @@ test("one custody run at a time, and a run is never cancelled mid-flight", () =>
   assert.match(CODE, /group: devnet-escrow-custody-validation/);
   assert.match(CODE, /cancel-in-progress: false/);
 });
+
+/* ---------------------------------------- the read-only preflight workflow */
+
+/**
+ * The preflight workflow may run on pull requests; the execute workflow may
+ * not. That difference is only safe because this one provably cannot sign
+ * anything, so the properties that make it read-only are asserted here rather
+ * than described in its header.
+ */
+const PREFLIGHT_PATH = join(".github", "workflows", "verify-escrow-custody-preflight.yml");
+const PREFLIGHT_SOURCE = readFileSync(join(REPO, PREFLIGHT_PATH), "utf8");
+const PREFLIGHT = PREFLIGHT_SOURCE.split("\n")
+  .filter((line) => !/^\s*#/.test(line))
+  .join("\n");
+
+test("the preflight workflow never runs the harness in execute mode", () => {
+  assert.ok(
+    !PREFLIGHT.includes("--execute"),
+    "the read-only workflow must not invoke the value-moving mode",
+  );
+  assert.match(PREFLIGHT, /run: node scripts\/devnet-escrow-custody\.mjs\n/);
+});
+
+test("the preflight workflow takes no secrets and attaches no environment", () => {
+  assert.ok(!PREFLIGHT.includes("secrets."), "a read-only job needs no secret");
+  assert.doesNotMatch(PREFLIGHT, /^\s+environment:/m);
+  assert.ok(!PREFLIGHT.includes("PPV_CUSTODY_FUNDER"), "it must not read a funder keypair");
+});
+
+test("the preflight workflow grants contents: read and nothing else", () => {
+  assert.match(PREFLIGHT, /^permissions:\n\s+contents:\s*read\s*$/m);
+  for (const scope of [
+    "contents", "actions", "checks", "deployments", "id-token", "issues",
+    "packages", "pages", "pull-requests", "security-events", "statuses",
+  ]) {
+    assert.doesNotMatch(PREFLIGHT, new RegExp(`${scope}:\\s*write`));
+  }
+});
+
+test("the preflight workflow is pinned to devnet with no endpoint input", () => {
+  assert.match(PREFLIGHT, /PPV_CUSTODY_RPC_URL: https:\/\/api\.devnet\.solana\.com/);
+  assert.doesNotMatch(PREFLIGHT, /mainnet/i);
+  assert.doesNotMatch(PREFLIGHT, /rpc_url:|endpoint:/);
+});
+
+test("the preflight workflow cannot deploy or move an authority", () => {
+  for (const forbidden of [
+    "solana program deploy",
+    "solana program upgrade",
+    "set-upgrade-authority",
+    "anchor deploy",
+    "record-deployment",
+  ]) {
+    assert.ok(!PREFLIGHT.includes(forbidden), `the preflight workflow runs ${forbidden}`);
+  }
+});
+
+test("the preflight workflow actually performs the live Squads decode", () => {
+  // Without --live-squads the verifier compares declared facts to policy, which
+  // is the thing RR-7 says is not enough.
+  assert.match(PREFLIGHT, /--live-squads/);
+  assert.match(PREFLIGHT, /--multisig GEE6nE9xN4GsHGo8QHvyqNLH7eM7yLBrtFtfsmH9ip46/);
+  assert.match(PREFLIGHT, /--vault FD2spnsMVgsuddPSRWAe3ee4DMbgDx5ivpvVfvKcNrLE/);
+});
+
+test("only the execute workflow is workflow_dispatch-only", () => {
+  // Stated as a pair so the two files cannot converge: the preflight may run on
+  // pull requests precisely because it cannot sign, and the execute workflow
+  // may not, whatever it can or cannot do.
+  const preflightOn = PREFLIGHT.match(/^on:\n([\s\S]*?)\n(?=\w)/m)[1];
+  assert.match(preflightOn, /pull_request:/);
+  const executeOn = CODE.match(/^on:\n([\s\S]*?)\n(?=\w)/m)[1];
+  assert.doesNotMatch(executeOn, /pull_request:/);
+});
