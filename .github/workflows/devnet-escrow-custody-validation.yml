@@ -101,23 +101,65 @@ jobs:
       - name: Read-only preflight
         run: node scripts/devnet-escrow-custody.mjs
 
-      - name: Live custody run
+      - name: Funder preflight
+        # Separate from the run, and before it, because the two failures it
+        # catches are the ones that are expensive to discover late.
+        #
+        #   * A missing secret fails here, having created nothing.
+        #   * A funder too thin for the full matrix fails here, rather than
+        #     partway through — a run that stops between a `fund` and its
+        #     settlement leaves tokens in a vault and burns an authorization
+        #     that has to be granted again.
+        #
+        # It prints the funder's PUBLIC address and its balance. It prints
+        # nothing else about it, and `set +x` is never lifted.
         if: ${{ !inputs.preflight_only }}
         env:
-          PPV_COMMIT_SHA: ${{ github.sha }}
           PPV_CUSTODY_FUNDER: ${{ runner.temp }}/custody-funder.json
           PPV_CUSTODY_FUNDER_SECRET: ${{ secrets.PPV_CUSTODY_FUNDER_KEYPAIR }}
         run: |
           set -euo pipefail
-          if [ -z "${PPV_CUSTODY_FUNDER_SECRET}" ]; then
-            echo "PPV_CUSTODY_FUNDER_KEYPAIR is not configured for this environment" >&2
+          if [ -z "${PPV_CUSTODY_FUNDER_SECRET:-}" ]; then
+            echo "::error::PPV_CUSTODY_FUNDER_KEYPAIR is not configured for the" \
+                 "devnet-custody-validation environment. Add a DISPOSABLE devnet" \
+                 "keypair there. Do not use the deployer or any custody signer." >&2
             exit 1
           fi
           # Written with no shell echo, read by the harness, removed in the
           # cleanup step below whatever happens.
           printf '%s' "${PPV_CUSTODY_FUNDER_SECRET}" > "${PPV_CUSTODY_FUNDER}"
           chmod 600 "${PPV_CUSTODY_FUNDER}"
-          node scripts/devnet-escrow-custody.mjs --execute
+          node -e '
+            const { Connection, Keypair } = require("@solana/web3.js");
+            const { readFileSync } = require("node:fs");
+            (async () => {
+              const funder = Keypair.fromSecretKey(
+                Uint8Array.from(JSON.parse(readFileSync(process.env.PPV_CUSTODY_FUNDER, "utf8"))),
+              );
+              const connection = new Connection(process.env.PPV_CUSTODY_RPC_URL, "confirmed");
+              const lamports = await connection.getBalance(funder.publicKey, "confirmed");
+              const sol = lamports / 1e9;
+              // Public address only. Never the secret, in any form.
+              console.log(`funder public address: ${funder.publicKey.toBase58()}`);
+              console.log(`funder devnet balance: ${sol} SOL`);
+              if (lamports < 1e9) {
+                console.error(`::error::funder holds ${sol} SOL; the full scenario matrix needs at least 1 SOL`);
+                process.exit(1);
+              }
+            })().catch((error) => {
+              // Deliberately not the error object: a thrown parse error can
+              // carry the input that failed to parse.
+              console.error("::error::funder preflight failed:", error?.message ?? "unknown error");
+              process.exit(1);
+            });
+          '
+
+      - name: Live custody run
+        if: ${{ !inputs.preflight_only }}
+        env:
+          PPV_COMMIT_SHA: ${{ github.sha }}
+          PPV_CUSTODY_FUNDER: ${{ runner.temp }}/custody-funder.json
+        run: node scripts/devnet-escrow-custody.mjs --execute
 
       - name: Remove the funder keypair
         if: always()
