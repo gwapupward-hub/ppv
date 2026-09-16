@@ -31,6 +31,9 @@ false now, and kept only so the sequence of events stays legible.
 | Upgrade authority | `FD2spnsMVgsuddPSRWAe3ee4DMbgDx5ivpvVfvKcNrLE` (custody vault) |
 | Authority transfer | FINALIZED |
 | Deployment provenance | CLOSED — `deployments/evidence/ppv-escrow-devnet-231dceb.json` |
+| Live devnet read-only preflight | PASS — https://github.com/gwapupward-hub/ppv/actions/runs/35053809296 |
+| RR-6 event/history reconstruction | OPEN — written, not run live |
+| RR-7 live Squads decode | CLOSED for the custody multisig; OPEN for Core/Commerce |
 | Live devnet custody validation | NOT RUN |
 | Independent security review (RR-13) | OPEN |
 | Legal review | OPEN |
@@ -229,7 +232,7 @@ is about complete projection agreeing with chain state, and an indexer that
 decodes every event and projects the wrong lifecycle is worse than one that
 fails loudly.
 
-### RR-7 — The Squads threshold is declared, not read from chain
+### RR-7 — The Squads threshold is declared, not read from chain — **CLOSED for the Escrow custody multisig; NARROWED to Core/Commerce governance**
 
 Verification proves the upgrade authority is the recorded vault address and is
 off-curve (so it is a PDA rather than a wallet). It does not read the Squads
@@ -256,19 +259,57 @@ permission mask — rather than accepting them as deployment-environment inputs.
 Attempted in Sprint 1 against two candidate program ids without a match; not
 guessed at since.
 
-*Progress, not closure (this sprint).* `scripts/lib/squads.mjs` decodes the
-Squads V4 `Multisig` account layout, and `scripts/verify-custody-governance.mjs`
-will now compare the declared threshold, member set and permission masks
-against the decoded account and the derived vault when it is given an RPC
-endpoint and `--live-squads`. The decoder is covered by offline fixtures in
-`scripts/test/squads-decode.test.mjs`, including rejection of a wrong
-threshold, a wrong member set, a wrong permission mask and a vault that does
-not derive. **RR-7 remains OPEN**: the decoder has not been run against the
-live `GEE6nE9xN4GsHGo8QHvyqNLH7eM7yLBrtFtfsmH9ip46` account, because the
-environment that maintains this repository has no route to any Solana RPC host.
-A decoder that has only ever seen its own fixtures proves the layout is
-implemented, not that the live account matches. Closing RR-7 requires an actual
-live decode, recorded as evidence.
+*Closed for Escrow, with evidence.* `scripts/lib/squads.mjs` decodes the Squads
+V4 `Multisig` account, and `scripts/verify-custody-governance.mjs --live-squads`
+compares the decoded account against the declared configuration. It has been
+run against the live account. From chain state, not from a declaration:
+
+| | read from `GEE6nE9xN4GsHGo8QHvyqNLH7eM7yLBrtFtfsmH9ip46` |
+| --- | --- |
+| Squads program | `SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf` |
+| Threshold | 2 |
+| Members | exactly 3: `HDkMBufpYfm1LN6apVkeV3aA2dhMk57PmBujwJ4j4Ecx`, `5y12g4GKbba3k6WDUyZT8eUfeBdboxxGrjkdjM4kX2Wo`, `BJmFM4k7Q32CiCYSdoYkAhXdD5Sk3BegMh2cbEAsgSwJ` |
+| Permissions | mask 7 (Initiate + Vote + Execute) for each |
+| Vault index 0 | derives to `FD2spnsMVgsuddPSRWAe3ee4DMbgDx5ivpvVfvKcNrLE` |
+| Time lock | 0 |
+| Shared signers with Core/Commerce governance | exactly 1 (the approved devnet exception) |
+
+Evidence: https://github.com/gwapupward-hub/ppv/actions/runs/35053809296 — the verifier printed `squads_live_decode=read-from-chain`, and
+the same run read `FD2spnsMVgsuddPSRWAe3ee4DMbgDx5ivpvVfvKcNrLE` out of
+`ppv_escrow`'s ProgramData as its live upgrade authority. The two halves of the
+claim therefore come from the same reading of the same chain: the account that
+holds authority over the custody program **is** the 2-of-3 this repository
+records. `verify-escrow-custody-preflight.yml` re-establishes it on every pull
+request that touches the decoder, the verifier or the evidence records, so the
+answer cannot go stale without a failing check.
+
+The decoder is hand-written so the read-only verifiers stay dependency-free, and
+`scripts/test/squads-decode.test.mjs` checks it field for field against the
+pinned `@sqds/multisig` 2.1.4 serializer, and asserts refusal of a wrong
+threshold, a wrong member set, a wrong permission mask, a vault that does not
+derive, a vault at the wrong index, an account under another program's
+ownership, and a truncated account.
+
+*What this does not close.* RR-7 was never only about Escrow. The vault
+governing the non-custodial programs, `B6tcsTrMCKTZV5vi3rRCnA3FMPeeWACSHuuTSz5XQgnX`,
+is still verified from declared facts: this repository does not record the
+address of the multisig that owns it, so there is nothing to decode. That
+remainder is **OPEN** and MEDIUM for the same reason the whole entry was —
+a wrong declared threshold there does not let anyone move custody, it lets the
+repository overstate how hard a Core or Commerce upgrade is to push.
+
+*A finding from running it.* The first live run failed, and the failure was in
+the verifier rather than in the configuration. `checkChain` required an account
+to exist at the vault address, reasoning that "a vault that has never been
+created cannot hold authority". A Squads V4 vault is a pure signer PDA: the BPF
+loader stores an authority as a bare pubkey and Squads signs with
+`invoke_signed`, so a vault nobody has funded has no account and holds authority
+perfectly well. In the same run that reported "no account exists at the vault
+FD2spns…", the preflight read that address out of ProgramData as the live
+upgrade authority. The check has been replaced by one that is strictly stronger
+and needs no network: the vault must *derive* from the multisig at the declared
+index. It had never fired before because the verifier is normally run without an
+RPC endpoint.
 
 ### RR-8 — The property suite is not mutation-qualified — **CLOSED**
 

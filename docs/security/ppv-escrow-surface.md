@@ -29,6 +29,7 @@ false now, and kept only so the sequence of events stays legible.
 | Upgrade authority | `FD2spnsMVgsuddPSRWAe3ee4DMbgDx5ivpvVfvKcNrLE` (custody vault) |
 | Authority transfer | FINALIZED |
 | Deployment provenance | CLOSED — `deployments/evidence/ppv-escrow-devnet-231dceb.json` |
+| Live devnet read-only preflight | PASS — https://github.com/gwapupward-hub/ppv/actions/runs/35053809296 |
 | Live devnet custody validation | NOT RUN |
 | Independent security review (RR-13) | OPEN |
 | Legal review | OPEN |

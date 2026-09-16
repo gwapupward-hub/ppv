@@ -120,6 +120,7 @@ false now, and kept only so the sequence of events stays legible.
 | Upgrade authority | `FD2spnsMVgsuddPSRWAe3ee4DMbgDx5ivpvVfvKcNrLE` (custody vault) |
 | Authority transfer | FINALIZED |
 | Deployment provenance | CLOSED — `deployments/evidence/ppv-escrow-devnet-231dceb.json` |
+| Live devnet read-only preflight | PASS — https://github.com/gwapupward-hub/ppv/actions/runs/35053809296 |
 | Live devnet custody validation | NOT RUN |
 | Independent security review (RR-13) | OPEN |
 | Legal review | OPEN |
@@ -162,11 +163,27 @@ loaded or an instruction is built. Its evidence lands in
 `deployments/validation/` and can hold public facts only — the generator fails
 rather than redacts if anything key-shaped reaches it.
 
-**Status: NOT RUN.** The harness and its deterministic refusal suite exist and
-pass; no live custody run has happened, because the environment that maintains
-this repository has no route to any Solana RPC host. Until a run exists and its
-evidence is committed, the correct reading of every custody claim in this
-repository is the one it already carries.
+**Status: the preflight has run; the custody suite has not.**
+
+The read-only half — `verify-escrow-custody-preflight.yml` — runs on every pull
+request that touches the harness, the Squads decoder, the governance verifier or
+the evidence records, and it passes against live devnet. It establishes the
+cluster, that `ppv_escrow` is executable and loader-owned at its permanent id,
+that ProgramData resolves to `2bWfopyJ8LxJ6azd9ZhaGmfs9S2gGRQKx6TX88ddULAa`,
+that the upgrade authority is the custody vault, that the deployed bytes hash to
+the reviewed binary, and — decoded out of the Squads V4 multisig account rather
+than declared — a threshold of 2, exactly the three recorded members, mask 7
+each, and a vault index 0 that derives to
+`FD2spnsMVgsuddPSRWAe3ee4DMbgDx5ivpvVfvKcNrLE`. That is what closed **RR-7** for
+the custody multisig.
+
+The value-moving half has **NOT RUN**. The harness and its deterministic refusal
+suite exist and pass, but no transaction has been sent, because the environment
+that maintains this repository has no route to any Solana RPC host and the
+execute workflow is `workflow_dispatch` only. Until a run exists and its evidence
+is committed under `deployments/validation/`, the correct reading of every
+custody-behaviour claim in this repository is the one it already carries, and
+**RR-6** stays open.
 
 **A passing run would not open this gate.** It would close the coverage rows in
 the smoke suite's table and could close RR-6 and RR-7. The gate's remaining

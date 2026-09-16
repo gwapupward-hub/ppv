@@ -259,3 +259,59 @@ test("only the execute workflow is workflow_dispatch-only", () => {
   const executeOn = CODE.match(/^on:\n([\s\S]*?)\n(?=\w)/m)[1];
   assert.doesNotMatch(executeOn, /pull_request:/);
 });
+
+/* ------------------------------ the closure and the check that supports it */
+
+/**
+ * RR-7 is closed for the custody multisig because the live decode happened and
+ * keeps happening. If the check that re-establishes it were removed, the
+ * register would be asserting a fact nothing checks any more — which is the
+ * exact shape of the problem RR-7 described in the first place.
+ *
+ * So the two are tied together here: while the register claims the closure, the
+ * preflight workflow must still perform the live decode on pull requests.
+ */
+test("RR-7's closure is backed by a check that still runs", () => {
+  const register = readFileSync(
+    join(REPO, "docs", "security", "ppv-escrow-residual-risk.md"),
+    "utf8",
+  );
+  const rr7 = register.match(/### RR-7 — [^\n]*/)?.[0] ?? "";
+  if (!/CLOSED/.test(rr7)) return; // Nothing to support.
+
+  assert.match(
+    PREFLIGHT,
+    /--live-squads/,
+    "RR-7 is recorded as closed, but the preflight workflow no longer performs the live decode",
+  );
+  const on = PREFLIGHT.match(/^on:\n([\s\S]*?)\n(?=\w)/m)[1];
+  assert.match(
+    on,
+    /pull_request:/,
+    "RR-7 is recorded as closed, but the live decode no longer runs on pull requests",
+  );
+  assert.match(
+    register,
+    /squads_live_decode=read-from-chain/,
+    "the closure must cite the verifier output that established it",
+  );
+  assert.match(
+    register,
+    /actions\/runs\/\d+/,
+    "the closure must cite the run that established it",
+  );
+});
+
+test("RR-7's closure is scoped, not blanket", () => {
+  const register = readFileSync(
+    join(REPO, "docs", "security", "ppv-escrow-residual-risk.md"),
+    "utf8",
+  );
+  const rr7 = register.match(/### RR-7 —[\s\S]*?(?=\n### )/)?.[0] ?? "";
+  if (!/CLOSED/.test(rr7)) return;
+  // Core/Commerce governance is still verified from declared facts, and this
+  // repository records no multisig address for its vault, so there is nothing
+  // to decode. A closure that did not say so would overstate itself.
+  assert.match(rr7, /B6tcsTrMCKTZV5vi3rRCnA3FMPeeWACSHuuTSz5XQgnX/);
+  assert.match(rr7, /What this does not close/);
+});
