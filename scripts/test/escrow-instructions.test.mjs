@@ -598,3 +598,99 @@ test("an unknown instruction name is refused rather than encoded", () => {
     /unknown agreement type/,
   );
 });
+
+
+/* --------------------------------------------- the optional settlement proof */
+
+/**
+ * The optional account, in both of its states.
+ *
+ * The struct-pinning cases above all pass `settlementProof: null`, so they
+ * exercise the absent path only — and the absent path is the forgiving one,
+ * because Anchor forces an absent optional to non-writable regardless of what
+ * the client asked for. The *present* path takes its writability from the IDL,
+ * which takes it from the struct, and `settlement_proof` is declared without
+ * `#[account(mut)]` in both `Settle` and `SettleMilestone`: a settlement cites
+ * evidence, it does not modify it.
+ *
+ * A writable-when-present client would have been accepted by the runtime and
+ * would never have failed, which is exactly the silent divergence from the
+ * generated client that hand-encoding has to be defended against.
+ */
+test("settlement_proof is declared without #[account(mut)] in both structs", () => {
+  for (const [file, struct] of [
+    ["settle.rs", "Settle"],
+    ["milestone.rs", "SettleMilestone"],
+  ]) {
+    const source = readFileSync(join(INSTRUCTIONS_DIR, file), "utf8");
+    const body = source.match(new RegExp(`pub struct ${struct}<'info> \\{([\\s\\S]*?)\\n\\}`))[1];
+    const declaration = body.match(/([^\n]*\n[^\n]*)pub settlement_proof:/);
+    assert.ok(declaration, `${struct} has no settlement_proof field`);
+    assert.ok(
+      !/#\[account\(\s*mut/.test(declaration[1]),
+      `${struct}.settlement_proof is now mutable; the builders must follow`,
+    );
+  }
+});
+
+for (const [label, build] of [
+  [
+    "settle",
+    (settlementProof) =>
+      settleInstruction({
+        signerKey: creator,
+        agreement,
+        mint,
+        vault,
+        vaultAuthority,
+        sellerTokenAccount: otherAccount,
+        settlementProof,
+      }),
+  ],
+  [
+    "settle_milestone",
+    (settlementProof) =>
+      settleMilestoneInstruction({
+        signerKey: creator,
+        agreement,
+        milestone,
+        mint,
+        vault,
+        vaultAuthority,
+        sellerTokenAccount: otherAccount,
+        settlementProof,
+      }),
+  ],
+]) {
+  test(`${label}: an absent settlement proof is the program id, read-only`, () => {
+    const instruction = build(null);
+    const slot = instruction.keys.find((key) => key.pubkey.equals(ESCROW_PROGRAM_ID));
+    assert.ok(slot, "an absent optional account must be signalled by the program id");
+    assert.equal(slot.isWritable, false);
+    assert.equal(slot.isSigner, false);
+  });
+
+  test(`${label}: a cited settlement proof is passed read-only, as the struct declares`, () => {
+    const instruction = build(proof);
+    const slot = instruction.keys.find((key) => key.pubkey.equals(proof));
+    assert.ok(slot, "the cited proof must appear in the account list");
+    assert.equal(
+      slot.isWritable,
+      false,
+      "settlement_proof has no #[account(mut)]; a settlement cites evidence rather than modifying it",
+    );
+    assert.equal(slot.isSigner, false);
+  });
+
+  test(`${label}: citing a proof changes only that one slot`, () => {
+    const absent = build(null).keys;
+    const present = build(proof).keys;
+    assert.equal(absent.length, present.length);
+    const differing = absent
+      .map((key, index) => [index, key, present[index]])
+      .filter(([, a, b]) => !a.pubkey.equals(b.pubkey) || a.isWritable !== b.isWritable);
+    assert.equal(differing.length, 1, "only the optional slot may differ");
+    assert.ok(differing[0][1].pubkey.equals(ESCROW_PROGRAM_ID));
+    assert.ok(differing[0][2].pubkey.equals(proof));
+  });
+}

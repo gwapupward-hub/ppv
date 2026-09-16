@@ -179,9 +179,20 @@ function escrowIx(name, keys, data = Buffer.alloc(0), programId = ESCROW_PROGRAM
  * `Option<Account<'info, T>>` in Anchor 0.30 is signalled by passing the
  * *program's own id* in the account slot. Passing the system program, or
  * omitting the account, is a different thing and fails deserialization.
+ *
+ * Read-only either way. Anchor decides writability from the IDL, and it forces
+ * `isWritable = false` when an optional account is absent — but when it is
+ * *present* it uses whatever the struct declared, and `settlement_proof` is
+ * declared without `#[account(mut)]` in both `Settle` and `SettleMilestone`.
+ * A settlement cites evidence; it does not modify it.
+ *
+ * Marking it writable anyway would have been accepted by the runtime, which is
+ * what makes it worth stating: it would have diverged from the generated
+ * client without ever failing, and the divergence is the thing this file exists
+ * to avoid.
  */
 function optionalAccount(account, programId = ESCROW_PROGRAM_ID) {
-  return account ? rw(account) : ro(programId);
+  return ro(account ?? programId);
 }
 
 export function initializeAgreementInstruction({
