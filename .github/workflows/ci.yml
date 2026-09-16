@@ -32,6 +32,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history, because this is the job that runs the release suite,
+          # and part of that suite reads the repository's own past: the Escrow
+          # provenance tests `git show` the release commit 231dceb and the
+          # evidence-tooling commit 1b9d4c1 to prove the two really are
+          # different code. A shallow checkout has neither object, so those
+          # assertions fail on the runner while passing everywhere else — and
+          # the failure looks like a broken test rather than a missing clone.
+          #
+          # Reaching for a shallower clone here again is guarded by
+          # scripts/test/escrow-provenance-closeout-workflow.test.mjs, which
+          # asserts this property against whichever job runs the suite.
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22

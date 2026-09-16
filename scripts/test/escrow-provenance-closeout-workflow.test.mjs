@@ -353,6 +353,91 @@ test("the record path is the canonical one for this release", () => {
   assert.match(CODE, /node scripts\/verify-deployed-program\.mjs "\$\{RECORD_PATH\}"/);
 });
 
+/* ------------------------------------------ CI must be able to run this test */
+
+/**
+ * The test above reads the repository's own history, which is a dependency on
+ * how CI clones — a kind of dependency nothing normally states out loud.
+ *
+ * `actions/checkout` defaults to `fetch-depth: 1`. Under that default the
+ * commits this suite compares are simply absent, `git show` fails, and the
+ * failure presents as a broken provenance test rather than as a missing clone.
+ * That is the shape worth guarding: not the mistake, but the mistake's
+ * disguise.
+ *
+ * So the invariant is asserted structurally against whichever job actually
+ * runs the release suite, rather than against a remembered job name or line —
+ * if the suite moves to another job, the requirement moves with it.
+ */
+
+const CI_PATH = join(".github", "workflows", "ci.yml");
+const CI = readFileSync(join(REPO, CI_PATH), "utf8");
+
+/**
+ * The jobs in a workflow, as {name, body} pairs, split on indentation.
+ *
+ * A real YAML parse would be better, and the repository has no YAML parser —
+ * adding one so a test can read four lines of config would be a dependency the
+ * production code does not have. Indentation is enough here because the only
+ * question asked is which top-level job block a line falls inside.
+ */
+function jobsOf(workflow) {
+  const lines = workflow.split("\n");
+  const start = lines.findIndex((line) => /^jobs:\s*$/.test(line));
+  assert.notEqual(start, -1, "the workflow declares no jobs");
+
+  const jobs = [];
+  for (let i = start + 1; i < lines.length; i += 1) {
+    const header = lines[i].match(/^ {2}([\w-]+):\s*$/);
+    if (!header) continue;
+    let end = i + 1;
+    while (end < lines.length && !/^ {2}[\w-]+:\s*$/.test(lines[end])) end += 1;
+    jobs.push({ name: header[1], body: lines.slice(i, end).join("\n") });
+    i = end - 1;
+  }
+  return jobs;
+}
+
+/** Whether a job body runs this suite, by any of the routes that reach it. */
+const runsReleaseSuite = (body) =>
+  /^\s*-?\s*(run|- run):\s*npm test\s*$/m.test(body) ||
+  /npm run test:release/.test(body) ||
+  /node --test scripts\/test/.test(body);
+
+test("the job list is parsed, not guessed at", () => {
+  // If this stops finding jobs the assertions below would pass vacuously,
+  // which is the failure mode a structural test has and a grep does not.
+  const names = jobsOf(CI).map((job) => job.name);
+  assert.ok(names.length >= 3, `parsed only ${names.length} CI jobs: ${names.join(", ")}`);
+  assert.ok(names.includes("sdk"), `no sdk job among ${names.join(", ")}`);
+});
+
+test("every CI job that runs the release suite checks out full history", () => {
+  const running = jobsOf(CI).filter((job) => runsReleaseSuite(job.body));
+  assert.ok(
+    running.length > 0,
+    "no CI job runs the release suite; this test would otherwise pass vacuously",
+  );
+  for (const job of running) {
+    assert.match(
+      job.body,
+      /uses:\s*actions\/checkout@v\d+[\s\S]*?fetch-depth:\s*0/,
+      `CI job '${job.name}' runs the release suite without fetch-depth: 0, so the ` +
+        "provenance tests cannot read the commits they compare",
+    );
+  }
+});
+
+test("the commits the suite reads are the ones a shallow clone would lose", () => {
+  // Ties the CI requirement back to its cause: these are the objects the
+  // separation test resolves, and neither is the checked-out tip.
+  const source = readFileSync(join(REPO, "scripts", "test", "escrow-provenance-closeout-workflow.test.mjs"), "utf8");
+  assert.match(source, /git", \["show"/, "the suite no longer reads history; this guard is stale");
+  for (const sha of [DEPLOYED_SOURCE_SHA, EVIDENCE_TOOLING_SHA]) {
+    assert.ok(source.includes(sha), `${sha} is no longer read by this suite`);
+  }
+});
+
 /* ----------------------------------------------------------- documentation */
 
 test("the workflow documents why each guarantee holds", () => {
