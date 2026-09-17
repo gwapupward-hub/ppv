@@ -80,6 +80,22 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          # Full history, because the deterministic step below runs the release
+          # suite, and part of that suite reads the repository's own past: the
+          # Escrow provenance tests `git show` the release commit 231dceb and
+          # the evidence-tooling commit 1b9d4c1 to prove the two really are
+          # different code.
+          #
+          # Under `actions/checkout`'s default depth of 1 those objects are
+          # simply absent, and the failure presents as a broken provenance test
+          # rather than as a missing clone — which is exactly how run
+          # 35182967665 failed, before it had read a single account or sent a
+          # single transaction.
+          #
+          # Guarded by scripts/test/escrow-provenance-closeout-workflow.test.mjs,
+          # which now asserts this against every workflow that runs the suite
+          # rather than against ci.yml alone.
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:

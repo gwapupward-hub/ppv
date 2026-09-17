@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -448,4 +448,210 @@ test("the workflow documents why each guarantee holds", () => {
   assert.match(SOURCE, /signer-free/);
   assert.match(SOURCE, /UNKNOWN is failure/);
   assert.match(SOURCE, /built nothing that is deployed/);
+});
+
+/* ------------------- and so must every OTHER workflow that runs the suite */
+
+/**
+ * The same requirement, asserted against the whole workflow directory.
+ *
+ * The guard above scans `ci.yml`, and its own prose claimed the invariant held
+ * "against whichever job actually runs the release suite". Within that one file
+ * it did. Across the repository it did not, and the gap was not hypothetical:
+ * `devnet-escrow-custody-validation.yml` ran `npm run test:release` from a
+ * `fetch-depth: 1` checkout, and run 35182967665 failed on this very suite's
+ * separation test — `fatal: path 'scripts/collect-deployment-evidence.mjs'
+ * exists on disk, but not in '231dceb…'` — before it had read one account or
+ * sent one transaction.
+ *
+ * That is the failure mode worth guarding twice: not the missing clone, but its
+ * disguise as a broken provenance assertion. So the requirement now follows the
+ * suite wherever it is invoked, including from workflows that do not exist yet.
+ *
+ * The check is deliberately expressed as a function returning violations rather
+ * than as assertions inline, so the tamper cases below can run the *real* logic
+ * against mutated workflow text instead of testing a paraphrase of it.
+ */
+
+const WORKFLOW_DIR = join(REPO, ".github", "workflows");
+
+function workflowFiles() {
+  return readdirSync(WORKFLOW_DIR)
+    .filter((name) => name.endsWith(".yml") || name.endsWith(".yaml"))
+    .sort();
+}
+
+/**
+ * The steps of a job body, as text blocks.
+ *
+ * Same reasoning as `jobsOf`: indentation is enough, because the only question
+ * asked is which step block a line belongs to.
+ */
+function stepsOf(jobBody) {
+  const lines = jobBody.split("\n");
+  const steps = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!/^ {6}- /.test(lines[i])) continue;
+    let end = i + 1;
+    while (end < lines.length && !/^ {6}- /.test(lines[end]) && !/^ {0,4}\S/.test(lines[end])) {
+      end += 1;
+    }
+    steps.push(lines.slice(i, end).join("\n"));
+    i = end - 1;
+  }
+  return steps;
+}
+
+const isCheckout = (step) => /uses:\s*actions\/checkout@v\d+/.test(step);
+
+/**
+ * The `fetch-depth` a checkout step declares, or null when it declares none.
+ *
+ * Null matters as much as a number: `actions/checkout` defaults to depth 1, so
+ * an absent `fetch-depth` is a shallow checkout that merely does not say so.
+ */
+function declaredFetchDepth(step) {
+  const match = step.match(/^\s*fetch-depth:\s*(\S+)\s*$/m);
+  return match ? match[1] : null;
+}
+
+/**
+ * Every reason a workflow would lose the history the release suite reads.
+ *
+ * Returns human-readable strings; an empty array means the workflow is safe.
+ */
+function shallowHistoryViolations(source, label) {
+  const violations = [];
+  if (!/^jobs:\s*$/m.test(source)) return violations;
+
+  for (const job of jobsOf(source)) {
+    if (!runsReleaseSuite(job.body)) continue;
+
+    const checkouts = stepsOf(job.body).filter(isCheckout);
+    if (checkouts.length === 0) {
+      violations.push(`${label}: job '${job.name}' runs the release suite with no checkout step`);
+      continue;
+    }
+    // *Every* checkout, not merely one of them: a job that checks out shallow
+    // and then deep still ran the suite against whichever tree it built.
+    for (const checkout of checkouts) {
+      const depth = declaredFetchDepth(checkout);
+      if (depth === null) {
+        violations.push(
+          `${label}: job '${job.name}' runs the release suite but a checkout declares no ` +
+            "fetch-depth, and actions/checkout defaults to 1",
+        );
+      } else if (depth !== "0") {
+        violations.push(
+          `${label}: job '${job.name}' runs the release suite with fetch-depth: ${depth}; ` +
+            "the provenance tests cannot read the commits they compare",
+        );
+      }
+    }
+  }
+  return violations;
+}
+
+test("the workflow directory and its steps are parsed, not guessed at", () => {
+  // Without this the assertions below could pass by finding nothing.
+  const files = workflowFiles();
+  assert.ok(files.length >= 5, `parsed only ${files.length} workflow files`);
+  assert.ok(files.includes("ci.yml"));
+  assert.ok(files.includes("devnet-escrow-custody-validation.yml"));
+
+  const custody = readFileSync(join(WORKFLOW_DIR, "devnet-escrow-custody-validation.yml"), "utf8");
+  const [job] = jobsOf(custody);
+  const checkouts = stepsOf(job.body).filter(isCheckout);
+  assert.equal(checkouts.length, 1, "expected exactly one checkout in the custody job");
+  assert.equal(declaredFetchDepth(checkouts[0]), "0");
+});
+
+test("every workflow that runs the release suite checks out full history", () => {
+  const scanned = [];
+  const violations = [];
+  for (const name of workflowFiles()) {
+    const source = readFileSync(join(WORKFLOW_DIR, name), "utf8");
+    if (jobsOf(source).some((job) => runsReleaseSuite(job.body))) scanned.push(name);
+    violations.push(...shallowHistoryViolations(source, name));
+  }
+  assert.ok(
+    scanned.length >= 2,
+    `only ${scanned.length} workflow(s) run the release suite (${scanned.join(", ")}); ` +
+      "this test would otherwise pass vacuously",
+  );
+  assert.ok(
+    scanned.includes("devnet-escrow-custody-validation.yml"),
+    "the custody validation workflow is no longer scanned; it is the one that failed this way",
+  );
+  assert.deepEqual(violations, [], violations.join("\n"));
+});
+
+/* ----------------------------------------------- the guard must actually bite */
+
+const CUSTODY_WORKFLOW = readFileSync(
+  join(WORKFLOW_DIR, "devnet-escrow-custody-validation.yml"),
+  "utf8",
+);
+
+test("tamper: removing fetch-depth entirely is caught", () => {
+  const tampered = CUSTODY_WORKFLOW.replace(/^ +fetch-depth: 0\n/m, "");
+  assert.notEqual(tampered, CUSTODY_WORKFLOW, "the mutation did not apply");
+  const violations = shallowHistoryViolations(tampered, "tampered");
+  assert.ok(
+    violations.some((v) => /declares no fetch-depth/.test(v)),
+    `expected an absent-depth violation, got ${JSON.stringify(violations)}`,
+  );
+});
+
+test("tamper: fetch-depth: 1 is caught", () => {
+  const tampered = CUSTODY_WORKFLOW.replace(/fetch-depth: 0/, "fetch-depth: 1");
+  assert.notEqual(tampered, CUSTODY_WORKFLOW, "the mutation did not apply");
+  const violations = shallowHistoryViolations(tampered, "tampered");
+  assert.ok(
+    violations.some((v) => /fetch-depth: 1/.test(v)),
+    `expected a shallow-depth violation, got ${JSON.stringify(violations)}`,
+  );
+});
+
+test("tamper: any other shallow depth is caught, not just 1", () => {
+  // The equivalent-configuration case: a bounded depth is still a depth that
+  // can miss the commits, and "it is not 1" is not a defence.
+  for (const depth of ["2", "50", "1000"]) {
+    const tampered = CUSTODY_WORKFLOW.replace(/fetch-depth: 0/, `fetch-depth: ${depth}`);
+    const violations = shallowHistoryViolations(tampered, "tampered");
+    assert.ok(
+      violations.some((v) => v.includes(`fetch-depth: ${depth}`)),
+      `depth ${depth} was accepted`,
+    );
+  }
+});
+
+test("tamper: a second, shallow checkout in the same job is caught", () => {
+  // A job that checks out deep and then shallow has still run the suite
+  // against whichever tree it ended up with.
+  const tampered = CUSTODY_WORKFLOW.replace(
+    /^( +)fetch-depth: 0\n/m,
+    "$1fetch-depth: 0\n\n      - uses: actions/checkout@v4\n        with:\n          fetch-depth: 1\n",
+  );
+  assert.notEqual(tampered, CUSTODY_WORKFLOW, "the mutation did not apply");
+  const violations = shallowHistoryViolations(tampered, "tampered");
+  assert.ok(
+    violations.some((v) => /fetch-depth: 1/.test(v)),
+    `expected the added shallow checkout to be caught, got ${JSON.stringify(violations)}`,
+  );
+});
+
+test("tamper: dropping the checkout altogether is caught", () => {
+  const tampered = CUSTODY_WORKFLOW.replace(
+    /^ {6}- uses: actions\/checkout@v4\n(?: {8}.*\n| *\n)*/m,
+    "",
+  );
+  assert.notEqual(tampered, CUSTODY_WORKFLOW, "the mutation did not apply");
+  assert.ok(
+    shallowHistoryViolations(tampered, "tampered").some((v) => /no checkout step/.test(v)),
+  );
+});
+
+test("the unmodified custody workflow is clean, so the tampers mean something", () => {
+  assert.deepEqual(shallowHistoryViolations(CUSTODY_WORKFLOW, "custody"), []);
 });
