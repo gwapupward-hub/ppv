@@ -769,3 +769,104 @@ test("the harness names no mainnet endpoint anywhere", () => {
     );
   }
 });
+
+/* --------------------------------------------------------- the funding budget */
+
+import {
+  LAMPORTS_PER_SOL,
+  MINIMUM_FUNDER_LAMPORTS,
+  WALLET_FUNDING_LAMPORTS,
+  checkFunder,
+} from "../devnet-escrow-custody.mjs";
+
+/**
+ * What each disposable wallet needs, computed rather than guessed.
+ *
+ * The buyer creates every agreement, and a creator pays rent for every account
+ * its instructions open. The original 0.05 SOL was *less* than that sum, so the
+ * run would have reached roughly the bounty scenario and then failed on an
+ * account it could not pay rent for — possibly between a `fund` and its
+ * settlement, leaving tokens in a vault.
+ *
+ * The numbers below are Solana's rent-exemption formula, (128 + size) × 3480 ×
+ * 2, applied to the account sizes this program actually declares. They are
+ * asserted rather than commented so that adding a scenario, or growing an
+ * account, fails here instead of halfway through an authorized run.
+ */
+const RENT = (size) => (128 + size) * 3480 * 2;
+
+const AGREEMENT_ACCOUNT_SIZE = 362; // 8 discriminator + EscrowAgreement::INIT_SPACE
+const TOKEN_ACCOUNT_SIZE = 165;
+const MILESTONE_ACCOUNT_SIZE = 183;
+
+/** Every agreement the run opens; the buyer is the creator of all of them. */
+const AGREEMENTS = 10;
+const VAULTS = AGREEMENTS; // one token vault per agreement, paid by the creator
+const MILESTONES = 3; // two in the milestone scenario, one for the foreign PDA
+
+test("the run's agreement count matches what the scenarios actually open", () => {
+  const source = readFileSync(join(REPO, "scripts", "devnet-escrow-custody.mjs"), "utf8");
+  const opened = [...source.matchAll(/await openAgreement\(ctx, \{/g)].length;
+  // Two of the call sites are the dispute scenario, which runs twice with a
+  // different conceder, so the static count is one below the runtime count.
+  assert.equal(
+    opened + 1,
+    AGREEMENTS,
+    `openAgreement appears ${opened} times; the budget below assumes ${AGREEMENTS} agreements`,
+  );
+});
+
+test("the buyer's funding covers the rent it is required to pay", () => {
+  const required =
+    AGREEMENTS * RENT(AGREEMENT_ACCOUNT_SIZE) +
+    VAULTS * RENT(TOKEN_ACCOUNT_SIZE) +
+    MILESTONES * RENT(MILESTONE_ACCOUNT_SIZE) +
+    30 * 5_000; // transaction fees as the creator
+
+  assert.ok(
+    WALLET_FUNDING_LAMPORTS > required,
+    `each wallet gets ${WALLET_FUNDING_LAMPORTS / LAMPORTS_PER_SOL} SOL but the buyer must pay ` +
+      `${required / LAMPORTS_PER_SOL} SOL in rent and fees`,
+  );
+  // And the old value really was short, which is why this test exists.
+  assert.ok(
+    0.05 * LAMPORTS_PER_SOL < required,
+    "0.05 SOL should be demonstrably insufficient; if it is not, this budget is wrong",
+  );
+});
+
+test("the funder floor covers every wallet plus the funder's own outlay", () => {
+  const wallets = 3 * WALLET_FUNDING_LAMPORTS;
+  const funderOutlay = 2 * RENT(82) + 5 * RENT(TOKEN_ACCOUNT_SIZE) + 20 * 5_000;
+  assert.ok(
+    MINIMUM_FUNDER_LAMPORTS >= wallets + funderOutlay,
+    `the floor is ${MINIMUM_FUNDER_LAMPORTS / LAMPORTS_PER_SOL} SOL but the run spends at least ` +
+      `${(wallets + funderOutlay) / LAMPORTS_PER_SOL} SOL`,
+  );
+  // Not wildly more than needed either: asking for SOL the run cannot spend is
+  // its own kind of sloppiness.
+  assert.ok(MINIMUM_FUNDER_LAMPORTS <= 2 * (wallets + funderOutlay));
+});
+
+test("a funder below the floor is refused before anything is created", async () => {
+  const funder = Keypair.generate();
+  const thin = { getBalance: async () => MINIMUM_FUNDER_LAMPORTS - 1 };
+  await assert.rejects(
+    checkFunder(thin, funder.publicKey),
+    (error) =>
+      error instanceof CustodyHarnessFailure &&
+      /needs at least 1 SOL/.test(error.message) &&
+      error.message.includes(funder.publicKey.toBase58()),
+  );
+});
+
+test("a sufficient funder reports its public address and balance only", async () => {
+  const funder = Keypair.generate();
+  const fat = { getBalance: async () => 5 * LAMPORTS_PER_SOL };
+  const state = await checkFunder(fat, funder.publicKey);
+  assert.deepEqual(Object.keys(state).sort(), ["address", "lamports", "sol"]);
+  assert.equal(state.address, funder.publicKey.toBase58());
+  assert.equal(state.sol, 5);
+  // Whatever it returns goes into evidence, so it must survive the scrubber.
+  assert.deepEqual(assertNoSecrets(state), state);
+});

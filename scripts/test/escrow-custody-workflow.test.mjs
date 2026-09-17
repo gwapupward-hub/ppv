@@ -314,3 +314,66 @@ test("RR-7's closure is scoped, not blanket", () => {
   assert.match(rr7, /B6tcsTrMCKTZV5vi3rRCnA3FMPeeWACSHuuTSz5XQgnX/);
   assert.match(rr7, /What this does not close/);
 });
+
+/* ------------------------------------------------------- the funder preflight */
+
+/**
+ * The funder is checked before the matrix starts, not discovered mid-run.
+ *
+ * Two failures are cheap at the start and expensive late. A missing secret
+ * costs nothing if it stops the job before anything exists. A funder too thin
+ * for the full matrix, if it is only discovered partway through, can stop the
+ * run between a `fund` and its settlement — which leaves tokens in a vault,
+ * violates the accounting rule that every test vault ends at zero, and burns an
+ * authorization that has to be granted again before another run.
+ */
+test("the funder is checked before the live run, not during it", () => {
+  const preflight = CODE.indexOf("- name: Funder preflight");
+  const liveRun = CODE.indexOf("- name: Live custody run");
+  assert.ok(preflight > -1, "there is no funder preflight step");
+  assert.ok(liveRun > -1, "there is no live custody run step");
+  assert.ok(preflight < liveRun, "the funder preflight must come first");
+});
+
+test("a missing funder secret stops the job before anything is created", () => {
+  assert.match(CODE, /if \[ -z "\$\{PPV_CUSTODY_FUNDER_SECRET:-\}" \]; then/);
+  assert.match(CODE, /PPV_CUSTODY_FUNDER_KEYPAIR is not configured/);
+});
+
+test("the funder preflight enforces a balance floor", () => {
+  assert.match(CODE, /getBalance/);
+  assert.match(CODE, /lamports < 1e9/, "the floor must be asserted, not merely reported");
+  assert.match(CODE, /needs at least 1 SOL/);
+});
+
+test("the funder preflight prints the public address and nothing else about it", () => {
+  assert.match(CODE, /funder public address: \$\{funder\.publicKey\.toBase58\(\)\}/);
+  assert.match(CODE, /funder devnet balance/);
+  // The secret must never reach a log, directly or through an error object
+  // carrying the input it failed to parse.
+  assert.ok(!/console\.log\([^)]*secretKey/.test(CODE));
+  assert.ok(!/console\.error\("::error::funder preflight failed:", error\)/.test(CODE));
+  assert.match(CODE, /error\?\.message \?\? "unknown error"/);
+});
+
+test("the live run step no longer carries the secret in its environment", () => {
+  // It reads the file the preflight wrote. Narrowing the env is free and means
+  // one fewer step in which the value could be echoed by a future edit.
+  const liveRun = CODE.slice(
+    CODE.indexOf("- name: Live custody run"),
+    CODE.indexOf("- name: Remove the funder keypair"),
+  );
+  assert.ok(liveRun.length > 0);
+  assert.ok(
+    !liveRun.includes("PPV_CUSTODY_FUNDER_SECRET"),
+    "the live run step must not take the secret; it takes the path",
+  );
+  assert.match(liveRun, /PPV_CUSTODY_FUNDER: \$\{\{ runner\.temp \}\}\/custody-funder\.json/);
+});
+
+test("the keypair file is still removed whatever happens", () => {
+  const remove = CODE.indexOf("- name: Remove the funder keypair");
+  const preflight = CODE.indexOf("- name: Funder preflight");
+  assert.ok(remove > preflight, "cleanup must follow the step that writes the file");
+  assert.match(CODE, /- name: Remove the funder keypair\n\s+if: always\(\)\n\s+run: rm -f/);
+});

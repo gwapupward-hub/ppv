@@ -164,6 +164,66 @@ const log = (line = "") => process.stdout.write(`${line}\n`);
 const step = (ok, name, detail = "") =>
   log(`  ${ok ? "ok  " : "FAIL"}  ${name}${detail ? ` — ${detail}` : ""}`);
 
+export const LAMPORTS_PER_SOL = 1_000_000_000;
+
+/**
+ * What each disposable wallet is given, and why it is not smaller.
+ *
+ * The buyer is the creator of every agreement, and a creator pays rent for
+ * every account its instructions open. Over the full matrix that is:
+ *
+ *   10 agreements       × 0.003410 SOL = 0.03410   (EscrowAgreement, 362 bytes)
+ *   10 vault token accts × 0.002039 SOL = 0.02039   (SPL token account, 165 bytes)
+ *    3 milestones        × 0.002165 SOL = 0.00649   (Milestone, 183 bytes)
+ *   ~30 transaction fees                 = 0.00015
+ *                                        ----------
+ *                                          0.06113 SOL
+ *
+ * The first version of this file funded each wallet with 0.05 SOL, which is
+ * less than that. The run would have reached roughly the bounty scenario and
+ * then failed on an account it could not pay rent for — after several vaults
+ * had already been funded and emptied, and with a real chance of dying between
+ * a `fund` and its settlement, which is precisely the stranded-custody outcome
+ * the accounting rules exist to prevent.
+ *
+ * 0.25 SOL is four times the computed need. Devnet SOL is free and meaningless,
+ * so the margin costs nothing; running out mid-matrix costs an entire authorized
+ * execution.
+ */
+export const WALLET_FUNDING_LAMPORTS = 0.25 * LAMPORTS_PER_SOL;
+
+/**
+ * The floor the funder must clear before the harness will move value.
+ *
+ * Three wallets at 0.25, plus the funder's own outlay — two mints, five
+ * associated token accounts, and the fees for creating them — is roughly
+ * 0.77 SOL. One SOL is the smallest round number above that with margin, and
+ * asking for more than the run can spend would be its own kind of sloppiness.
+ */
+export const MINIMUM_FUNDER_LAMPORTS = 1 * LAMPORTS_PER_SOL;
+
+/**
+ * The funder, checked before anything is created.
+ *
+ * Reports the funder's PUBLIC address and balance — never anything else about
+ * it — and refuses to continue below the floor. A run that discovers it is out
+ * of SOL halfway through the matrix has spent an authorization it cannot get
+ * back, and may leave a vault holding tokens; this is the check that makes that
+ * a refusal at the start instead.
+ */
+export async function checkFunder(connection, funderPublicKey, { minimum = MINIMUM_FUNDER_LAMPORTS } = {}) {
+  const lamports = await connection.getBalance(funderPublicKey, "confirmed");
+  const sol = lamports / LAMPORTS_PER_SOL;
+  if (lamports < minimum) {
+    throw new CustodyHarnessFailure(
+      `the funder ${funderPublicKey.toBase58()} holds ${sol} SOL; the full scenario matrix needs ` +
+        `at least ${minimum / LAMPORTS_PER_SOL} SOL. Top it up from the devnet faucet rather than ` +
+        "starting a run that cannot finish.",
+    );
+  }
+  return { address: funderPublicKey.toBase58(), lamports, sol };
+}
+
 /** A unique, meaningless 32-byte hash per run, so nothing collides across runs. */
 function runHash(runId, label) {
   return createHash("sha256").update(`ppv:custody-validation:${runId}:${label}`).digest();
@@ -355,8 +415,12 @@ export async function setup(ctx, { supply = 10_000n } = {}) {
     ["seller", ctx.seller],
     ["outsider", ctx.outsider],
   ]) {
-    await fundLamports(ctx, wallet.publicKey, 0.05 * 1e9);
-    step(true, `disposable ${name} wallet`, wallet.publicKey.toBase58());
+    await fundLamports(ctx, wallet.publicKey, WALLET_FUNDING_LAMPORTS);
+    step(
+      true,
+      `disposable ${name} wallet`,
+      `${wallet.publicKey.toBase58()} (${WALLET_FUNDING_LAMPORTS / LAMPORTS_PER_SOL} SOL)`,
+    );
   }
 
   // Classic SPL Token only. Token-2022 is out of scope for this program: it
@@ -2208,6 +2272,8 @@ export function buildEvidence(ctx, { preflightFacts, reconstruction, commit }) {
       mintDecimals: 0,
       secondaryMint: ctx.otherMint?.toBase58() ?? null,
       mintedSupply: ctx.supply?.toString() ?? null,
+      funder: ctx.funderPublicKey ?? null,
+      funderStartingLamports: ctx.funderStartingLamports ?? null,
       wallets: {
         buyer: ctx.buyer?.publicKey.toBase58() ?? null,
         seller: ctx.seller?.publicKey.toBase58() ?? null,
@@ -2283,6 +2349,12 @@ export async function run({ endpoint, funderPath, outPath, commit }) {
     Uint8Array.from(JSON.parse(readFileSync(funderPath, "utf8"))),
   );
   const ctx = createContext({ endpoint, connection, client, funder });
+
+  const funderState = await checkFunder(connection, funder.publicKey);
+  log("\nFunder");
+  step(true, "disposable devnet funder", `${funderState.address} holds ${funderState.sol} SOL`);
+  ctx.funderPublicKey = funderState.address;
+  ctx.funderStartingLamports = funderState.lamports;
 
   await setup(ctx);
 
