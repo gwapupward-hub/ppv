@@ -120,12 +120,53 @@ describe("PPV protocol invariants (property-based)", function () {
             reporter: (out) => {
               if (!out.failed) return;
               const cause: unknown = (out as { errorInstance?: unknown }).errorInstance;
-              const detail =
-                cause instanceof InvariantViolation ? cause.message : String(out.error ?? cause);
+              const violation = cause instanceof InvariantViolation ? cause : null;
+              const detail = violation ? violation.message : String(out.error ?? cause);
               const scenario = out.counterexample?.[0] as
                 | { flavour: string; actions: GeneratedAction[] }
                 | undefined;
               const minimized = scenario?.actions ?? [];
+
+              // A failure that is not an invariant violation must not be
+              // reported as one.
+              //
+              // fast-check hands this reporter whatever ended the run, and it
+              // used to be headed "PPV protocol invariant violated" regardless.
+              // So a `SendTransactionError: Blockhash not found` with an empty
+              // log array — a transaction the validator never even simulated —
+              // was published as a custody finding, and the mutation harness
+              // above had no way to tell the machine failing from the protocol
+              // failing. That is what happened in run 35184864950.
+              //
+              // The typed error is the reliable signal: an invariant assertion
+              // throws `InvariantViolation` and nothing else does. Everything
+              // else is labelled as unclassified here and classified by
+              // `scripts/lib/property-failure.mjs`, which decides — failing
+              // closed — whether it is infrastructure. This file deliberately
+              // knows no infrastructure patterns: it reports what it can prove.
+              if (!violation) {
+                throw new Error(
+                  [
+                    "",
+                    // Duplicated as NON_INVARIANT_MARKER in
+                    // scripts/lib/property-failure.mjs; the two are asserted
+                    // equal in scripts/test/property-failure.test.mjs.
+                    "PPV PROPERTY SUITE FAILED WITHOUT AN INVARIANT VIOLATION.",
+                    "  No invariant assertion fired. This is not, on its own, a custody",
+                    "  finding — classify it before treating it as one.",
+                    `  seed            : ${seed}`,
+                    `  shrink path     : ${out.counterexamplePath}`,
+                    `  replay          : PPV_INVARIANT_SEED=${seed} PPV_INVARIANT_PATH=${out.counterexamplePath} npm run test:invariants:seed`,
+                    `  runs executed   : ${out.numRuns}`,
+                    `  shrinks applied : ${out.numShrinks}`,
+                    `  agreement type  : ${scenario?.flavour ?? "unknown"}`,
+                    `  minimized to    : ${minimized.length} action(s)`,
+                    ...minimized.map((action, index) => `    [${index}] ${describeAction(action)}`),
+                    detail,
+                  ].join("\n"),
+                );
+              }
+
               throw new Error(
                 [
                   "",

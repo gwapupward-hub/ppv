@@ -346,14 +346,56 @@ fi
 
 # The suite must be green on the restored source, or "it detected the mutation"
 # could just mean "it fails on everything".
+#
+# Note what has already happened by the time control reaches here: every
+# requested mutation was applied, built and detected. An undetected one exits
+# above, so a clean rerun can never stand in for a mutation the suite missed.
+#
+# One retry is allowed, and only for a positively identified infrastructure
+# failure. `scripts/lib/property-failure.mjs` is the only thing that decides,
+# it fails closed, and an invariant violation or a program error is never
+# retryable however many times the validator also misbehaved. The retry exists
+# because run 35184864950 spent forty minutes detecting all four mutations and
+# was then thrown away by a validator that stopped serving blockhashes — a
+# machine failure charged to the protocol.
+clean_attempt() {
+  local log="$1"
+  anchor build >/dev/null 2>&1
+  run_property_suite "${log}"
+}
+
 echo "  clean rerun (no mutation)"
-anchor build >/dev/null 2>&1
-if ! run_property_suite "${workdir}/run-clean.log"; then
-  echo "CLEAN PROPERTY SUITE FAILED after reverting every mutation" >&2
-  tail -n 40 "${workdir}/run-clean.log" >&2
-  exit 1
+if ! clean_attempt "${workdir}/run-clean.log"; then
+  verdict="$(node scripts/lib/property-failure.mjs "${workdir}/run-clean.log")"
+  kind="${verdict%%:*}"
+  reason="${verdict#*:}"
+
+  if [[ "${kind}" != "infrastructure" ]]; then
+    echo "CLEAN PROPERTY SUITE FAILED after reverting every mutation" >&2
+    echo "  classification : ${kind} (${reason}) — not retried" >&2
+    tail -n 40 "${workdir}/run-clean.log" >&2
+    exit 1
+  fi
+
+  echo "                             infrastructure failure (${reason}); one retry" >&2
+  # Explicitly, rather than relying on the previous attempt's teardown: stop
+  # anything still serving, destroy the ledger, and let start_validator build a
+  # fresh one and re-airdrop the provider.
+  stop_validator || true
+  rm -rf "${workdir}/ledger"
+
+  if ! clean_attempt "${workdir}/run-clean-retry.log"; then
+    retry_verdict="$(node scripts/lib/property-failure.mjs "${workdir}/run-clean-retry.log")"
+    echo "CLEAN PROPERTY SUITE FAILED after reverting every mutation" >&2
+    echo "  first attempt  : infrastructure (${reason})" >&2
+    echo "  retry          : ${retry_verdict} — one retry is the limit" >&2
+    tail -n 40 "${workdir}/run-clean-retry.log" >&2
+    exit 1
+  fi
+  echo "                             green on retry after ${reason}"
+else
+  echo "                             green"
 fi
-echo "                             green"
 
 echo
 cat "${report}"

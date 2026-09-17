@@ -71,6 +71,17 @@ jobs:
         with:
           # The job reads, and pushes nothing.
           persist-credentials: false
+          # Full history. This job runs suite tests from scripts/test/, and that
+          # directory contains assertions which read the repository's own past
+          # by `git show`-ing pinned commits. The list below happens not to
+          # include one today, which is a fact about today's list rather than a
+          # property of the job — widen the list, or add such an assertion to a
+          # file already on it, and a default-depth checkout would fail as a
+          # broken test rather than as a missing clone.
+          #
+          # This is the same defect that failed custody run 35182967665, found
+          # here by the guard added for it rather than by a second outage.
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
