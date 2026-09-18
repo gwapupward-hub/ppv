@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -13,30 +13,24 @@ import { REPO } from "./helpers.mjs";
 /**
  * The funder preflight, executed rather than grepped.
  *
- * It lives inline in the custody workflow as a `node -e` script, which is the
- * right place for it — it needs the secret, and the secret must not travel any
- * further than the step that uses it. But an inline workflow script is code
- * that only ever runs on a runner, in the one job nobody wants to debug by
- * re-running: the live custody execution is authorized one run at a time.
+ * This is the step nobody wants to debug by re-running: the live custody
+ * execution is authorized one run at a time, and this step is where the one PPV
+ * secret the workflow takes is handled. It used to live inline in the YAML as a
+ * `node -e` script, which its test had to regex-dedent back out before it could
+ * run anything. It is a file now, and this suite runs that file — against a
+ * local stub that answers `getBalance`.
  *
- * So the script is extracted from the YAML and actually run here, against a
- * local stub that answers `getBalance`. A syntax error, a wrong comparison, or
- * a secret reaching stdout fails on a pull request instead of burning an
- * authorized run.
+ * A syntax error, a wrong comparison, or a secret reaching a log fails on a
+ * pull request instead of burning an authorized run.
+ *
+ * The leak this suite exists for: in run 35393227976 the preflight printed
+ * `JSON.parse`'s error message, and that message quotes the first ten
+ * characters of whatever it rejected. So the assertions are not "malformed
+ * input fails" — they are "when malformed input fails, no run of four or more
+ * of its characters appears in stdout or stderr".
  */
 
-const WORKFLOW = join(REPO, ".github", "workflows", "devnet-escrow-custody-validation.yml");
-
-/** The inline script, dedented out of the YAML block that carries it. */
-function extractPreflightScript() {
-  const yaml = readFileSync(WORKFLOW, "utf8");
-  const match = yaml.match(/node -e '\n([\s\S]*?)\n {10}'\n/);
-  assert.ok(match, "the funder preflight's inline node script was not found in the workflow");
-  return match[1]
-    .split("\n")
-    .map((line) => (line.startsWith(" ".repeat(12)) ? line.slice(12) : line))
-    .join("\n");
-}
+const PREFLIGHT = join(REPO, "scripts", "funder-preflight.mjs");
 
 /** A stub that answers getBalance with a fixed lamport count. */
 async function stubRpc(lamports) {
@@ -68,27 +62,25 @@ async function stubRpc(lamports) {
 }
 
 /**
- * Runs the extracted script exactly as the workflow does: `node -e` from the
- * repository root.
+ * Runs the preflight exactly as the workflow does: `node scripts/funder-preflight.mjs`
+ * from the repository root.
  *
- * Three details, each of which cost a debugging round:
+ * Two details, each of which cost a debugging round when this suite ran the
+ * inline form:
  *
- *   * `node -e` is the form the workflow uses, and the repository root is where
- *     its `require` calls resolve from. Running the same text as a file in a
- *     temp directory cannot find `@solana/web3.js` and tests nothing.
  *   * `spawn`, never `spawnSync`. `spawnSync` blocks this process's event loop,
- *     so the stub server below never gets to answer the request the child is
- *     waiting on, and the child appears to hang — a false failure that looks
- *     exactly like a real one. `scripts/test/helpers.mjs` records the same trap.
+ *     so the stub server never gets to answer the request the child is waiting
+ *     on, and the child appears to hang — a false failure that looks exactly
+ *     like a real one. `scripts/test/helpers.mjs` records the same trap.
  *   * stdout and stderr are collected as they arrive rather than after exit, so
  *     a child that does hang still reports what it managed to print.
  *
- * The keypair is generated per fixture and thrown away with the temp directory.
- * It is never a real funder.
+ * Keypairs are generated per fixture and thrown away with the temp directory.
+ * None is ever a real funder.
  */
-function runPreflight({ script, keypairPath, rpcUrl, timeoutMs = 30_000 }) {
+function runPreflight({ keypairPath, rpcUrl, timeoutMs = 30_000 }) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ["-e", script], {
+    const child = spawn(process.execPath, [PREFLIGHT], {
       cwd: REPO,
       env: {
         ...process.env,
@@ -121,26 +113,55 @@ function runPreflight({ script, keypairPath, rpcUrl, timeoutMs = 30_000 }) {
 
 function fixture() {
   const dir = mkdtempSync(join(tmpdir(), "ppv-funder-preflight-"));
-  const script = extractPreflightScript();
   const keypair = Keypair.generate();
   const keypairPath = join(dir, "funder.json");
   writeFileSync(keypairPath, JSON.stringify(Array.from(keypair.secretKey)));
-  return { dir, script, keypair, keypairPath };
+  return { dir, keypair, keypairPath };
 }
 
-test("the inline script parses as CommonJS, which is what `node -e` runs", () => {
-  const { dir, script } = fixture();
-  const path = join(dir, "syntax-check.cjs");
-  writeFileSync(path, script);
-  const result = spawnSync(process.execPath, ["--check", path], { encoding: "utf8" });
-  assert.equal(result.status, 0, result.stderr);
+/** The shortest run of input characters we treat as a leak. */
+const LEAK_WINDOW = 4;
+
+function noFragmentLeaked(output, input, context) {
+  for (let i = 0; i + LEAK_WINDOW <= input.length; i += 1) {
+    const window = input.slice(i, i + LEAK_WINDOW);
+    assert.ok(
+      !output.includes(window),
+      `${context}: the fragment ${JSON.stringify(window)} from the supplied secret reached the log`,
+    );
+  }
+}
+
+/**
+ * The shapes a mis-set `PPV_CUSTODY_FUNDER_KEYPAIR` actually takes.
+ *
+ * Fixed strings rather than generated ones, so `noFragmentLeaked` is
+ * deterministic: a random base58 blob could, once in a great while, share a
+ * four-character run with the constant error message and fail for a reason
+ * that has nothing to do with the code.
+ */
+const MALFORMED = Object.freeze({
+  "a base58-looking private key string": "gWapUpwardFixtureNotAKeyJustNoiseWithTheBase58Shape",
+  // Leading digit, which `JSON.parse` starts to read as a number before it
+  // gives up — a different rejection path through the same function.
+  "a base58 string that starts with a digit": "3zzPPVnotARealKeyJustBase58AlphabetNoiseForThisTest1",
+  "malformed JSON": "[12, 34, 56",
+  "a JSON object instead of an array": '{"secretKey":[1,2,3],"publicKey":"9xQeWvG8"}',
+  "an out-of-range byte": JSON.stringify([...Array(63).fill(7), 256]),
+  "a truncated array": JSON.stringify(Array(32).fill(7)),
 });
 
+/** The constant the preflight is allowed to print, and the only one. */
+const FORMAT_ERROR =
+  "::error::PPV_CUSTODY_FUNDER_KEYPAIR has invalid format; expected a Solana keypair JSON byte array";
+
+/* ------------------------------------------------------------ the happy path */
+
 test("a funder above the floor passes and reports its public address", async () => {
-  const { script, keypair, keypairPath } = fixture();
+  const { keypair, keypairPath } = fixture();
   const rpc = await stubRpc(1_500_000_000);
   try {
-    const result = await runPreflight({ script, keypairPath, rpcUrl: rpc.url });
+    const result = await runPreflight({ keypairPath, rpcUrl: rpc.url });
     assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
     assert.match(result.stdout, new RegExp(`funder public address: ${keypair.publicKey.toBase58()}`));
     assert.match(result.stdout, /funder devnet balance: 1\.5 SOL/);
@@ -150,10 +171,10 @@ test("a funder above the floor passes and reports its public address", async () 
 });
 
 test("a funder below the floor fails, naming the shortfall", async () => {
-  const { script, keypairPath } = fixture();
+  const { keypairPath } = fixture();
   const rpc = await stubRpc(500_000_000);
   try {
-    const result = await runPreflight({ script, keypairPath, rpcUrl: rpc.url });
+    const result = await runPreflight({ keypairPath, rpcUrl: rpc.url });
     assert.equal(result.status, 1, "an underfunded funder must stop the job");
     assert.match(result.stderr, /funder holds 0\.5 SOL; the full scenario matrix needs at least 1 SOL/);
   } finally {
@@ -162,14 +183,14 @@ test("a funder below the floor fails, naming the shortfall", async () => {
 });
 
 test("exactly the floor is accepted; one lamport under is not", async () => {
-  const { script, keypairPath } = fixture();
+  const { keypairPath } = fixture();
   for (const [lamports, expected] of [
     [1_000_000_000, 0],
     [999_999_999, 1],
   ]) {
     const rpc = await stubRpc(lamports);
     try {
-      const result = await runPreflight({ script, keypairPath, rpcUrl: rpc.url });
+      const result = await runPreflight({ keypairPath, rpcUrl: rpc.url });
       assert.equal(result.status, expected, `${lamports} lamports: ${result.stdout}${result.stderr}`);
     } finally {
       rpc.close();
@@ -177,8 +198,8 @@ test("exactly the floor is accepted; one lamport under is not", async () => {
   }
 });
 
-test("no part of the keypair reaches stdout or stderr, on success or failure", async () => {
-  const { script, keypair, keypairPath } = fixture();
+test("no part of a valid keypair reaches stdout or stderr, on success or failure", async () => {
+  const { keypair, keypairPath } = fixture();
   const secretBytes = Array.from(keypair.secretKey);
   const asJson = JSON.stringify(secretBytes);
   const fileContents = readFileSync(keypairPath, "utf8");
@@ -186,7 +207,7 @@ test("no part of the keypair reaches stdout or stderr, on success or failure", a
   for (const lamports of [1_500_000_000, 500_000_000]) {
     const rpc = await stubRpc(lamports);
     try {
-      const result = await runPreflight({ script, keypairPath, rpcUrl: rpc.url });
+      const result = await runPreflight({ keypairPath, rpcUrl: rpc.url });
       const output = `${result.stdout}\n${result.stderr}`;
       assert.ok(!output.includes(asJson), "the secret key array reached the log");
       assert.ok(!output.includes(fileContents.slice(0, 40)), "the keypair file's contents reached the log");
@@ -198,23 +219,106 @@ test("no part of the keypair reaches stdout or stderr, on success or failure", a
   }
 });
 
-test("a malformed keypair file fails without echoing what it tried to parse", async () => {
-  // The specific hazard: `JSON.parse` throws an error whose message can quote
-  // the input. Printing the caught error object would put a secret in a log the
-  // moment the file was subtly wrong.
-  const { script, dir } = fixture();
+/* ------------------------------------------------- malformed secrets, in the log */
+
+for (const [description, supplied] of Object.entries(MALFORMED)) {
+  test(`${description} fails with the constant message and no fragment of itself`, async () => {
+    const { dir } = fixture();
+    const badPath = join(dir, "bad.json");
+    writeFileSync(badPath, supplied);
+    const rpc = await stubRpc(1_500_000_000);
+    try {
+      const result = await runPreflight({ keypairPath: badPath, rpcUrl: rpc.url });
+      assert.equal(result.status, 1, `${description} did not stop the job`);
+
+      const output = `${result.stdout}\n${result.stderr}`;
+      assert.ok(output.includes(FORMAT_ERROR), `${description}: the constant message was not printed`);
+      noFragmentLeaked(output, supplied, description);
+
+      // Nothing about the funder can have been printed either: the key was
+      // never loaded, so there is no public address to report.
+      assert.ok(!output.includes("funder public address"), `${description}: reported an address anyway`);
+    } finally {
+      rpc.close();
+    }
+  });
+}
+
+test("the balance is never fetched for a secret that failed validation", async () => {
+  // A request to the RPC would mean the preflight got as far as constructing a
+  // Keypair from bytes it had not accepted.
+  const { dir } = fixture();
   const badPath = join(dir, "bad.json");
-  const notSecret = "NOT-A-REAL-KEY-BUT-TREAT-IT-AS-ONE";
-  writeFileSync(badPath, notSecret);
+  writeFileSync(badPath, "[12, 34, 56");
+
+  let requests = 0;
+  const server = createServer((_req, res) => {
+    requests += 1;
+    res.end("{}");
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const result = await runPreflight({
+      keypairPath: badPath,
+      rpcUrl: `http://127.0.0.1:${server.address().port}`,
+    });
+    assert.equal(result.status, 1);
+    assert.equal(requests, 0, "the preflight talked to the RPC with an unvalidated secret");
+  } finally {
+    server.closeAllConnections();
+    server.close();
+  }
+});
+
+/**
+ * The exact regression from run 35393227976.
+ *
+ * `JSON.parse` quotes the first ten characters of its input, the old preflight
+ * printed that message, and so ten characters of the supplied secret reached a
+ * permanent Actions log.
+ */
+test("the ten-character JSON.parse fragment no longer reaches the log", async () => {
+  const supplied = "NOT-A-REAL-KEY-BUT-TREAT-IT-AS-ONE";
+  const { dir } = fixture();
+  const badPath = join(dir, "bad.json");
+  writeFileSync(badPath, supplied);
   const rpc = await stubRpc(1_500_000_000);
   try {
-    const result = await runPreflight({ script, keypairPath: badPath, rpcUrl: rpc.url });
+    const result = await runPreflight({ keypairPath: badPath, rpcUrl: rpc.url });
     assert.equal(result.status, 1);
-    assert.match(result.stderr, /funder preflight failed/);
+    const output = `${result.stdout}\n${result.stderr}`;
     assert.ok(
-      !result.stderr.includes(notSecret),
-      "the failing input was echoed into the log; print error.message, never the input",
+      !output.includes(supplied.slice(0, 10)),
+      "the parser's quoted prefix of the secret is back in the log",
     );
+    assert.ok(!output.includes("is not valid JSON"), "the parser's own message reached the log");
+    noFragmentLeaked(output, supplied, "run 35393227976 fixture");
+  } finally {
+    rpc.close();
+  }
+});
+
+test("a missing keypair file is reported without the parser's errno text", async () => {
+  const rpc = await stubRpc(1_500_000_000);
+  try {
+    const result = await runPreflight({
+      keypairPath: join(tmpdir(), "ppv-no-such-funder", "funder.json"),
+      rpcUrl: rpc.url,
+    });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /::error::the funder keypair file could not be read/);
+    assert.ok(!result.stderr.includes("ENOENT"));
+  } finally {
+    rpc.close();
+  }
+});
+
+test("an unset PPV_CUSTODY_FUNDER stops the preflight before it reads anything", async () => {
+  const rpc = await stubRpc(1_500_000_000);
+  try {
+    const result = await runPreflight({ keypairPath: "", rpcUrl: rpc.url });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /::error::PPV_CUSTODY_FUNDER is not set/);
   } finally {
     rpc.close();
   }

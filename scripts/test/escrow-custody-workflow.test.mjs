@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -27,6 +27,13 @@ const SOURCE = readFileSync(join(REPO, PATH), "utf8");
 const CODE = SOURCE.split("\n")
   .filter((line) => !/^\s*#/.test(line))
   .join("\n");
+
+/**
+ * The preflight step is a script now, so the assertions about what it does
+ * read the script rather than the YAML that invokes it.
+ */
+const FUNDER_PREFLIGHT_SOURCE = readFileSync(join(REPO, "scripts", "funder-preflight.mjs"), "utf8");
+const FUNDER_SECRET_SOURCE = readFileSync(join(REPO, "scripts", "lib", "funder-secret.mjs"), "utf8");
 
 /* ----------------------------------------------------------- the triggers */
 
@@ -340,20 +347,93 @@ test("a missing funder secret stops the job before anything is created", () => {
   assert.match(CODE, /PPV_CUSTODY_FUNDER_KEYPAIR is not configured/);
 });
 
+test("the funder preflight is a file the suite can run, not inline YAML", () => {
+  // It was a `node -e` block, which its own test had to regex-dedent out of
+  // this file before it could execute anything. The step that handles the one
+  // PPV secret this workflow takes is the worst possible place for code that
+  // is awkward to test, so it is `scripts/funder-preflight.mjs` now.
+  assert.match(CODE, /run: \|[\s\S]*?node scripts\/funder-preflight\.mjs/);
+  assert.ok(existsSync(join(REPO, "scripts", "funder-preflight.mjs")));
+  assert.ok(
+    !/node -e/.test(CODE),
+    "an inline node script is back in the custody workflow; put it in a file with tests",
+  );
+});
+
 test("the funder preflight enforces a balance floor", () => {
-  assert.match(CODE, /getBalance/);
-  assert.match(CODE, /lamports < 1e9/, "the floor must be asserted, not merely reported");
-  assert.match(CODE, /needs at least 1 SOL/);
+  assert.match(FUNDER_PREFLIGHT_SOURCE, /getBalance/);
+  assert.match(
+    FUNDER_PREFLIGHT_SOURCE,
+    /lamports < MINIMUM_FUNDER_LAMPORTS/,
+    "the floor must be asserted, not merely reported",
+  );
+  assert.match(FUNDER_PREFLIGHT_SOURCE, /MINIMUM_FUNDER_LAMPORTS = 1_000_000_000/);
+  assert.match(FUNDER_PREFLIGHT_SOURCE, /needs at least 1 SOL/);
 });
 
 test("the funder preflight prints the public address and nothing else about it", () => {
-  assert.match(CODE, /funder public address: \$\{funder\.publicKey\.toBase58\(\)\}/);
-  assert.match(CODE, /funder devnet balance/);
-  // The secret must never reach a log, directly or through an error object
-  // carrying the input it failed to parse.
-  assert.ok(!/console\.log\([^)]*secretKey/.test(CODE));
-  assert.ok(!/console\.error\("::error::funder preflight failed:", error\)/.test(CODE));
-  assert.match(CODE, /error\?\.message \?\? "unknown error"/);
+  assert.match(FUNDER_PREFLIGHT_SOURCE, /funder public address: \$\{funder\.publicKey\.toBase58\(\)\}/);
+  assert.match(FUNDER_PREFLIGHT_SOURCE, /funder devnet balance/);
+  assert.ok(!/(console\.log|process\.stdout\.write)\([^)]*secretKey/.test(FUNDER_PREFLIGHT_SOURCE));
+});
+
+/**
+ * Run 35393227976 stopped here with a malformed `PPV_CUSTODY_FUNDER_KEYPAIR`,
+ * and printed `JSON.parse`'s message — which quotes the first ten characters
+ * of what it rejected. The behavioural proof lives in
+ * `scripts/test/funder-preflight.test.mjs`, which runs the script against those
+ * inputs and reads its output. These two assertions are the structural half:
+ * they stop the shape that made the leak possible from coming back.
+ */
+test("no parse or validation failure is reported through the parser's own message", () => {
+  const parseFailure = FUNDER_PREFLIGHT_SOURCE.slice(
+    FUNDER_PREFLIGHT_SOURCE.indexOf("const secret = readFunderSecret"),
+    FUNDER_PREFLIGHT_SOURCE.indexOf("const connection = new Connection"),
+  );
+  assert.ok(parseFailure.length > 0, "the secret-handling region of the preflight was not found");
+  assert.ok(
+    !/error[?.]*\.message/.test(parseFailure),
+    "a keypair parse or validation failure prints error.message again",
+  );
+  assert.match(parseFailure, /annotate\(secret\.error\)/);
+  assert.match(parseFailure, /annotate\(FUNDER_SECRET_FORMAT_ERROR\)/);
+});
+
+test("the constant it prints for a bad secret carries no interpolation", () => {
+  assert.match(
+    FUNDER_SECRET_SOURCE,
+    /export const FUNDER_SECRET_FORMAT_ERROR =\n\s+"PPV_CUSTODY_FUNDER_KEYPAIR has invalid format; expected a Solana keypair JSON byte array";/,
+  );
+  // A template literal here would be the whole defect returning: the message
+  // is a constant precisely so that nothing from the input can reach it.
+  assert.ok(!/FUNDER_SECRET_FORMAT_ERROR = `/.test(FUNDER_SECRET_SOURCE));
+});
+
+test("the validation the preflight depends on runs before Keypair.fromSecretKey", () => {
+  const validate = FUNDER_PREFLIGHT_SOURCE.indexOf("readFunderSecret(funderPath)");
+  const construct = FUNDER_PREFLIGHT_SOURCE.indexOf("Keypair.fromSecretKey");
+  assert.ok(validate > -1 && construct > -1);
+  assert.ok(validate < construct, "bytes reach web3.js before they have been checked");
+
+  for (const check of [
+    /Array\.isArray\(parsed\)/,
+    /SUPPORTED_SECRET_KEY_LENGTHS\.includes\(parsed\.length\)/,
+    /Number\.isInteger\(element\)/,
+    /element < MIN_SECRET_BYTE \|\| element > MAX_SECRET_BYTE/,
+  ]) {
+    assert.match(FUNDER_SECRET_SOURCE, check);
+  }
+});
+
+test("the harness loads the funder through the same validator as the preflight", () => {
+  // Same secret, same file, same `JSON.parse` hazard — and this script's
+  // top-level handler prints `error.message`.
+  const harness = readFileSync(join(REPO, "scripts", "devnet-escrow-custody.mjs"), "utf8");
+  assert.match(harness, /loadFunderSecretOrThrow\(funderPath\)/);
+  assert.ok(
+    !/Uint8Array\.from\(JSON\.parse\(readFileSync\(funderPath/.test(harness),
+    "the harness parses the funder keypair inline again",
+  );
 });
 
 test("the live run step no longer carries the secret in its environment", () => {
