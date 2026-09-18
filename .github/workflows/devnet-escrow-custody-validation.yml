@@ -145,30 +145,10 @@ jobs:
           # cleanup step below whatever happens.
           printf '%s' "${PPV_CUSTODY_FUNDER_SECRET}" > "${PPV_CUSTODY_FUNDER}"
           chmod 600 "${PPV_CUSTODY_FUNDER}"
-          node -e '
-            const { Connection, Keypair } = require("@solana/web3.js");
-            const { readFileSync } = require("node:fs");
-            (async () => {
-              const funder = Keypair.fromSecretKey(
-                Uint8Array.from(JSON.parse(readFileSync(process.env.PPV_CUSTODY_FUNDER, "utf8"))),
-              );
-              const connection = new Connection(process.env.PPV_CUSTODY_RPC_URL, "confirmed");
-              const lamports = await connection.getBalance(funder.publicKey, "confirmed");
-              const sol = lamports / 1e9;
-              // Public address only. Never the secret, in any form.
-              console.log(`funder public address: ${funder.publicKey.toBase58()}`);
-              console.log(`funder devnet balance: ${sol} SOL`);
-              if (lamports < 1e9) {
-                console.error(`::error::funder holds ${sol} SOL; the full scenario matrix needs at least 1 SOL`);
-                process.exit(1);
-              }
-            })().catch((error) => {
-              // Deliberately not the error object: a thrown parse error can
-              // carry the input that failed to parse.
-              console.error("::error::funder preflight failed:", error?.message ?? "unknown error");
-              process.exit(1);
-            });
-          '
+          # A file, not an inline `node -e`. The step that handles the one PPV
+          # secret this workflow takes is the last place to keep code that can
+          # only be tested by regex-extracting it back out of this YAML.
+          node scripts/funder-preflight.mjs
 
       - name: Live custody run
         if: ${{ !inputs.preflight_only }}

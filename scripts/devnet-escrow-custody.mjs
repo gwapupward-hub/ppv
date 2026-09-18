@@ -53,6 +53,7 @@ import { fileURLToPath } from "node:url";
 
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 
+import { loadFunderSecretOrThrow } from "./lib/funder-secret.mjs";
 import { PERMANENT_PROGRAM_IDS, ESCROW_CUSTODY_GOVERNANCE } from "./lib/identity.mjs";
 import { DEVNET_GENESIS, readDeployedProgram, rpc } from "./lib/rpc.mjs";
 import {
@@ -2345,9 +2346,10 @@ export async function run({ endpoint, funderPath, outPath, commit }) {
   const preflightFacts = await preflight(client);
 
   const connection = new Connection(endpoint, "confirmed");
-  const funder = Keypair.fromSecretKey(
-    Uint8Array.from(JSON.parse(readFileSync(funderPath, "utf8"))),
-  );
+  // Not an inline `JSON.parse`. A malformed keypair throws an error whose
+  // message quotes the input, and this script's top-level handler prints
+  // `error.message`. `loadFunderSecretOrThrow` throws a constant instead.
+  const funder = Keypair.fromSecretKey(loadFunderSecretOrThrow(funderPath));
   const ctx = createContext({ endpoint, connection, client, funder });
 
   const funderState = await checkFunder(connection, funder.publicKey);
