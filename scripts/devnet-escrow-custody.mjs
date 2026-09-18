@@ -55,7 +55,7 @@ import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 
 import { loadFunderSecretOrThrow } from "./lib/funder-secret.mjs";
 import { PERMANENT_PROGRAM_IDS, ESCROW_CUSTODY_GOVERNANCE } from "./lib/identity.mjs";
-import { DEVNET_GENESIS, readDeployedProgram, rpc } from "./lib/rpc.mjs";
+import { DEVNET_GENESIS, RPC_RATE_LIMIT, RpcRateLimitError, readDeployedProgram, rpc } from "./lib/rpc.mjs";
 import {
   PERMISSION_ALL,
   SQUADS_V4_PROGRAM_ID,
@@ -404,6 +404,26 @@ export function readEvidence(path) {
  * about exact quantities rather than about a scaled representation of them —
  * "the vault holds 100" rather than "the vault holds 100000000, which is 100".
  */
+/**
+ * A pause between the setup burst and the first scenario read.
+ *
+ * Setup opens three wallets, two mints, five token accounts and two mints-to in
+ * a few seconds, each with its own confirmation polling, and the first thing
+ * the matrix then does is a `getMultipleAccounts` over every watched address.
+ * On public devnet in run 35405785493 that last read was the one the rate
+ * limiter refused.
+ *
+ * This is not the fix — bounded 429 handling in `scripts/lib/rpc.mjs` is. It is
+ * a cheap way to stop asking for the refusal in the first place, and it is
+ * deliberately short: a long sleep would be a way of hiding a rate-limit
+ * problem rather than surviving one.
+ */
+export const SCENARIO_COOLDOWN_MS = 750;
+
+export async function cooldownBeforeScenarios({ sleep = setTimeout } = {}) {
+  await new Promise((resolve) => sleep(resolve, SCENARIO_COOLDOWN_MS));
+}
+
 export async function setup(ctx, { supply = 10_000n } = {}) {
   const spl = await import("@solana/spl-token");
   log("\nDisposable test material");
@@ -2359,6 +2379,7 @@ export async function run({ endpoint, funderPath, outPath, commit }) {
   ctx.funderStartingLamports = funderState.lamports;
 
   await setup(ctx);
+  await cooldownBeforeScenarios();
 
   // Two further agreements exist only to give the relationship-binding
   // negatives a *genuinely foreign* account to present.
@@ -2569,6 +2590,18 @@ if (process.argv[1] && process.argv[1].endsWith("devnet-escrow-custody.mjs")) {
     .then(() => process.exit(0))
     .catch((error) => {
       process.stderr.write(`\nFAIL  ${error?.message ?? String(error)}\n`);
+      if (error instanceof RpcRateLimitError) {
+        // Named so the run summary cannot record an endpoint's rate limiter as
+        // a custody finding. The validation still fails; what failed is the
+        // machine in front of the chain, not the program on it.
+        process.stderr.write(
+          `\nCLASSIFICATION=${RPC_RATE_LIMIT}\n` +
+            "The RPC endpoint refused reads after bounded retries. No custody assertion was\n" +
+            "evaluated against this failure: it is not a defect, not an invariant violation,\n" +
+            "and not evidence about the deployed program. Re-run against a less contended\n" +
+            "endpoint; do not resend any transaction by hand.\n",
+        );
+      }
       if (error instanceof CustodyDefect) {
         process.stderr.write(
           "\nThis is a finding about the DEPLOYED PROGRAM, not about the harness.\n" +
