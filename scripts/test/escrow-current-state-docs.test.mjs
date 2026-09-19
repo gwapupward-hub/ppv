@@ -200,10 +200,21 @@ test("the current-state block does not claim a live custody validation that has 
         "reference that proves it",
     );
     if (status.startsWith("ATTEMPTED")) {
+      // An ATTEMPTED row must still say what was not achieved. The accurate
+      // answer moved once run 35465469908 executed the whole behaviour matrix
+      // and stopped in read-only reconstruction: "no custody matrix has run"
+      // became false, and leaving it there would have been the drift this
+      // guard exists to catch. The bound is unchanged — one of these phrases
+      // must be present — only the vocabulary is wider.
       assert.match(
         status,
-        /no custody matrix has run/,
+        /no custody matrix has run|history reconstruction did not complete/,
         `${doc} says attempts were made without saying what was not achieved`,
+      );
+      assert.match(
+        status,
+        /CANONICAL_LIVE_CUSTODY_EVIDENCE=NONE|`deployments\/validation\//,
+        `${doc} claims an attempt without saying where the evidence stands`,
       );
     }
   }

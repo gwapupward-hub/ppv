@@ -25,11 +25,12 @@ CANONICAL_LIVE_CUSTODY_EVIDENCE=NONE
 ```
 
 This directory holds this README and nothing else. **No live custody validation
-record exists**, and none may be written by hand: only a complete, successful
-run of `devnet-escrow-custody-validation.yml` creates one.
+record exists**, and none may be written by hand: it is written either by a
+complete, successful run of `devnet-escrow-custody-validation.yml`, or by a
+`RECOVERY=PASS` from `devnet-escrow-custody-recovery.yml`, which rebuilds a
+completed run read-only from public chain state.
 
-Several controlled executions have been attempted. Each reached an
-infrastructure or setup stage and stopped there:
+Several controlled executions have been dispatched:
 
 | Run | How far it got | Why it stopped |
 | --- | --- | --- |
@@ -38,21 +39,55 @@ infrastructure or setup stage and stopped there:
 | [35405785493](https://github.com/gwapupward-hub/ppv/actions/runs/35405785493) | disposable setup complete | public devnet RPC returned HTTP 429 before the first agreement |
 | [35414331967](https://github.com/gwapupward-hub/ppv/actions/runs/35414331967) | disposable setup | heavy rate limiting through the same shared public endpoint |
 | [35430583241](https://github.com/gwapupward-hub/ppv/actions/runs/35430583241) | **almost the entire matrix** | preflight reported `Blockhash not found` before the final proof settlement |
+| [35439828941](https://github.com/gwapupward-hub/ppv/actions/runs/35439828941) | escrow, cancel, refund, both disputes | the first state-only step was sent without a read client (fixed in #39) |
+| [35457793117](https://github.com/gwapupward-hub/ppv/actions/runs/35457793117) | **the whole matrix** | Phase 12 read `envelope.program`, which `EscrowEventEnvelope` does not have (fixed in #40) |
+| [35465469908](https://github.com/gwapupward-hub/ppv/actions/runs/35465469908) | **the whole matrix** | Phase 12 `getTransaction` returned HTTP 429 |
 
-Each cause is fixed and separately tested. What they have in common is where
-they stopped, and it is worth being exact about it:
+Each cause is fixed and separately tested. The last three rows are a different
+kind of stop from the first four, and the distinction is the point of this
+section:
 
-* disposable wallet, mint and associated-token-account transactions **did**
-  occur in the later attempts — it is not true that nothing has ever been sent
-  to devnet;
-* **no PPV agreement was created, no vault existed, and no token ever entered
-  PPV custody**;
-* therefore **no complete PPV custody matrix has run**.
+* the earlier attempts stopped before any PPV agreement existed. Disposable
+  wallet, mint and associated-token-account transactions **did** occur, so it
+  is not true that nothing was ever sent to devnet, but no vault existed and no
+  token entered PPV custody;
+* runs 35457793117 and **35465469908 executed the entire custody behaviour
+  matrix**. Agreements were created, vaults were funded, tokens moved, and
+  every completed funded scenario vault returned to zero. Both then stopped in
+  **Phase 12, which is read-only** — one on a consumer bug, one on a provider's
+  rate limiter. Neither is a finding about the deployed program.
 
-An aborted attempt is neither a custody PASS nor a custody FAIL. It is evidence
-about infrastructure and about nothing else. Nothing in this directory may be
-backfilled from a failed run's logs, and none of the rows above should be read
-as a finding about the deployed program.
+An aborted attempt is neither a custody PASS nor a custody FAIL, and a run that
+completed its behaviour matrix is not a PASS either until its history has been
+independently reconstructed. Nothing in this directory may be backfilled from a
+failed run's logs.
+
+### Recovering a completed run instead of repeating it
+
+Run 35465469908's failure was a *read*. Re-running the matrix to recover from
+it would send ~70 fresh value-moving transactions to re-learn what the chain
+already records, so the repository recovers the run instead:
+
+```
+gh workflow run devnet-escrow-custody-recovery.yml \
+  -f run_id=35465469908 \
+  -f expect_commit=6053b1ede324b03a5064da53c7ebae25b13f1ee6 \
+  -f publish=true
+```
+
+`scripts/recover-devnet-escrow-custody-evidence.mjs` reads that run's public
+diagnostic for **coordinates only** — addresses and signatures — and checks
+every claim against chain state: each recorded success must exist and carry no
+error, each expected refusal must have landed carrying one, each agreement must
+currently hold the recorded terminal state, each vault must read zero, and each
+history must reconstruct through `@gwap/ppv-indexer` to the state the live
+account reports.
+
+It needs no funder, buyer, seller, outsider, deployer or custody key, and it
+**cannot** send a transaction: it imports no signer type, no transaction
+builder and no send path, and every RPC method it names is a read.
+`scripts/test/custody-recovery.test.mjs` asserts that structurally, so an edit
+that broke it fails the suite.
 
 ### Run 35430583241 in particular
 
@@ -96,6 +131,23 @@ The exposure that produced the 3-unit half is closed: `foreign-proof-source` is
 now created, used and refunded entirely inside the proof scenario, before the
 settlement that failed, instead of being opened at the start of the run and
 torn down at the end.
+
+### Run 35465469908's aborted fixture
+
+The run stopped in Phase 12, after the matrix, and before the harness's final
+cancel of `foreign-milestone-source`.
+
+That fixture was **never funded**. Its vault balance is 0, so it holds no
+customer or economic value of any kind — it is an empty disposable devnet
+agreement. Its state may remain `Open` permanently, because the disposable
+signer that could cancel it existed only inside that process and was destroyed
+with it.
+
+No signer is to be reconstructed and no recovery instruction invented. An
+unfunded disposable fixture resting in `Open` is **not stranded custody value**,
+and recovery records it explicitly as an aborted disposable fixture after
+reading its vault balance from chain rather than taking the claim on trust. A
+fixture whose vault reads anything other than zero fails recovery outright.
 
 ## What a record may contain
 

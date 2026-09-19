@@ -121,7 +121,7 @@ false now, and kept only so the sequence of events stays legible.
 | Authority transfer | FINALIZED |
 | Deployment provenance | CLOSED — `deployments/evidence/ppv-escrow-devnet-231dceb.json` |
 | Live devnet read-only preflight | PASS — https://github.com/gwapupward-hub/ppv/actions/runs/35053809296 |
-| Live devnet custody validation | ATTEMPTED — NOT COMPLETED (no custody matrix has run; `CANONICAL_LIVE_CUSTODY_EVIDENCE=NONE`) |
+| Live devnet custody validation | ATTEMPTED — NOT COMPLETED (the custody matrix executed in run 35465469908; history reconstruction did not complete, so `CANONICAL_LIVE_CUSTODY_EVIDENCE=NONE`) |
 | Independent security review (RR-13) | OPEN |
 | Legal review | OPEN |
 | **Custody gate** | **CLOSED** |
@@ -177,15 +177,27 @@ each, and a vault index 0 that derives to
 `FD2spnsMVgsuddPSRWAe3ee4DMbgDx5ivpvVfvKcNrLE`. That is what closed **RR-7** for
 the custody multisig.
 
-The value-moving half is **ATTEMPTED — NOT COMPLETED**. The harness and its
-deterministic refusal suite exist and pass, and several controlled executions
-have been dispatched; each reached an infrastructure or setup stage and stopped
-there. Disposable wallet, mint and associated-token-account transactions did
-occur in the later attempts, so it is not true that nothing has been sent to
-devnet. What is true, and what matters, is narrower:
+The value-moving half is **ATTEMPTED — NOT COMPLETED**, and the reason has
+moved. Run [35465469908](https://github.com/gwapupward-hub/ppv/actions/runs/35465469908)
+executed the whole custody behaviour matrix against the deployed program —
+ordinary escrow, cancellation, refund, both dispute outcomes, milestones,
+bounty, proof submission, approval and rejection, a live CPI into `ppv_core`,
+the foreign-proof relationship negative and its cleanup, and the proof-backed
+final settlement — with every completed funded scenario vault back to zero. It
+then stopped in Phase 12, the *read-only* history reconstruction, because the
+RPC provider answered `getTransaction` with HTTP 429.
 
-> **No PPV agreement was created, no vault existed, no token entered PPV
-> custody, and no complete custody matrix has run.**
+So agreements were created, vaults existed, and tokens did enter and leave PPV
+custody. What is missing is narrower, and it is what this gate turns on:
+
+> **No complete custody matrix has been independently reconstructed from chain
+> state, so no canonical validation record exists.**
+
+`scripts/recover-devnet-escrow-custody-evidence.mjs` and
+`.github/workflows/devnet-escrow-custody-recovery.yml` exist to close that
+read-only, from run 35465469908's public diagnostic, without repeating a single
+value-moving transaction. Until that recovery runs and reports `RECOVERY=PASS`,
+this row stays as it is.
 
 `deployments/validation/README.md` lists each attempt and where it stopped. An
 aborted attempt is neither a custody PASS nor a custody FAIL; none of them is a

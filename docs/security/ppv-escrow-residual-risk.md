@@ -34,7 +34,7 @@ false now, and kept only so the sequence of events stays legible.
 | Live devnet read-only preflight | PASS — https://github.com/gwapupward-hub/ppv/actions/runs/35053809296 |
 | RR-6 event/history reconstruction | OPEN — written, not run live |
 | RR-7 live Squads decode | CLOSED for the custody multisig; OPEN for Core/Commerce |
-| Live devnet custody validation | ATTEMPTED — NOT COMPLETED (no custody matrix has run; `CANONICAL_LIVE_CUSTODY_EVIDENCE=NONE`) |
+| Live devnet custody validation | ATTEMPTED — NOT COMPLETED (the custody matrix executed in run 35465469908; history reconstruction did not complete, so `CANONICAL_LIVE_CUSTODY_EVIDENCE=NONE`) |
 | Independent security review (RR-13) | OPEN |
 | Legal review | OPEN |
 | **Custody gate** | **CLOSED** |

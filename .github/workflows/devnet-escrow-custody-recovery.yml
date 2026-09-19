@@ -1,0 +1,156 @@
+name: Recover live DEVNET custody evidence (read-only)
+
+# Manual only, and read-only by construction.
+#
+# Live custody run 35465469908 executed the entire value-moving matrix against
+# the deployed ppv_escrow and then failed in Phase 12 — the read-only history
+# reconstruction — because the RPC provider answered `getTransaction` with HTTP
+# 429. The custody behaviour happened; only the reading of it did not.
+#
+# This workflow reads that run's public diagnostic and rebuilds the evidence
+# from public chain state. It sends nothing.
+#
+#   * no funder secret. The custody validation workflow takes
+#     PPV_CUSTODY_FUNDER_KEYPAIR because it pays fees for disposable wallets;
+#     this one has no env block naming it, because recovery signs nothing.
+#   * no buyer, seller, outsider, deployer or custody signer.
+#   * scripts/test/custody-recovery.test.mjs asserts, structurally, that the
+#     recovery command imports no signer type, no transaction builder and no
+#     send path, and that every RPC method it names is a read.
+#
+# It cannot deploy, upgrade, close or set an upgrade authority, and it cannot
+# open the custody gate: RR-13 and legal review are unaffected by a passing
+# recovery, and the recovered record says so in its own gates block.
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: The workflow run whose diagnostic to recover (e.g. 35465469908)
+        required: true
+        type: string
+      expect_commit:
+        description: The commit that run executed; recovery refuses a diagnostic naming another
+        required: true
+        type: string
+      publish:
+        description: "Write the recovered evidence record (leave off to verify only)"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  # Only to download the source run's own public diagnostic artifact.
+  actions: read
+
+concurrency:
+  group: devnet-escrow-custody-recovery
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    name: Read-only recovery
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: devnet-custody-validation
+    env:
+      # Recovery reads one transaction per signature across eight scenarios and
+      # every negative, which is exactly the load that rate-limited run
+      # 35465469908. The dedicated endpoint is required and there is no public
+      # fallback; the client now tolerates a bounded run of 429s on top.
+      PPV_CUSTODY_RPC_URL: ${{ secrets.PPV_CUSTODY_RPC_URL }}
+
+    steps:
+      - name: Require the dedicated devnet RPC endpoint
+        run: |
+          set -euo pipefail
+          if [ -z "${PPV_CUSTODY_RPC_URL:-}" ]; then
+            echo "::error::DEDICATED_DEVNET_RPC=MISSING" >&2
+            exit 1
+          fi
+          echo "DEDICATED_DEVNET_RPC=CONFIGURED"
+
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          # The release suite reads the repository's own past; see
+          # scripts/test/escrow-provenance-closeout-workflow.test.mjs.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build the SDK and indexer the recovery reads through
+        run: npm run build
+
+      - name: Deterministic harness checks
+        run: npm run test:release
+
+      - name: Download the source run's public failure diagnostic
+        uses: actions/download-artifact@v4
+        with:
+          name: ppv-escrow-devnet-custody-failure-diagnostic
+          path: recovery-input
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Refuse an input that carries key material
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          records=(recovery-input/*.json)
+          if [ ${#records[@]} -eq 0 ]; then
+            echo "::error::run ${{ inputs.run_id }} published no diagnostic record" >&2
+            exit 1
+          fi
+          for record in "${records[@]}"; do
+            if grep -Eq '"(secretKey|secret_key|privateKey|private_key|keypair|mnemonic|seedPhrase|rpcEndpoint|rpcUrl)"' "${record}"; then
+              echo "::error::${record} contains a secret-shaped field; refusing to read it" >&2
+              exit 1
+            fi
+            if grep -Eq 'https?://[^"]*[?&](api-?key|token|apikey)=' "${record}"; then
+              echo "::error::${record} contains a credential-bearing URL; refusing to read it" >&2
+              exit 1
+            fi
+            sha256sum "${record}"
+          done
+
+      - name: Recover the run read-only
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          records=(recovery-input/*.json)
+          node scripts/recover-devnet-escrow-custody-evidence.mjs \
+            --diagnostic "${records[0]}" \
+            --expect-commit "${{ inputs.expect_commit }}" \
+            ${{ inputs.publish && format('--out deployments/validation/ppv-escrow-devnet-live-custody-{0}.json', inputs.run_id) || '' }}
+
+      - name: Refuse to publish a record containing key material
+        if: ${{ always() && inputs.publish }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          records=(deployments/validation/*.json)
+          for record in "${records[@]}"; do
+            if grep -Eq '"(secretKey|secret_key|privateKey|private_key|keypair|mnemonic|seedPhrase|rpcEndpoint|rpcUrl)"' "${record}"; then
+              echo "::error::${record} contains a secret-shaped field; refusing to publish it" >&2
+              exit 1
+            fi
+            if grep -Eq 'https?://[^"]*[?&](api-?key|token|apikey)=' "${record}"; then
+              echo "::error::${record} contains a credential-bearing URL; refusing to publish it" >&2
+              exit 1
+            fi
+          done
+
+      - name: Upload the recovered evidence
+        if: ${{ success() && inputs.publish }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ppv-escrow-devnet-live-custody-recovered-${{ inputs.run_id }}
+          path: deployments/validation/*.json
+          if-no-files-found: error
