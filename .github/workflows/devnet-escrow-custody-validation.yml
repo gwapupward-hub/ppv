@@ -26,8 +26,9 @@ name: Live DEVNET custody validation (ppv_escrow)
 #
 #   * deploy, upgrade, close, or set the upgrade authority of any program. It
 #     runs one script, and that script calls no loader instruction.
-#   * touch mainnet. There is no endpoint input; the RPC URL is fixed below, and
-#     the harness refuses a mainnet genesis hash regardless.
+#   * touch mainnet. There is no endpoint input; the RPC URL comes from a
+#     protected-environment secret, and the harness refuses a mainnet genesis
+#     hash regardless — genesis is what binds, not the URL.
 #   * open the custody gate. RR-13 and legal review are unaffected by a passing
 #     run, and the evidence record says so in its own gates block.
 #
@@ -64,9 +65,21 @@ jobs:
     timeout-minutes: 60
     environment: devnet-custody-validation
     env:
-      # Fixed. Not an input, because an endpoint input is the one thing that
-      # could point this at another cluster.
-      PPV_CUSTODY_RPC_URL: https://api.devnet.solana.com
+      # A DEDICATED devnet endpoint, supplied by the protected environment. Not
+      # an input, because an endpoint input is the one thing that could point
+      # this at another cluster; and no longer the shared public endpoint,
+      # because that endpoint's rate limiter killed run 35405785493 after its
+      # disposable setup had already been created and paid for.
+      #
+      # It may carry an API key, so nothing prints it: the harness registers it
+      # as sensitive before building a client, every message this repository
+      # writes says "the configured RPC endpoint" instead, and messages from
+      # web3.js or undici are scrubbed on the way out. It is absent from the
+      # evidence record by construction — the cluster is named by genesis hash.
+      #
+      # Devnet is still proved by genesis hash against the live cluster, which
+      # is the check that actually binds; a secret URL is trusted for nothing.
+      PPV_CUSTODY_RPC_URL: ${{ secrets.PPV_CUSTODY_RPC_URL }}
 
     steps:
       - name: Confirm the run
@@ -76,6 +89,26 @@ jobs:
             echo "confirmation did not match ppv_escrow; refusing" >&2
             exit 1
           fi
+
+      - name: Require the dedicated devnet RPC endpoint
+        # First, before checkout, before npm, before the funder secret is read
+        # and long before an instruction is built. A run that discovers this
+        # late has already spent time; a run that falls back to the shared
+        # public endpoint has already spent devnet SOL.
+        #
+        # Presence only. The value is never echoed, never traced, and never
+        # compared against anything that would reveal it.
+        run: |
+          set -euo pipefail
+          if [ -z "${PPV_CUSTODY_RPC_URL:-}" ]; then
+            echo "::error::DEDICATED_DEVNET_RPC=MISSING" >&2
+            echo "::error::Configure the PPV_CUSTODY_RPC_URL secret on the" \
+                 "devnet-custody-validation environment with a dedicated devnet endpoint." \
+                 "This workflow has no fallback: the shared public endpoint rate-limited" \
+                 "run 35405785493 mid-run." >&2
+            exit 1
+          fi
+          echo "DEDICATED_DEVNET_RPC=CONFIGURED"
 
       - uses: actions/checkout@v4
         with:

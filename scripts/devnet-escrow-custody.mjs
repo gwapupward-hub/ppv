@@ -55,6 +55,7 @@ import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 
 import { loadFunderSecretOrThrow } from "./lib/funder-secret.mjs";
 import { PERMANENT_PROGRAM_IDS, ESCROW_CUSTODY_GOVERNANCE } from "./lib/identity.mjs";
+import { registerSensitiveEndpoint, redact } from "./lib/endpoint-safety.mjs";
 import { DEVNET_GENESIS, RPC_RATE_LIMIT, RpcRateLimitError, readDeployedProgram, rpc } from "./lib/rpc.mjs";
 import {
   PERMISSION_ALL,
@@ -2267,8 +2268,11 @@ export function buildEvidence(ctx, { preflightFacts, reconstruction, commit }) {
       runId: ctx.runId,
     },
     cluster: "devnet",
+    // The cluster is identified by its genesis hash, which is the claim that
+    // matters and is verifiable by anyone. The endpoint is deliberately absent:
+    // a dedicated RPC URL carries a credential, evidence is published, and
+    // which endpoint was read proves nothing that the genesis hash does not.
     genesisHash: preflightFacts.genesis,
-    rpcEndpoint: ctx.endpoint,
     program: {
       name: "ppv_escrow",
       programId: preflightFacts.programId,
@@ -2550,9 +2554,36 @@ export async function run({ endpoint, funderPath, outPath, commit }) {
   return { record, path: written, context: ctx };
 }
 
+/**
+ * The endpoint this run reads and signs through.
+ *
+ * `PPV_CUSTODY_RPC_URL` is required and has no default. Run 35405785493 died on
+ * the shared public endpoint's rate limiter after its disposable setup had
+ * already been created, so a run that silently falls back to that endpoint is a
+ * run that will spend devnet SOL and then fail the same way. Better to stop
+ * before anything exists and say which secret is missing.
+ *
+ * Registered as sensitive the moment it is read — before a client, before a
+ * keypair, before anything that can throw — because a dedicated endpoint
+ * usually authenticates with a key inside the URL.
+ */
+export function resolveEndpoint(env = process.env) {
+  const endpoint = env.PPV_CUSTODY_RPC_URL;
+  if (!endpoint || endpoint.trim() === "") {
+    throw new CustodyHarnessFailure(
+      "DEDICATED_DEVNET_RPC=MISSING — PPV_CUSTODY_RPC_URL is not configured for the " +
+        "devnet-custody-validation environment. This harness has no default endpoint: the shared " +
+        "public devnet RPC rate-limited run 35405785493 mid-run, and falling back to it would " +
+        "spend devnet SOL before failing the same way.",
+    );
+  }
+  registerSensitiveEndpoint(endpoint);
+  return endpoint;
+}
+
 async function main() {
   const argv = process.argv.slice(2);
-  const endpoint = process.env.PPV_CUSTODY_RPC_URL || "https://api.devnet.solana.com";
+  const endpoint = resolveEndpoint();
   requireNoMainnetEndpoint(endpoint);
 
   if (!argv.includes("--execute")) {
@@ -2589,7 +2620,9 @@ if (process.argv[1] && process.argv[1].endsWith("devnet-escrow-custody.mjs")) {
   main()
     .then(() => process.exit(0))
     .catch((error) => {
-      process.stderr.write(`\nFAIL  ${error?.message ?? String(error)}\n`);
+      // Redacted, not merely trusted: this message can come from web3.js or
+      // undici wrapping a request whose URL carries the RPC credential.
+      process.stderr.write(`\nFAIL  ${redact(error?.message ?? String(error))}\n`);
       if (error instanceof RpcRateLimitError) {
         // Named so the run summary cannot record an endpoint's rate limiter as
         // a custody finding. The validation still fails; what failed is the

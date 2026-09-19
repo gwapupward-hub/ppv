@@ -29,6 +29,7 @@
 
 import { Connection, Keypair } from "@solana/web3.js";
 
+import { registerSensitiveEndpoint, redact } from "./lib/endpoint-safety.mjs";
 import { FUNDER_SECRET_FORMAT_ERROR, readFunderSecret } from "./lib/funder-secret.mjs";
 
 /**
@@ -44,6 +45,19 @@ function annotate(message) {
 }
 
 async function main() {
+  // Required and registered before anything can throw. A dedicated RPC URL
+  // authenticates with a key inside it, and the balance check below reports
+  // network failures.
+  const endpoint = process.env.PPV_CUSTODY_RPC_URL;
+  if (!endpoint || endpoint.trim() === "") {
+    annotate(
+      "DEDICATED_DEVNET_RPC=MISSING — PPV_CUSTODY_RPC_URL is not configured for the " +
+        "devnet-custody-validation environment",
+    );
+    return 1;
+  }
+  registerSensitiveEndpoint(endpoint);
+
   const funderPath = process.env.PPV_CUSTODY_FUNDER;
   if (!funderPath) {
     annotate("PPV_CUSTODY_FUNDER is not set; the preflight has no keypair path to read");
@@ -70,7 +84,7 @@ async function main() {
 
   // Past this line nothing derived from the secret is in play, so ordinary
   // error text is safe again: what can fail now is the network.
-  const connection = new Connection(process.env.PPV_CUSTODY_RPC_URL, "confirmed");
+  const connection = new Connection(endpoint, "confirmed");
   const lamports = await connection.getBalance(funder.publicKey, "confirmed");
   const sol = lamports / 1e9;
 
@@ -91,6 +105,8 @@ main()
     // Reachable only from the network phase above — every secret-handling path
     // returns rather than throws. `FunderSecretError`'s message is a constant,
     // so even a future path that threw one would print no key material.
-    annotate(`funder preflight failed: ${error?.message ?? "unknown error"}`);
+    // Redacted: web3.js wraps a transport failure around the request it made,
+    // and that request carries the RPC credential.
+    annotate(redact(`funder preflight failed: ${error?.message ?? "unknown error"}`));
     process.exit(1);
   });
