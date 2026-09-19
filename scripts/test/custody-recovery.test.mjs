@@ -3,6 +3,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 
+import { PROOF_ACCOUNT_DISCRIMINATOR } from "@gwap/ppv-sdk";
+
+import { decodeBase58 } from "../lib/pubkey.mjs";
 import { CustodyDefect, CustodyHarnessFailure } from "../lib/custody-runner.mjs";
 import {
   PRIMARY_SCENARIOS,
@@ -10,7 +13,8 @@ import {
   lookupTransaction,
   parseArguments,
   readDiagnostic,
-  replayProofAddresses,
+  collectProofBindings,
+  verifyProofBindings,
   verifyRefusals,
   verifySuccesses,
 } from "../recover-devnet-escrow-custody-evidence.mjs";
@@ -263,11 +267,13 @@ test("15. RR-6 names every lifecycle family, and each maps to a primary scenario
   ]);
 });
 
-test("16. the proof-record check cannot pass vacuously", () => {
-  // No reconstructed history naming a proof means no addresses to verify, and
-  // `recover` refuses that rather than reporting zero records as a pass.
-  assert.deepEqual(replayProofAddresses({ ordinaryEscrow: { proofAddresses: [] } }), []);
-  assert.match(CODE, /proofAddresses\.length === 0/);
+test("16. the proof-binding check cannot pass vacuously", async () => {
+  // No reconstructed history binding a proof means nothing to verify, and
+  // recovery refuses that rather than reporting zero bindings as a pass.
+  await assert.rejects(
+    () => verifyProofBindings({ accountInfo: async () => null }, new Map()),
+    /must not pass vacuously/,
+  );
   assert.match(CODE, /must not pass vacuously/);
 });
 
@@ -290,4 +296,253 @@ test("18. the recovered record states how it was produced", () => {
   }
   // And it is scrubbed before it can be written.
   assert.match(CODE, /return assertNoSecrets\(record\);/);
+});
+
+/* ======================================================= PHASE R5 (19-27) */
+
+/**
+ * The escrow proof, the ppv_core record it minted, and the link between them.
+ *
+ * Recovery run 35474019085 passed R1–R4 against live chain state — every
+ * primary scenario terminal, every primary vault 0, 43 refusals proved on
+ * chain, both disposable fixtures at 0, all eight histories reconstructed —
+ * and then failed in Phase R5 with
+ *
+ *     proof record CkQ2svTDYnKftVG36Ds12zfBwngakmAooLKro9QPKnLo
+ *     is owned by ppv_escrow instead of ppv_core
+ *
+ * The question was right and the address was wrong.
+ * `AgreementLifecycle.proofs[].proof` is the ESCROW-side Proof PDA and is
+ * supposed to be owned by `ppv_escrow`. The record under `ppv_core` is a
+ * different account, published by the escrow events themselves as `coreProof`.
+ *
+ * Nothing in the SDK or the indexer changed to accommodate this: the consumer
+ * was reading one half of a relationship and asking the other half's question
+ * of it.
+ */
+
+const ESCROW_ID = "7U1bCHQcr8Jg6J8G69JGaAWCRtsrZB1RYx4zo1sNEVF4";
+const CORE_ID = "9cWE41ZDNQChvFrRoVuPQDeoVLg46ACTiZRCZaBZzfwU";
+const PROOF_PDA = "CkQ2svTDYnKftVG36Ds12zfBwngakmAooLKro9QPKnLo";
+const CORE_PROOF = "H4vMrZ8kLpQxNbWfDcJ2yTgAeRsUvXn6BmKt3PqZwYcE";
+
+const proofEvent = (name, overrides = {}) => ({
+  event: {
+    program: "ppv_escrow",
+    name,
+    agreement: AGREEMENT_FOR_PROOFS,
+    timestamp: 1_760_000_000,
+    proof: PROOF_PDA,
+    coreProof: CORE_PROOF,
+    proofIndex: 0,
+    ...overrides,
+  },
+  programId: ESCROW_ID,
+  transactionSignature: SIGNATURE(3),
+  slot: 400_000_010,
+  instructionIndex: 0,
+  innerInstructionIndex: 1,
+  blockTime: 1_760_000_000,
+});
+
+const AGREEMENT_FOR_PROOFS = "5ZRmnSJVPKb9gWsDkL5jMiTkZwCmT2r1xHN8nJ2pQ4Vu";
+
+/**
+ * A chain whose two proof accounts are owned by whoever the test says.
+ *
+ * The escrow account's bytes are real: `decodeProofAccount` runs over them, so
+ * a test that claimed a stored `coreProof` the encoding could not produce
+ * would fail in the decoder rather than in the assertion.
+ */
+function proofChain({ escrowOwner = ESCROW_ID, coreOwner = CORE_ID, storedCoreProof = CORE_PROOF, missing = [] } = {}) {
+  return {
+    accountInfo: async (address) => {
+      if (missing.includes(address)) return null;
+      if (address === PROOF_PDA) {
+        return { owner: escrowOwner, data: [encodeProofAccount(storedCoreProof), "base64"] };
+      }
+      if (address === CORE_PROOF) return { owner: coreOwner, data: ["", "base64"] };
+      return null;
+    },
+  };
+}
+
+/** A `ppv_escrow` Proof account, byte for byte as the program lays it out. */
+function encodeProofAccount(coreProof) {
+  const discriminator = Buffer.from(PROOF_ACCOUNT_DISCRIMINATOR);
+  const body = Buffer.alloc(2 + 32 + 32 + 32 + 4 + 1 + 8 + 8 + 32 + 32);
+  let offset = 0;
+  body.writeUInt8(1, offset); offset += 1; // schemaVersion
+  body.writeUInt8(255, offset); offset += 1; // bump
+  decodeBase58(AGREEMENT_FOR_PROOFS).forEach((byte, i) => (body[offset + i] = byte)); offset += 32;
+  decodeBase58(coreProof).forEach((byte, i) => (body[offset + i] = byte)); offset += 32;
+  decodeBase58(PROOF_PDA).forEach((byte, i) => (body[offset + i] = byte)); offset += 32; // submitter
+  body.writeUInt32LE(0, offset); offset += 4; // proofIndex
+  body.writeUInt8(1, offset); offset += 1; // status
+  body.writeBigInt64LE(0n, offset); offset += 8; // createdAt
+  body.writeBigInt64LE(0n, offset); offset += 8; // decidedAt
+  offset += 32; // decidedBy
+  offset += 32; // reserved
+  return Buffer.concat([discriminator, body]).toString("base64");
+}
+
+const bindingsFrom = (...events) => collectProofBindings(new Map(), "proofs", events);
+
+test("19. ProofRecord.proof is the ESCROW Proof PDA, and is expected to be escrow-owned", async () => {
+  // The exact address run 35474019085 rejected, now accepted for the reason it
+  // was rejected: ppv_escrow owning it is correct.
+  const [row] = await verifyProofBindings(proofChain(), bindingsFrom(proofEvent("ProofSubmitted")));
+  assert.equal(row.proof, PROOF_PDA);
+  assert.equal(row.escrowOwner, ESCROW_ID);
+  assert.notEqual(row.proof, row.coreProof);
+});
+
+test("20. the coreProof named by the event is the account checked against ppv_core", async () => {
+  const [row] = await verifyProofBindings(proofChain(), bindingsFrom(proofEvent("ProofSubmitted")));
+  assert.equal(row.coreProof, CORE_PROOF);
+  assert.equal(row.coreOwner, CORE_ID);
+  assert.equal(row.storedCoreProofMatchesEvent, true);
+});
+
+test("21. a coreProof owned by anything but ppv_core fails", async () => {
+  for (const owner of [ESCROW_ID, "11111111111111111111111111111111"]) {
+    await assert.rejects(
+      () => verifyProofBindings(proofChain({ coreOwner: owner }), bindingsFrom(proofEvent("ProofSubmitted"))),
+      (error) => {
+        assert.ok(error instanceof CustodyDefect);
+        assert.match(error.message, /not the permanent ppv_core/);
+        return true;
+      },
+      `coreProof owned by ${owner} was accepted`,
+    );
+  }
+});
+
+test("22. an escrow proof owned by anything but ppv_escrow fails", async () => {
+  for (const owner of [CORE_ID, "11111111111111111111111111111111"]) {
+    await assert.rejects(
+      () => verifyProofBindings(proofChain({ escrowOwner: owner }), bindingsFrom(proofEvent("ProofSubmitted"))),
+      /not the permanent ppv_escrow/,
+      `escrow proof owned by ${owner} was accepted`,
+    );
+  }
+});
+
+test("23. ProofSubmitted and a later decision disagreeing on coreProof fails", () => {
+  // Refused while the binding is being built, before any account is read: a
+  // conflicting pair is a finding, never a last-writer-wins overwrite.
+  const other = "4XChfxgexHJ5EZ8ytcStSAZnC2htZsKFuaLgZ7ac69Wa";
+  assert.throws(
+    () => bindingsFrom(proofEvent("ProofSubmitted"), proofEvent("ProofApproved", { coreProof: other })),
+    (error) => {
+      assert.ok(error instanceof CustodyDefect);
+      assert.match(error.message, /one escrow proof mints exactly one ppv_core record/);
+      return true;
+    },
+  );
+  // And in the other order, so neither event is privileged.
+  assert.throws(
+    () => bindingsFrom(proofEvent("ProofApproved"), proofEvent("ProofSubmitted", { coreProof: other })),
+    /one escrow proof mints exactly one ppv_core record/,
+  );
+});
+
+test("24. duplicate deliveries of the same event introduce no conflict", async () => {
+  const bindings = bindingsFrom(
+    proofEvent("ProofSubmitted"),
+    proofEvent("ProofSubmitted"),
+    proofEvent("ProofApproved"),
+    proofEvent("ProofApproved"),
+  );
+  assert.equal(bindings.size, 1);
+  const [row] = await verifyProofBindings(proofChain(), bindings);
+  assert.deepEqual(row.decisions, ["ProofApproved"]);
+});
+
+test("25. a decision with no ProofSubmitted to establish the binding fails", async () => {
+  await assert.rejects(
+    () => verifyProofBindings(proofChain(), bindingsFrom(proofEvent("ProofApproved"))),
+    /no ProofSubmitted event established its ppv_core binding/,
+  );
+});
+
+test("25b. an event missing either side of the relationship fails", () => {
+  assert.throws(() => bindingsFrom(proofEvent("ProofSubmitted", { proof: "" })), /names no escrow proof/);
+  assert.throws(() => bindingsFrom(proofEvent("ProofSubmitted", { coreProof: "" })), /names no coreProof/);
+});
+
+test("26. recovery can never substitute proof for coreProof", async () => {
+  // The substitution the old defect amounted to: asking ppv_core about the
+  // escrow PDA. Refused explicitly rather than left to the owner check.
+  await assert.rejects(
+    () =>
+      verifyProofBindings(proofChain(), bindingsFrom(proofEvent("ProofSubmitted", { coreProof: PROOF_PDA }))),
+    /names itself as its ppv_core record; recovery must never substitute one for the other/,
+  );
+});
+
+test("26b. a missing account on either side fails", async () => {
+  await assert.rejects(
+    () => verifyProofBindings(proofChain({ missing: [PROOF_PDA] }), bindingsFrom(proofEvent("ProofSubmitted"))),
+    /escrow proof account .* does not exist on chain/,
+  );
+  await assert.rejects(
+    () => verifyProofBindings(proofChain({ missing: [CORE_PROOF] }), bindingsFrom(proofEvent("ProofSubmitted"))),
+    /does not exist on chain/,
+  );
+});
+
+test("26c. an escrow account storing a different coreProof than the event fails", async () => {
+  const other = "4XChfxgexHJ5EZ8ytcStSAZnC2htZsKFuaLgZ7ac69Wa";
+  await assert.rejects(
+    () => verifyProofBindings(proofChain({ storedCoreProof: other }), bindingsFrom(proofEvent("ProofSubmitted"))),
+    (error) => {
+      assert.ok(error instanceof CustodyDefect);
+      assert.match(error.message, /stores ppv_core record .* but its events published/);
+      return true;
+    },
+  );
+});
+
+test("27. Phase R5 never asks ppv_core about lifecycle.proofs[].proof again", () => {
+  // The structural guard on the exact defect. `proofAddresses` may still be
+  // recorded — it is the escrow-side list and the record keeps it — but it
+  // must not feed the ppv_core ownership check.
+  const phaseR5 = CODE.slice(CODE.indexOf("export async function verifyProofBindings"));
+  assert.ok(phaseR5.length > 0, "verifyProofBindings is gone; the scan is broken");
+  assert.ok(
+    !/proofAddresses/.test(phaseR5),
+    "the ppv_core verification reads proofAddresses, which are escrow-side Proof PDAs",
+  );
+  // Each side's ownership check reads that side's account, proved by where
+  // each check sits relative to each read. Anchored on code, not on comments:
+  // CODE has comments stripped.
+  const readEscrow = phaseR5.indexOf("accountInfo(row.proof)");
+  const readCore = phaseR5.indexOf("accountInfo(row.coreProof)");
+  const escrowVerdict = phaseR5.indexOf("ppv_escrow ${escrowOwner}");
+  const coreVerdict = phaseR5.indexOf("ppv_core ${coreOwner}");
+  for (const [name, index] of [
+    ["accountInfo(row.proof)", readEscrow],
+    ["accountInfo(row.coreProof)", readCore],
+    ["the ppv_escrow verdict", escrowVerdict],
+    ["the ppv_core verdict", coreVerdict],
+  ]) {
+    assert.ok(index >= 0, `${name} was not found in verifyProofBindings; the scan is broken`);
+  }
+  assert.ok(readEscrow < escrowVerdict, "the ppv_escrow verdict does not follow the escrow account read");
+  assert.ok(
+    escrowVerdict < readCore,
+    "the escrow account is read after the ppv_core verdict; the two checks are crossed",
+  );
+  assert.ok(
+    readCore < coreVerdict,
+    "the ppv_core verdict does not follow the ppv_core account read — this is exactly run 35474019085",
+  );
+  // Both verdicts exist. The strings are split across lines in the source, so
+  // they are matched by their template-literal tails rather than whole.
+  assert.match(phaseR5, /not the permanent ` \+\s*`ppv_escrow \$\{escrowOwner\}/);
+  assert.match(phaseR5, /not the permanent ` \+\s*`ppv_core \$\{coreOwner\}/);
+  // And the stored-field cross-check that makes this more than two lookups.
+  assert.match(phaseR5, /decodeProofAccount/);
+  assert.match(phaseR5, /decoded\.coreProof !== row\.coreProof/);
 });

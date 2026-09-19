@@ -376,6 +376,7 @@ export async function recover({ diagnostic, client, chainSource, expectedCommit,
   log("\nPhase R4 — history reconstruction through @gwap/ppv-indexer");
   const { replayAgreement, ReceiptStore } = indexer;
   const reconstruction = {};
+  const bindings = new Map();
   for (const key of PRIMARY_SCENARIOS) {
     const scenario = scenarios[key];
     const replay = await replayAgreement(chainSource, scenario.agreement, {
@@ -436,8 +437,11 @@ export async function recover({ diagnostic, client, chainSource, expectedCommit,
       refundedAmount: refunded.toString(),
       milestones: replay.lifecycle.milestones.length,
       proofs: replay.lifecycle.proofs.length,
+      // The escrow-side Proof PDAs, which is what `ProofRecord.proof` means.
+      // Kept for the record; NOT the addresses Phase R5 asks ppv_core about.
       proofAddresses: replay.lifecycle.proofs.map((record) => record.proof),
     };
+    collectProofBindings(bindings, key, replay.events);
     note(true, `${key}: ${replay.events.length} events reconstruct ${replay.lifecycle.state}`);
   }
 
@@ -450,27 +454,14 @@ export async function recover({ diagnostic, client, chainSource, expectedCommit,
   note(true, "milestone history reconstructs", `${reconstruction.milestones.milestones} milestones`);
   note(true, "proof history reconstructs", `${reconstruction.proofs.proofs} proofs`);
 
-  /* 20. The proof records the escrow events reference, under ppv_core. */
-  log("\nPhase R5 — proof records under the permanent ppv_core");
-  const proofRecords = [];
-  const proofAddresses = replayProofAddresses(reconstruction);
-  if (proofAddresses.length === 0) {
-    throw new CustodyDefect(
-      "no reconstructed history references a proof record, so the ppv_escrow -> ppv_core CPI cannot be " +
-        "verified; this check must not pass vacuously",
-    );
-  }
-  for (const proof of proofAddresses) {
-    const info = await client.accountInfo(proof);
-    if (!info) throw new CustodyDefect(`proof record ${proof} referenced by ppv_escrow does not exist on chain`);
-    if (info.owner !== CORE_PROGRAM_ID.toBase58()) {
-      throw new CustodyDefect(
-        `proof record ${proof} is owned by ${info.owner}, not the permanent ppv_core ${CORE_PROGRAM_ID.toBase58()}`,
-      );
-    }
-    proofRecords.push({ proof, owner: info.owner });
-  }
-  note(true, `${proofRecords.length} proof records exist under ppv_core`, CORE_PROGRAM_ID.toBase58());
+  /* 20. The escrow proof, the ppv_core record it minted, and the link. */
+  log("\nPhase R5 — proof bindings, and the records under the permanent ppv_core");
+  const proofBindings = await verifyProofBindings(client, bindings);
+  note(
+    true,
+    `${proofBindings.length} escrow proofs bind to ppv_core records`,
+    `${ESCROW_PROGRAM_ID.toBase58()} -> ${CORE_PROGRAM_ID.toBase58()}`,
+  );
 
   /* The accounting, stated as totals. */
   const totals = {
@@ -494,7 +485,7 @@ export async function recover({ diagnostic, client, chainSource, expectedCommit,
     refusals,
     fixtures,
     reconstruction,
-    proofRecords,
+    proofBindings,
     totals,
     families,
     rr6,
@@ -502,19 +493,178 @@ export async function recover({ diagnostic, client, chainSource, expectedCommit,
   };
 }
 
+/* -------------------------------------------------- the proof bindings */
+
+/** The escrow events that name both sides of the relationship. */
+const PROOF_EVENTS = Object.freeze(["ProofSubmitted", "ProofApproved", "ProofRejected"]);
+
 /**
- * Proof addresses the reconstructed histories name.
+ * The escrow proof -> ppv_core record mapping, taken from the events themselves.
  *
- * Taken from the replayed lifecycles rather than from the diagnostic, so check
- * 20 verifies the records the *events* reference. An empty set would make that
- * check vacuous, so the caller refuses one.
+ * Recovery run 35474019085 passed R1-R4 and then failed here with
+ *
+ *     proof record CkQ2svTDYnKftVG36Ds12zfBwngakmAooLKro9QPKnLo
+ *     is owned by ppv_escrow instead of ppv_core
+ *
+ * which was the verifier asking the right question of the wrong account.
+ * `AgreementLifecycle.proofs[].proof` is the ESCROW-side Proof PDA, and it is
+ * supposed to be owned by `ppv_escrow`; the record under `ppv_core` is a
+ * different address, and the escrow events publish it directly as `coreProof`
+ * — "the ppv_core ProofRecord minted by the same instruction", in
+ * `sdk/src/escrow/events.ts`'s own words.
+ *
+ * So the relationship is read off the envelopes rather than guessed from one
+ * half of it. `ProofSubmitted` establishes a binding; a later `ProofApproved`
+ * or `ProofRejected` for the same proof must agree with it, and a disagreement
+ * is a finding rather than a last-writer-wins overwrite. Duplicate deliveries
+ * of the same event are harmless because they carry the same pair.
  */
-export function replayProofAddresses(reconstruction) {
-  const seen = new Set();
-  for (const entry of Object.values(reconstruction)) {
-    for (const proof of entry.proofAddresses ?? []) seen.add(proof);
+export function collectProofBindings(bindings, scenario, envelopes) {
+  for (const envelope of envelopes) {
+    const event = envelope.event;
+    if (!PROOF_EVENTS.includes(event.name)) continue;
+
+    if (!event.proof) {
+      throw new CustodyDefect(`${scenario}: a ${event.name} event names no escrow proof account`);
+    }
+    if (!event.coreProof) {
+      throw new CustodyDefect(`${scenario}: ${event.name} for proof ${event.proof} names no coreProof`);
+    }
+
+    const existing = bindings.get(event.proof);
+    if (!existing) {
+      if (event.name !== "ProofSubmitted") {
+        // A decision without the submission that created the binding: the
+        // history is incomplete, and guessing the pair from one event would
+        // be inventing the relationship this check exists to prove.
+        bindings.set(event.proof, {
+          scenario,
+          proof: event.proof,
+          coreProof: event.coreProof,
+          proofIndex: event.proofIndex ?? null,
+          submitted: false,
+          decisions: [event.name],
+        });
+        continue;
+      }
+      bindings.set(event.proof, {
+        scenario,
+        proof: event.proof,
+        coreProof: event.coreProof,
+        proofIndex: event.proofIndex ?? null,
+        submitted: true,
+        decisions: [],
+      });
+      continue;
+    }
+
+    if (existing.coreProof !== event.coreProof) {
+      throw new CustodyDefect(
+        `${scenario}: escrow proof ${event.proof} is bound to ppv_core record ${existing.coreProof} by ` +
+          `one event and to ${event.coreProof} by ${event.name}; one escrow proof mints exactly one ` +
+          "ppv_core record",
+      );
+    }
+    if (event.name === "ProofSubmitted") existing.submitted = true;
+    else if (!existing.decisions.includes(event.name)) existing.decisions.push(event.name);
   }
-  return [...seen];
+  return bindings;
+}
+
+/**
+ * Each binding, proved against chain state rather than taken from the events.
+ *
+ * Four independent facts per proof, plus the one that ties them together:
+ *
+ *   A. the escrow Proof account exists;
+ *   B. it is owned by the permanent `ppv_escrow`;
+ *   C. the `coreProof` account exists;
+ *   D. it is owned by the permanent `ppv_core`;
+ *   E. the escrow account's OWN stored `coreProof` field equals the one the
+ *      event published.
+ *
+ * (E) is what makes this more than two ownership lookups. The event is a claim
+ * about a relationship; the escrow account's `core_proof` field is the program's
+ * own record of it. An event that named someone else's ppv_core record would
+ * pass A-D and fail here.
+ */
+export async function verifyProofBindings(client, bindings) {
+  const rows = [...bindings.values()];
+  if (rows.length === 0) {
+    throw new CustodyDefect(
+      "no reconstructed history bound an escrow proof to a ppv_core record, so the ppv_escrow -> " +
+        "ppv_core CPI cannot be verified; this check must not pass vacuously",
+    );
+  }
+
+  const escrowOwner = ESCROW_PROGRAM_ID.toBase58();
+  const coreOwner = CORE_PROGRAM_ID.toBase58();
+  const verified = [];
+
+  for (const row of rows) {
+    if (row.proof === row.coreProof) {
+      throw new CustodyDefect(
+        `${row.scenario}: escrow proof ${row.proof} names itself as its ppv_core record; recovery must ` +
+          "never substitute one for the other",
+      );
+    }
+    if (!row.submitted) {
+      throw new CustodyDefect(
+        `${row.scenario}: escrow proof ${row.proof} was decided by ${row.decisions.join(", ")} but no ` +
+          "ProofSubmitted event established its ppv_core binding",
+      );
+    }
+
+    // A / B — the escrow side.
+    const escrow = await client.accountInfo(row.proof);
+    if (!escrow) {
+      throw new CustodyDefect(`${row.scenario}: escrow proof account ${row.proof} does not exist on chain`);
+    }
+    if (escrow.owner !== escrowOwner) {
+      throw new CustodyDefect(
+        `${row.scenario}: escrow proof ${row.proof} is owned by ${escrow.owner}, not the permanent ` +
+          `ppv_escrow ${escrowOwner}`,
+      );
+    }
+
+    // E — the program's own record of the relationship.
+    const { decodeProofAccount } = await import("@gwap/ppv-sdk");
+    const decoded = decodeProofAccount(Buffer.from(escrow.data[0], "base64"));
+    if (decoded.coreProof !== row.coreProof) {
+      throw new CustodyDefect(
+        `${row.scenario}: escrow proof ${row.proof} stores ppv_core record ${decoded.coreProof}, but its ` +
+          `events published ${row.coreProof}`,
+      );
+    }
+
+    // C / D — the ppv_core side.
+    const core = await client.accountInfo(row.coreProof);
+    if (!core) {
+      throw new CustodyDefect(
+        `${row.scenario}: ppv_core record ${row.coreProof}, minted for escrow proof ${row.proof}, does ` +
+          "not exist on chain",
+      );
+    }
+    if (core.owner !== coreOwner) {
+      throw new CustodyDefect(
+        `${row.scenario}: ppv_core record ${row.coreProof} is owned by ${core.owner}, not the permanent ` +
+          `ppv_core ${coreOwner}`,
+      );
+    }
+
+    verified.push({
+      scenario: row.scenario,
+      proof: row.proof,
+      coreProof: row.coreProof,
+      proofIndex: row.proofIndex,
+      escrowOwner: escrow.owner,
+      coreOwner: core.owner,
+      storedCoreProofMatchesEvent: true,
+      decisions: row.decisions,
+    });
+  }
+
+  return verified;
 }
 
 /* ----------------------------------------------------- the public record */
@@ -555,7 +705,7 @@ export function buildRecoveredEvidence(result, { diagnostic, generatedAt = new D
     expectedFailures: result.refusals,
     abortedDisposableFixtures: result.fixtures,
     reconstruction: result.reconstruction,
-    proofRecords: result.proofRecords,
+    proofBindings: result.proofBindings,
     accounting: { ...result.totals, finalVaultTotal: "0" },
     lifecycleFamilies: result.families,
     gates: {
