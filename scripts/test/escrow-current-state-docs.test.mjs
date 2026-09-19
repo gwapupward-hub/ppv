@@ -168,6 +168,21 @@ for (const doc of [
   });
 }
 
+/**
+ * The live-custody row has exactly two legitimate shapes, and "NOT RUN" is no
+ * longer one of them.
+ *
+ * It was, while nothing had ever been dispatched. Since then several controlled
+ * executions have run and sent disposable wallet, mint and associated-token-
+ * account transactions to devnet before stopping on infrastructure. "NOT RUN"
+ * understates that, and a reader who finds it and then finds those runs has to
+ * work out for themselves which is wrong.
+ *
+ * The narrower claim is the accurate one and is what the row must carry:
+ * attempts happened, and no complete custody matrix has run. `PASS` stays
+ * bounded exactly as before — it requires the evidence reference that proves
+ * it, because a status nobody can check is not a status.
+ */
 test("the current-state block does not claim a live custody validation that has not run", () => {
   for (const doc of [
     "docs/deployment-gates.md",
@@ -179,9 +194,17 @@ test("the current-state block does not claim a live custody validation that has 
     assert.ok(row, `${doc} has no live-custody-validation row`);
     const status = row[1].trim();
     assert.ok(
-      status === "NOT RUN" || /^PASS — /.test(status),
+      /^ATTEMPTED — NOT COMPLETED\b/.test(status) || /^PASS — /.test(status),
       `${doc} reports live custody validation as ${JSON.stringify(status)}; ` +
-        "it must be NOT RUN, or PASS followed by the evidence reference that proves it",
+        "it must be ATTEMPTED — NOT COMPLETED, or PASS followed by the evidence " +
+        "reference that proves it",
     );
+    if (status.startsWith("ATTEMPTED")) {
+      assert.match(
+        status,
+        /no custody matrix has run/,
+        `${doc} says attempts were made without saying what was not achieved`,
+      );
+    }
   }
 });
