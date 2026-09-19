@@ -356,7 +356,12 @@ export async function stepWithoutValue(
   { label, instructions, signers, watched },
 ) {
   const before = await snapshotBalances(client, watched);
-  const signature = await send(connection, instructions, signers, { label });
+  // `client` is forwarded, not optional. `send` confirms by polling
+  // getSignatureStatuses over HTTP and has no websocket fallback, so omitting
+  // it here refuses the step. Run 35439828941 proved ordinary escrow, cancel,
+  // refund and both dispute outcomes live and then stopped on
+  // `milestones: submit_milestone 0` for exactly that reason.
+  const signature = await send(connection, instructions, signers, { label, client });
   const after = await snapshotBalances(client, watched);
   assertNoMovement(before, after, { label });
   return { label, signature, balancesBefore: before.toJSON(), balancesAfter: after.toJSON() };
