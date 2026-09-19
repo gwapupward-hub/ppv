@@ -195,26 +195,58 @@ jobs:
         run: rm -f "${{ runner.temp }}/custody-funder.json"
 
       - name: Refuse to publish an artifact containing key material
-        if: ${{ !inputs.preflight_only }}
+        # Scans BOTH directories, and runs whatever happened: a failed run
+        # produces a diagnostic, and a diagnostic is uploaded, so it is held to
+        # the same rule as evidence. The RPC URL is in the pattern because a
+        # dedicated endpoint carries a credential in the URL itself.
+        if: ${{ always() && !inputs.preflight_only }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          records=(deployments/validation/*.json deployments/diagnostics/*.json)
+          for record in "${records[@]}"; do
+            if grep -Eq '"(secretKey|secret_key|privateKey|private_key|keypair|mnemonic|seedPhrase|rpcEndpoint|rpcUrl)"' "${record}"; then
+              echo "::error::${record} contains a secret-shaped field; refusing to publish it" >&2
+              exit 1
+            fi
+            if grep -Eq 'https?://[^"]*[?&](api-?key|token|apikey)=' "${record}"; then
+              echo "::error::${record} contains a credential-bearing URL; refusing to publish it" >&2
+              exit 1
+            fi
+          done
+
+      - name: Require that a successful run produced evidence
+        if: ${{ success() && !inputs.preflight_only }}
         run: |
           set -euo pipefail
           shopt -s nullglob
           records=(deployments/validation/*.json)
           if [ ${#records[@]} -eq 0 ]; then
-            echo "no evidence record was produced" >&2
+            echo "::error::the run reported success but wrote no evidence record" >&2
             exit 1
           fi
-          for record in "${records[@]}"; do
-            if grep -Eq '"(secretKey|secret_key|privateKey|private_key|keypair|mnemonic|seedPhrase)"' "${record}"; then
-              echo "${record} contains a secret-shaped field; refusing to publish it" >&2
-              exit 1
-            fi
-          done
 
       - name: Upload the validation evidence
-        if: ${{ !inputs.preflight_only }}
+        # Success only. Evidence means the matrix completed; a partial run has
+        # a diagnostic instead, uploaded separately below under a name nobody
+        # can mistake for this one.
+        if: ${{ success() && !inputs.preflight_only }}
         uses: actions/upload-artifact@v4
         with:
           name: ppv-escrow-devnet-custody-validation
           path: deployments/validation/*.json
           if-no-files-found: error
+
+      - name: Upload the failure diagnostic
+        # `always()`, because the run this matters for is the one that failed.
+        # Run 35430583241 reached ten successful lifecycles and uploaded
+        # nothing, leaving the operator a log and no account state.
+        #
+        # This is NOT validation evidence: different artifact name, different
+        # directory, and the record's own first field says so.
+        if: ${{ always() && !inputs.preflight_only }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ppv-escrow-devnet-custody-failure-diagnostic
+          path: deployments/diagnostics/*.json
+          if-no-files-found: ignore
