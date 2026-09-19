@@ -344,18 +344,57 @@ test("a method nobody allowlisted gets zero retries rather than the benefit of t
   assert.deepEqual(c.waits, []);
 });
 
-test("the value-moving path does not go through this client", () => {
-  const runner = readFileSync(join(REPO, "scripts", "lib", "custody-runner.mjs"), "utf8");
-  // Sends are web3.js, and web3.js is constructed from a Connection the read
-  // client knows nothing about. If this ever changes, the retry policy above
-  // stops being safe and this assertion is the thing that says so.
-  assert.match(runner, /import \{ Transaction, sendAndConfirmTransaction \} from "@solana\/web3\.js";/);
-  for (const sender of ["export async function send(", "export async function sendExpectingFailure("]) {
-    const body = runner.slice(runner.indexOf(sender), runner.indexOf(sender) + 1200);
-    assert.ok(body.length > 0, `${sender} was not found`);
-    assert.ok(!body.includes("client.call"), `${sender} routes a send through the read client`);
-    assert.ok(!/retr/i.test(body), `${sender} grew a retry; an ambiguous send must not be resent`);
+/**
+ * The send path moved into `transaction-lifecycle.mjs`; the property did not.
+ *
+ * The read client now legitimately appears in the lifecycle — confirmation
+ * polls `getSignatureStatuses`, which is a read and belongs behind the bounded
+ * 429 policy. What must remain true is narrower and is what this asserts:
+ * submission goes through `connection.sendRawTransaction`, never through the
+ * read client, and the read client's retry never reaches a transaction.
+ */
+test("submission never goes through the read client", () => {
+  const lifecycle = readFileSync(join(REPO, "scripts", "lib", "transaction-lifecycle.mjs"), "utf8");
+
+  // Submission is web3.js against a Connection the read client knows nothing
+  // about.
+  assert.match(lifecycle, /connection\.sendRawTransaction\(/);
+  assert.ok(
+    !/client\.call\(\s*"sendTransaction"/.test(lifecycle),
+    "a transaction is being submitted through the read client",
+  );
+
+  // The read client is used for exactly one thing here, and it is a read.
+  assert.match(lifecycle, /signatureStatus\(client, signature\)/);
+
+  // `maxRetries: 0` on every submission: web3.js will otherwise rebroadcast on
+  // its own, which is the resend this whole file exists to prevent.
+  // Sliced rather than regex-matched: the call spans several lines and a
+  // non-greedy match stops at `serialize()`'s own closing paren.
+  const submissions = [];
+  for (let at = lifecycle.indexOf("connection.sendRawTransaction("); at > -1; ) {
+    submissions.push(lifecycle.slice(at, lifecycle.indexOf("});", at) + 3));
+    at = lifecycle.indexOf("connection.sendRawTransaction(", at + 1);
   }
+  assert.ok(submissions.length >= 2, "expected a success path and a refusal path");
+  for (const submission of submissions) {
+    assert.match(submission, /maxRetries: 0/, `a submission does not pin maxRetries: 0:\n${submission}`);
+  }
+});
+
+test("the only resend is a positively classified pre-submission blockhash expiry", () => {
+  const lifecycle = readFileSync(join(REPO, "scripts", "lib", "transaction-lifecycle.mjs"), "utf8");
+  // Every `continue` in a submit loop is a resend. Each one must be guarded by
+  // the classifier, and nothing else may reach it.
+  const guards = lifecycle.match(/if \(isPreSubmissionBlockhashExpiry\(error\)\) \{/g) ?? [];
+  assert.equal(guards.length, 2, "both send paths must gate their only resend on that classifier");
+  assert.match(lifecycle, /export const MAX_BLOCKHASH_RETRIES = 1;/);
+  // An ambiguous send is resolved, not repeated.
+  assert.match(lifecycle, /confirmBySignature\(client, prepared\.signature/);
+  assert.ok(
+    !/sendRawTransaction[\s\S]{0,200}catch[\s\S]{0,200}sendRawTransaction/.test(lifecycle),
+    "a catch block resubmits",
+  );
 });
 
 /* ----------------------------------------------- the failure run's exact call */

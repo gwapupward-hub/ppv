@@ -37,6 +37,7 @@ infrastructure or setup stage and stopped there:
 | [35393227976](https://github.com/gwapupward-hub/ppv/actions/runs/35393227976) | funder preflight | the funder secret was not keypair JSON |
 | [35405785493](https://github.com/gwapupward-hub/ppv/actions/runs/35405785493) | disposable setup complete | public devnet RPC returned HTTP 429 before the first agreement |
 | [35414331967](https://github.com/gwapupward-hub/ppv/actions/runs/35414331967) | disposable setup | heavy rate limiting through the same shared public endpoint |
+| [35430583241](https://github.com/gwapupward-hub/ppv/actions/runs/35430583241) | **almost the entire matrix** | preflight reported `Blockhash not found` before the final proof settlement |
 
 Each cause is fixed and separately tested. What they have in common is where
 they stopped, and it is worth being exact about it:
@@ -52,6 +53,49 @@ An aborted attempt is neither a custody PASS nor a custody FAIL. It is evidence
 about infrastructure and about nothing else. Nothing in this directory may be
 backfilled from a failed run's logs, and none of the rows above should be read
 as a finding about the deployed program.
+
+### Run 35430583241 in particular
+
+It got much further than the others, and the distinction matters. Ordinary
+escrow, cancel, refund, both dispute outcomes, milestones, bounty, and the
+proof path — submission through a live CPI into `ppv_core`, approval, and
+rejection — all completed, and several funded vaults were emptied and checked
+at zero.
+
+It then stopped on `proofs: settle citing the approved proof` with
+
+```
+Transaction simulation failed: Blockhash not found
+Logs: []
+```
+
+`Logs: []` is the part that settles the classification. The transaction was
+rejected by **simulation, before broadcast**: no instruction executed, and
+`ppv_escrow` never saw the settlement. That is
+`PRE_SUBMISSION_BLOCKHASH_EXPIRED`, and it is not a custody defect, not a
+program rejection, and not an invariant failure.
+
+**Aborted test fixtures.** Two agreements were funded and not wound down:
+
+| fixture | disposable units |
+| --- | --- |
+| the proofs agreement (reached `Completed`) | 9 |
+| `foreign-proof-source` | 3 |
+
+`ABORTED_TEST_FIXTURES_RUN_35430583241` = **12 economically meaningless Classic
+SPL test units**. The disposable buyer and seller keys existed only inside that
+process and are gone, so there is no safe recovery and none should be
+attempted; no key is to be reconstructed and no cleanup instruction invented.
+They are devnet test artifacts, not customer assets.
+
+They must **not** count toward a future run's `FINAL_LIVE_VAULT_BALANCE_TOTAL`.
+That metric is about the vaults a run creates, and a run that inherits someone
+else's stranded fixture has not failed its own accounting.
+
+The exposure that produced the 3-unit half is closed: `foreign-proof-source` is
+now created, used and refunded entirely inside the proof scenario, before the
+settlement that failed, instead of being opened at the start of the run and
+torn down at the end.
 
 ## What a record may contain
 
@@ -131,6 +175,28 @@ treated as a credential:
 the live cluster, before a keypair is loaded or an instruction is built. The
 endpoint's name is only a cheap early refusal for anything that says "mainnet"
 on its face.
+
+#### What the endpoint has to be able to do
+
+Run 35430583241 drew repeated `429 Too Many Requests` and one
+`ws error: Unexpected server response: 429` from a dedicated endpoint, so
+"dedicated" is not by itself sufficient. The matrix needs, roughly:
+
+| | |
+| --- | --- |
+| Transactions | ~70 submissions over ~15 minutes, in short bursts |
+| Reads | a `getMultipleAccounts` over every watched account before and after each one, plus confirmation polling |
+| Sustained request rate | comfortably above ~25 requests/second in burst |
+| Websocket subscriptions | **none required** |
+
+That last row is deliberate. Confirmation polls `getSignatureStatuses` over
+HTTP and never subscribes, so a provider's websocket quota cannot decide
+whether a custody run succeeds. A plan whose websocket tier is exhausted is
+fine; a plan whose HTTP tier is exhausted is not.
+
+Pacing between submissions is short and bounded on purpose. A long sleep would
+make a low-capacity endpoint appear adequate, and the next failure would arrive
+somewhere less legible.
 
 #### 2. `PPV_CUSTODY_FUNDER_KEYPAIR` — who pays rent and fees
 

@@ -535,7 +535,7 @@ async function fundLamports(ctx, to, lamports) {
       }),
     ],
     [ctx.funder],
-    { label: `funding ${to.toBase58()} for fees` },
+    { label: `funding ${to.toBase58()} for fees`, client: ctx.client },
   );
 }
 
@@ -608,7 +608,7 @@ export async function openAgreement(
       }),
     ],
     [creator],
-    { label: `${label}: initialize_agreement` },
+    { label: `${label}: initialize_agreement`, client: ctx.client },
   );
   const after = await snapshotBalances(ctx.client, watched(ctx));
   assertNoMovement(before, after, { label: `${label}: initialize_agreement` });
@@ -655,7 +655,7 @@ export async function valueStep(
   { label, instructions, signers, expected, expectState, invariant },
 ) {
   const before = await snapshotBalances(ctx.client, watched(ctx));
-  const signature = await send(ctx.connection, instructions, signers, { label });
+  const signature = await send(ctx.connection, instructions, signers, { label, client: ctx.client });
   const after = await snapshotBalances(ctx.client, watched(ctx));
 
   const observed = expected(before, after);
@@ -1893,9 +1893,54 @@ export async function scenarioProofs(ctx) {
   proofs.push(one);
   await decideProof(ctx, handle, one, "reject_proof", ctx.buyer, "Rejected");
 
-  // A proof belonging to another agreement cannot be decided here. Not
-  // conditional: a negative the run quietly skips is a negative the summary
-  // counts and nobody performed.
+  // The foreign proof fixture: created here, used once, and wound down
+  // immediately.
+  //
+  // A proof that belongs to a *different* agreement is the only way to ask
+  // whether the program checks that a proof it is handed is one of its own.
+  // A fabricated address would fail because the account does not exist, which
+  // proves nothing.
+  //
+  // It is funded, and funded means custody. It used to be opened at the top of
+  // the run and refunded at the very end, so those 3 units sat in a PPV vault
+  // across every unrelated scenario; when run 35430583241 stopped inside this
+  // scenario, the teardown never ran and they were stranded. Its whole life is
+  // now inside this scenario, and it is emptied before the main agreement's
+  // final settlement — the step that failed in that run.
+  const foreignProofAgreement = await openAgreement(ctx, {
+    label: "foreign-proof-source",
+    creator: ctx.buyer,
+    counterparty: ctx.seller.publicKey,
+    amount: 3n,
+  });
+  await valueStep(ctx, foreignProofAgreement, {
+    label: "foreign-proof-source: fund",
+    invariant: "PPV-P8",
+    instructions: [
+      fundInstruction({
+        buyer: ctx.buyer.publicKey,
+        agreement: foreignProofAgreement.agreement,
+        mint: foreignProofAgreement.mint,
+        vault: foreignProofAgreement.vault,
+        funderTokenAccount: ctx.ata.buyer,
+      }),
+    ],
+    signers: [ctx.buyer],
+    expectState: "Funded",
+    expected: (before, after) =>
+      assertFunding(before, after, {
+        buyer: ctx.ata.buyer.toBase58(),
+        vault: foreignProofAgreement.vault.toBase58(),
+        amount: 3n,
+        label: "foreign-proof-source: fund",
+      }),
+  });
+  const foreignProofHandle = await submitProof(ctx, foreignProofAgreement, 0, ctx.seller);
+  ctx.foreignProof = foreignProofHandle.proof;
+  ctx.foreignAgreements = [...(ctx.foreignAgreements ?? []), foreignProofAgreement];
+
+  // Not conditional: a negative the run quietly skips is a negative the
+  // summary counts and nobody performed.
   if (!ctx.foreignProof) {
     throw new CustodyHarnessFailure(
       "proofs: no foreign proof was prepared, so the relationship-binding negative cannot run",
@@ -1916,6 +1961,44 @@ export async function scenarioProofs(ctx) {
       signers: [ctx.buyer],
     }),
   );
+
+  // Wound down the moment it has served its purpose, and before the main
+  // agreement's settlement, so a failure there cannot strand it.
+  await valueStep(ctx, foreignProofAgreement, {
+    label: "foreign-proof-source: refund",
+    invariant: "PPV-P4",
+    instructions: [
+      refundInstruction({
+        seller: ctx.seller.publicKey,
+        agreement: foreignProofAgreement.agreement,
+        mint: foreignProofAgreement.mint,
+        vault: foreignProofAgreement.vault,
+        vaultAuthority: foreignProofAgreement.vaultAuthority,
+        buyerTokenAccount: ctx.ata.buyer,
+      }),
+    ],
+    signers: [ctx.seller],
+    expectState: "Refunded",
+    expected: (before, after) =>
+      assertPayout(before, after, {
+        vault: foreignProofAgreement.vault.toBase58(),
+        recipient: ctx.ata.buyer.toBase58(),
+        amount: 3n,
+        label: "foreign-proof-source: refund",
+      }),
+  });
+
+  // Asserted, not assumed: the point of moving it here is that it ends empty.
+  const foreignVaultAfter = (
+    await snapshotBalances(ctx.client, [foreignProofAgreement.vault.toBase58()])
+  ).get(foreignProofAgreement.vault.toBase58());
+  if (foreignVaultAfter !== 0n) {
+    throw new CustodyDefect(
+      `foreign-proof-source: its vault still holds ${foreignVaultAfter} after the refund`,
+      { label: "foreign-proof-source", vault: foreignProofAgreement.vault.toBase58() },
+    );
+  }
+  step(true, "foreign-proof-source: vault emptied before the main settlement", "0");
 
   // Settlement citing the approved proof: the payment and its justification in
   // one transaction, which is the composition the surface document claims.
@@ -2364,7 +2447,7 @@ function createContext({ endpoint, connection, client, funder }) {
   };
 }
 
-export async function run({ endpoint, funderPath, outPath, commit }) {
+export async function run({ endpoint, funderPath, outPath, commit, onContext = null }) {
   requireNoMainnetEndpoint(endpoint);
   const client = rpc(endpoint);
   const preflightFacts = await preflight(client);
@@ -2375,6 +2458,8 @@ export async function run({ endpoint, funderPath, outPath, commit }) {
   // `error.message`. `loadFunderSecretOrThrow` throws a constant instead.
   const funder = Keypair.fromSecretKey(loadFunderSecretOrThrow(funderPath));
   const ctx = createContext({ endpoint, connection, client, funder });
+  ctx.commit = commit;
+  if (onContext) onContext(ctx);
 
   const funderState = await checkFunder(connection, funder.publicKey);
   log("\nFunder");
@@ -2418,42 +2503,20 @@ export async function run({ endpoint, funderPath, outPath, commit }) {
       }),
     ],
     [ctx.buyer],
-    { label: "foreign-milestone-source: create_milestone" },
+    { label: "foreign-milestone-source: create_milestone", client: ctx.client },
   );
   ctx.foreignMilestone = foreignMilestone;
 
-  const foreignProofAgreement = await openAgreement(ctx, {
-    label: "foreign-proof-source",
-    creator: ctx.buyer,
-    counterparty: ctx.seller.publicKey,
-    amount: 3n,
-  });
-  await valueStep(ctx, foreignProofAgreement, {
-    label: "foreign-proof-source: fund",
-    invariant: "PPV-P8",
-    instructions: [
-      fundInstruction({
-        buyer: ctx.buyer.publicKey,
-        agreement: foreignProofAgreement.agreement,
-        mint: foreignProofAgreement.mint,
-        vault: foreignProofAgreement.vault,
-        funderTokenAccount: ctx.ata.buyer,
-      }),
-    ],
-    signers: [ctx.buyer],
-    expectState: "Funded",
-    expected: (before, after) =>
-      assertFunding(before, after, {
-        buyer: ctx.ata.buyer.toBase58(),
-        vault: foreignProofAgreement.vault.toBase58(),
-        amount: 3n,
-        label: "foreign-proof-source: fund",
-      }),
-  });
-  const foreignProofHandle = await submitProof(ctx, foreignProofAgreement, 0, ctx.seller);
-  ctx.foreignProof = foreignProofHandle.proof;
-  ctx.foreignAgreements = [foreignMilestoneAgreement, foreignProofAgreement];
-  step(true, "foreign milestone and foreign proof created for relationship-binding negatives");
+  ctx.foreignAgreements = [foreignMilestoneAgreement];
+  step(true, "foreign milestone created for the milestone relationship-binding negative");
+
+  // The foreign PROOF fixture is deliberately NOT created here.
+  //
+  // It used to be, and it held 3 funded units in a PPV vault across every
+  // unrelated scenario until a teardown at the very end of the run. When run
+  // 35430583241 stopped inside the proof scenario, that teardown never
+  // executed and the units were stranded. It is created, used and wound down
+  // inside `scenarioProofs`, which is the only scenario that needs it.
 
   await scenarioOrdinaryEscrow(ctx);
   await scenarioCancel(ctx);
@@ -2473,9 +2536,10 @@ export async function run({ endpoint, funderPath, outPath, commit }) {
   await scenarioBounty(ctx);
   await scenarioProofs(ctx);
 
-  // The two foreign agreements are wound down so no vault is left holding
-  // anything: the milestone source was never funded and is cancelled, and the
-  // proof source holds 3 units the seller returns.
+  // The foreign milestone source was never funded, so cancelling it is all
+  // that is required. The foreign proof source is funded, and is therefore
+  // created and wound down inside `scenarioProofs` rather than left alive
+  // here — see the note where it used to be created.
   await send(
     ctx.connection,
     [
@@ -2485,32 +2549,8 @@ export async function run({ endpoint, funderPath, outPath, commit }) {
       }),
     ],
     [ctx.buyer],
-    { label: "foreign-milestone-source: cancel" },
+    { label: "foreign-milestone-source: cancel", client: ctx.client },
   );
-  await valueStep(ctx, foreignProofAgreement, {
-    label: "foreign-proof-source: refund",
-    invariant: "PPV-P4",
-    instructions: [
-      refundInstruction({
-        seller: ctx.seller.publicKey,
-        agreement: foreignProofAgreement.agreement,
-        mint: foreignProofAgreement.mint,
-        vault: foreignProofAgreement.vault,
-        vaultAuthority: foreignProofAgreement.vaultAuthority,
-        buyerTokenAccount: ctx.ata.buyer,
-      }),
-    ],
-    signers: [ctx.seller],
-    expectState: "Refunded",
-    expected: (before, after) =>
-      assertPayout(before, after, {
-        vault: foreignProofAgreement.vault.toBase58(),
-        recipient: ctx.ata.buyer.toBase58(),
-        amount: 3n,
-        label: "foreign-proof-source: refund",
-      }),
-  });
-
   const reconstruction = await reconstruct(ctx);
 
   log("\nPhase 17 — final accounting");
@@ -2611,10 +2651,98 @@ async function main() {
       `ppv-escrow-devnet-custody-${commit.slice(0, 7) || "unknown"}.json`,
     );
 
-  await run({ endpoint, funderPath, outPath, commit });
+  await run({ endpoint, funderPath, outPath, commit, onContext: (ctx) => {
+    // Held so an execute-mode failure can write a public diagnostic about
+    // what actually happened. Run 35430583241 failed mid-matrix and uploaded
+    // nothing at all, which left the operator with a log and no account state.
+    liveContext = ctx;
+  } });
   log("\nPPV ESCROW LIVE DEVNET CUSTODY VALIDATION: PASS");
   log("CUSTODY GATE REMAINS CLOSED — RR-13 and legal review are open, mainnet is not authorized.");
 }
+
+/**
+ * What a failed execute-mode run leaves behind.
+ *
+ * Run 35430583241 stopped inside the proof scenario and uploaded no artifact at
+ * all, so the only record of ten successful lifecycles and two funded fixtures
+ * was a log. This is that record — and it is emphatically NOT validation
+ * evidence. It is named differently, written to a different place, and says so
+ * in its own first field, because the one thing worse than no evidence is a
+ * failed run's debris being mistaken for some.
+ *
+ * Public facts only. The same `assertNoSecrets` that guards the evidence record
+ * guards this one, so an RPC URL, a keypair or an environment value fails the
+ * write rather than being uploaded.
+ */
+export function buildFailureDiagnostic(ctx, error, { runId = null, commit = null } = {}) {
+  const scenarios = ctx?.scenarios ?? {};
+  const completed = Object.keys(scenarios);
+  const record = {
+    artifact: "ppv-escrow-devnet-custody-failure",
+    isValidationEvidence: false,
+    note:
+      "A failed live custody execution. This is diagnostic material about one run, not evidence " +
+      "of custody behaviour, and it must never be read as a PASS or landed under " +
+      "deployments/validation/.",
+    schemaVersion: 1,
+    workflowRunId: runId,
+    repositoryCommit: commit ?? ctx?.commit ?? null,
+    harnessRunId: ctx?.runId ?? null,
+    cluster: "devnet",
+    classification: error?.classification ?? classifyFailure(error),
+    failedAt: error?.message ? redact(error.message) : null,
+    lastCompletedPhase: completed.length > 0 ? completed[completed.length - 1] : null,
+    completedScenarios: completed,
+    knownSignature: error?.signature ?? null,
+    testMint: ctx?.mint ? String(ctx.mint) : null,
+    secondTestMint: ctx?.secondMint ? String(ctx.secondMint) : null,
+    wallets: ctx
+      ? {
+          funder: ctx.funderPublicKey ?? null,
+          buyer: ctx.buyer?.publicKey?.toBase58() ?? null,
+          seller: ctx.seller?.publicKey?.toBase58() ?? null,
+          outsider: ctx.outsider?.publicKey?.toBase58() ?? null,
+        }
+      : null,
+    scenarios: Object.fromEntries(
+      Object.entries(scenarios).map(([key, value]) => [
+        key,
+        {
+          agreement: value?.agreement ?? null,
+          vault: value?.vault ?? null,
+          finalState: value?.finalState ?? null,
+          signatures: value?.signatures ?? [],
+        },
+      ]),
+    ),
+    watchedAccounts: ctx?.watched ? [...ctx.watched] : [],
+    negatives: (ctx?.negatives ?? []).map((row) => ({
+      label: row.label,
+      signature: row.signature ?? null,
+      onChain: row.onChain ?? false,
+      errorCode: row.errorCode ?? null,
+    })),
+    unfinishedFixtures: (ctx?.foreignAgreements ?? []).map((handle) => ({
+      label: handle?.label ?? null,
+      agreement: handle?.agreement ? String(handle.agreement) : null,
+      vault: handle?.vault ? String(handle.vault) : null,
+    })),
+    generatedAt: new Date().toISOString(),
+  };
+  return assertNoSecrets(record);
+}
+
+/** A best-effort classification for an error that carries none of its own. */
+function classifyFailure(error) {
+  if (error instanceof CustodyDefect) return "CUSTODY_DEFECT";
+  if (error instanceof RpcRateLimitError) return RPC_RATE_LIMIT;
+  if (error instanceof CustodyHarnessFailure) return "HARNESS_DEFECT";
+  return "RPC_PROVIDER_FAILURE";
+}
+
+/** Set by `main()` so the failure path can describe what the run had reached. */
+let liveContext = null;
 
 if (process.argv[1] && process.argv[1].endsWith("devnet-escrow-custody.mjs")) {
   main()
@@ -2639,6 +2767,32 @@ if (process.argv[1] && process.argv[1].endsWith("devnet-escrow-custody.mjs")) {
         process.stderr.write(
           "\nThis is a finding about the DEPLOYED PROGRAM, not about the harness.\n" +
             "Do not patch around it. Do not upgrade the program. Report it.\n",
+        );
+      }
+      // Written on every execute-mode failure, so the next operator inherits
+      // account state rather than a log. Guarded: a diagnostic that cannot be
+      // written must not replace the real failure with its own.
+      try {
+        const runId = process.env.GITHUB_RUN_ID || null;
+        const diagnosticPath =
+          process.env.PPV_CUSTODY_FAILURE_OUT ||
+          // A different directory, not just a different filename. The
+          // validation upload globs deployments/validation/*.json, and a
+          // failed run's debris must not be able to arrive inside an artifact
+          // named "validation".
+          join(REPO, "deployments", "diagnostics", `ppv-escrow-devnet-custody-failure-${runId ?? "local"}.json`);
+        if (liveContext) {
+          const diagnostic = buildFailureDiagnostic(liveContext, error, {
+            runId,
+            commit: process.env.PPV_COMMIT_SHA || null,
+          });
+          mkdirSync(dirname(diagnosticPath), { recursive: true });
+          writeFileSync(diagnosticPath, `${JSON.stringify(diagnostic, null, 2)}\n`);
+          process.stderr.write(`\nFAILURE DIAGNOSTIC (not validation evidence): ${diagnosticPath}\n`);
+        }
+      } catch (diagnosticError) {
+        process.stderr.write(
+          `\ncould not write the failure diagnostic: ${redact(diagnosticError?.message ?? "unknown")}\n`,
         );
       }
       process.stderr.write("PPV ESCROW LIVE DEVNET CUSTODY VALIDATION: FAILED\n");

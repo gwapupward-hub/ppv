@@ -12,7 +12,13 @@
  * evidence record and refuses anything that looks like a private key.
  */
 
-import { Transaction, sendAndConfirmTransaction } from "@solana/web3.js";
+import {
+  CLASSIFICATION,
+  SUBMISSION_PACING_MS,
+  assertProvenRefusal,
+  sendExpectingRefusal,
+  sendExpectingSuccess,
+} from "./transaction-lifecycle.mjs";
 
 import { SAFE_ENDPOINT_LABEL, looksLikeCredentialUrl, redact } from "./endpoint-safety.mjs";
 import { DEVNET_GENESIS, MAINNET_GENESIS } from "./rpc.mjs";
@@ -159,56 +165,93 @@ export async function snapshotBalances(client, addresses) {
 /**
  * A transaction that is expected to succeed.
  *
- * Confirmed at `confirmed` before anything is asserted about it, because a
- * balance read against a slot that has not seen the transaction is not evidence
- * of anything, and the resulting "no movement" failure would look like a
- * protocol defect.
+ * Delegates to `scripts/lib/transaction-lifecycle.mjs`, which fetches a fresh
+ * blockhash, computes the signature before submitting, submits exactly once,
+ * and confirms by polling `getSignatureStatuses` over HTTP.
+ *
+ * What this replaced mattered. `sendAndConfirmTransaction` wrapped every
+ * outcome in one sentence, so run 35430583241's final settlement — rejected by
+ * *simulation* with `Blockhash not found` and `Logs: []`, meaning the
+ * instruction never reached the program — was reported as "expected to succeed
+ * and did not", which reads like a custody finding. A lifecycle failure is now
+ * classified, and a classification that is not about the program says so.
  */
-export async function send(connection, instructions, signers, { label }) {
-  const transaction = new Transaction().add(...instructions);
-  try {
-    return await sendAndConfirmTransaction(connection, transaction, signers, {
-      commitment: "confirmed",
-      preflightCommitment: "confirmed",
-    });
-  } catch (error) {
+export async function send(connection, instructions, signers, { label, client, ...options }) {
+  if (!client) {
     throw new CustodyHarnessFailure(
-      `${label} was expected to succeed and did not: ${describeError(error)}`,
+      `${label} was sent without a read client; confirmation polls getSignatureStatuses and ` +
+        "cannot fall back to a websocket subscription",
     );
+  }
+  try {
+    const outcome = await sendExpectingSuccess({
+      connection,
+      client,
+      instructions,
+      signers,
+      label,
+      ...options,
+    });
+    return outcome.signature;
+  } catch (error) {
+    if (error instanceof CustodyDefect) throw error;
+    const classification = error?.classification ?? CLASSIFICATION.RPC_PROVIDER_FAILURE;
+    const failure = new CustodyHarnessFailure(
+      `${label} did not complete [${classification}]: ${describeError(error)}`,
+    );
+    failure.classification = classification;
+    failure.signature = error?.signature ?? null;
+    throw failure;
   }
 }
 
 /**
- * A transaction that is expected to fail, sent so that it actually reaches the
- * program.
+ * A transaction that is expected to fail, proved by a failed transaction on chain.
  *
- * `skipPreflight` is on deliberately. With preflight, the RPC node's simulator
- * rejects the transaction and it never lands — which proves the simulator
- * agrees, not that the deployed program refuses. The whole point of a live
- * negative test is the second claim, so the transaction is submitted, lands in
- * a block, and fails there, leaving a signature that anyone can look up.
+ * The previous implementation caught essentially any thrown error and returned
+ * it as a refusal. That is not evidence: a 429, a reset socket or an expired
+ * blockhash would have been recorded as "the program refused this" — and run
+ * 35430583241 was being served 429s while its negative suite ran.
+ *
+ * A refusal now requires the signature to be found on chain carrying an error.
+ * No landed signature is an infrastructure failure and never a refusal; a
+ * landed signature with no error is a custody defect.
  */
-export async function sendExpectingFailure(connection, instructions, signers, { label }) {
-  const transaction = new Transaction().add(...instructions);
-  try {
-    const signature = await sendAndConfirmTransaction(connection, transaction, signers, {
-      commitment: "confirmed",
-      skipPreflight: true,
-    });
-    throw new CustodyDefect(
-      `${label} was expected to fail and SUCCEEDED (signature ${signature}). ` +
-        "A guard the repository claims exists did not refuse this.",
-      { label, signature },
+export async function sendExpectingFailure(connection, instructions, signers, { label, client, ...options }) {
+  if (!client) {
+    throw new CustodyHarnessFailure(
+      `${label} was sent without a read client; a refusal is only a refusal once its signature is ` +
+        "found on chain, and that requires getSignatureStatuses",
     );
+  }
+  try {
+    return assertProvenRefusal({
+      label,
+      ...(await sendExpectingRefusal({
+        connection,
+        client,
+        instructions,
+        signers,
+        label,
+        ...options,
+      })),
+    });
   } catch (error) {
     if (error instanceof CustodyDefect) throw error;
-    return {
-      signature: extractSignature(error) ?? null,
-      error: describeError(error),
-      errorCode: extractAnchorErrorCode(error),
-    };
+    if (error?.classification === CLASSIFICATION.CUSTODY_DEFECT) {
+      throw new CustodyDefect(describeError(error), { label, signature: error.signature ?? null });
+    }
+    const classification = error?.classification ?? CLASSIFICATION.RPC_PROVIDER_FAILURE;
+    const failure = new CustodyHarnessFailure(
+      `${label} could not be proved refused [${classification}]: ${describeError(error)}`,
+    );
+    failure.classification = classification;
+    failure.signature = error?.signature ?? null;
+    throw failure;
   }
 }
+
+export { SUBMISSION_PACING_MS };
 
 /**
  * Every failure the harness reports passes through here.
@@ -267,7 +310,9 @@ export async function attemptRefusal(
   const before = await snapshotBalances(client, watched);
   const stateBefore = readAgreement ? await readAgreement() : null;
 
-  const outcome = await sendExpectingFailure(connection, instructions, signers, { label });
+  // `client` is required: a refusal is only a refusal once its signature has
+  // been found on chain carrying an error.
+  const outcome = await sendExpectingFailure(connection, instructions, signers, { label, client });
 
   const after = await snapshotBalances(client, watched);
   const stateAfter = readAgreement ? await readAgreement() : null;
@@ -287,9 +332,14 @@ export async function attemptRefusal(
     invariant,
     expected: "failure",
     result: "refused",
+    // The proof, not a paraphrase of one: a signature anyone can look up, the
+    // fact that it landed, and the error the chain recorded against it.
     signature: outcome.signature,
+    onChain: outcome.onChain,
+    err: outcome.err,
     errorCode: outcome.errorCode,
-    error: outcome.error,
+    confirmationStatus: outcome.confirmationStatus ?? null,
+    programAttributed: outcome.programAttributed ?? "unverified",
     stateBefore: stateBefore?.state ?? null,
     stateAfter: stateAfter?.state ?? null,
     settledTotalBefore: stateBefore ? String(stateBefore.settledTotal) : null,
