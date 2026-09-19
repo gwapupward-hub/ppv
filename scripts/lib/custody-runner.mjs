@@ -14,6 +14,7 @@
 
 import { Transaction, sendAndConfirmTransaction } from "@solana/web3.js";
 
+import { SAFE_ENDPOINT_LABEL, looksLikeCredentialUrl, redact } from "./endpoint-safety.mjs";
 import { DEVNET_GENESIS, MAINNET_GENESIS } from "./rpc.mjs";
 import {
   BalanceSnapshot,
@@ -60,13 +61,13 @@ export async function requireDevnet(client) {
   const genesis = await client.genesisHash();
   if (genesis === MAINNET_GENESIS) {
     throw new CustodyHarnessFailure(
-      `${client.endpoint} is mainnet-beta (genesis ${genesis}). This harness signs value-moving ` +
+      `${SAFE_ENDPOINT_LABEL} is mainnet-beta (genesis ${genesis}). This harness signs value-moving ` +
         "transactions and is authorized for devnet only. Refusing before anything is constructed.",
     );
   }
   if (genesis !== DEVNET_GENESIS) {
     throw new CustodyHarnessFailure(
-      `${client.endpoint} reports genesis ${genesis}, which is neither devnet ` +
+      `${SAFE_ENDPOINT_LABEL} reports genesis ${genesis}, which is neither devnet ` +
         `(${DEVNET_GENESIS}) nor a cluster this harness recognises. Refusing.`,
     );
   }
@@ -83,8 +84,11 @@ export function requireNoMainnetEndpoint(endpoint) {
   const lowered = String(endpoint).toLowerCase();
   for (const marker of ["mainnet", "main-net", "mainnet-beta"]) {
     if (lowered.includes(marker)) {
+      // The marker is named; the endpoint is not. A dedicated RPC URL can
+      // carry an API key, and "which endpoint" adds nothing an operator does
+      // not already know — they set it.
       throw new CustodyHarnessFailure(
-        `the endpoint ${endpoint} names ${marker}; this harness is devnet-only and refuses it ` +
+        `${SAFE_ENDPOINT_LABEL} names ${marker}; this harness is devnet-only and refuses it ` +
           "without asking the cluster",
       );
     }
@@ -206,10 +210,19 @@ export async function sendExpectingFailure(connection, instructions, signers, { 
   }
 }
 
+/**
+ * Every failure the harness reports passes through here.
+ *
+ * Which makes it the place to scrub. `@solana/web3.js` wraps transport errors
+ * without knowing or caring that the URL inside one may be a credential, so a
+ * message this repository never wrote can still publish the endpoint. Redaction
+ * happens on the way out rather than at each throw site, because the throw
+ * sites belong to a dependency.
+ */
 export function describeError(error) {
   if (!error) return "unknown error";
   const logs = Array.isArray(error.logs) ? error.logs.join(" | ") : "";
-  return `${error.message ?? String(error)}${logs ? ` :: ${logs}` : ""}`;
+  return redact(`${error.message ?? String(error)}${logs ? ` :: ${logs}` : ""}`);
 }
 
 /** Anchor's `Error Code: X. Error Number: N` and the raw custom-program code. */
@@ -378,6 +391,17 @@ export function assertNoSecrets(value, path = "$") {
     if (/^\[\s*\d+\s*(,\s*\d+\s*){31,}\]$/.test(value)) {
       throw new CustodyHarnessFailure(
         `${path} holds a serialized byte array, which is how a keypair file is written`,
+      );
+    }
+
+    // A dedicated RPC endpoint authenticates with a key in its query string or
+    // its path. Evidence is published, so a URL shaped like that is refused
+    // rather than trimmed: this record names a cluster by genesis hash and has
+    // no reason to carry an endpoint at all.
+    if (looksLikeCredentialUrl(value)) {
+      throw new CustodyHarnessFailure(
+        `${path} holds a URL carrying credentials or an opaque path; an evidence record names ` +
+          "the cluster by genesis hash and never the endpoint that was read",
       );
     }
   }

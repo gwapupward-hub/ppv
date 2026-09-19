@@ -80,13 +80,87 @@ test("a live run requires an explicit confirmation and is not the default", () =
 
 /* --------------------------------------------------------- the cluster */
 
-test("there is no RPC endpoint input; the cluster is fixed to devnet", () => {
-  assert.match(CODE, /PPV_CUSTODY_RPC_URL: https:\/\/api\.devnet\.solana\.com/);
+/**
+ * The endpoint is a secret now, not a literal.
+ *
+ * Run 35405785493 reached execute mode, created its disposable wallets, mints
+ * and token accounts, and then died on the shared public endpoint's rate
+ * limiter before PPV had received a single transaction. That endpoint is out of
+ * the execution path; what replaces it is a dedicated one supplied by the
+ * protected environment.
+ *
+ * Nothing about the cluster guarantee weakens: devnet is proved by genesis hash
+ * against the live chain, and a secret URL is trusted for nothing.
+ */
+test("the dedicated RPC endpoint comes from the protected environment, not from a literal", () => {
+  assert.match(CODE, /PPV_CUSTODY_RPC_URL: \$\{\{ secrets\.PPV_CUSTODY_RPC_URL \}\}/);
+  assert.ok(
+    !/api\.devnet\.solana\.com/.test(CODE),
+    "the shared public endpoint is back in the execution path; it rate-limited run 35405785493",
+  );
+  assert.match(
+    CODE,
+    /environment: devnet-custody-validation/,
+    "the RPC secret must come from the protected environment",
+  );
+});
+
+test("there is still no RPC endpoint input", () => {
   assert.doesNotMatch(
     CODE,
     /rpc_url:|endpoint:|cluster:/,
     "an endpoint input is the one thing that could point this at another cluster",
   );
+  // Assigned exactly once, in the job env, so no step can shadow it with a
+  // literal of its own. Counted as a YAML assignment specifically: the shell's
+  // `${PPV_CUSTODY_RPC_URL:-}` default syntax is a read, not an assignment, and
+  // matching it here would make this assertion mean nothing.
+  const assignments = CODE.match(/^\s+PPV_CUSTODY_RPC_URL: \S/gm) ?? [];
+  assert.equal(assignments.length, 1, `assigned ${assignments.length} times: ${assignments}`);
+});
+
+test("a missing RPC secret stops the job before checkout, npm, or the funder", () => {
+  const guard = CODE.indexOf("Require the dedicated devnet RPC endpoint");
+  assert.ok(guard > -1, "there is no dedicated-RPC presence check");
+  for (const later of ["actions/checkout@v4", "npm ci", "Funder preflight", "Live custody run"]) {
+    const at = CODE.indexOf(later);
+    assert.ok(at > -1, `${later} was not found`);
+    assert.ok(guard < at, `the RPC presence check must run before ${later}`);
+  }
+  assert.match(CODE, /DEDICATED_DEVNET_RPC=MISSING/);
+  assert.match(CODE, /if \[ -z "\$\{PPV_CUSTODY_RPC_URL:-\}" \]; then/);
+});
+
+test("the workflow never echoes the RPC secret, only its presence", () => {
+  // `-z` on the variable is a presence test. Anything that prints it, compares
+  // it to a literal, or interpolates it into a message is not.
+  assert.ok(!/echo[^\n]*\$\{?\{?\s*secrets\.PPV_CUSTODY_RPC_URL/.test(CODE));
+  assert.ok(!/echo[^\n]*\$\{PPV_CUSTODY_RPC_URL\}/.test(CODE));
+  assert.ok(
+    !/PPV_CUSTODY_RPC_URL[^\n]*(>>\s*\$GITHUB_OUTPUT|>>\s*\$GITHUB_STEP_SUMMARY)/.test(CODE),
+    "the endpoint must not reach an output or a step summary",
+  );
+  assert.match(CODE, /DEDICATED_DEVNET_RPC=CONFIGURED/, "presence is reported, the value is not");
+});
+
+test("the RPC secret and the funder secret stay separate", () => {
+  // Different purposes, different failure modes. A single secret carrying both
+  // would mean one rotation touches custody and connectivity at once.
+  const secrets = [...CODE.matchAll(/secrets\.([A-Z_0-9]+)/g)].map((match) => match[1]);
+  assert.deepEqual([...new Set(secrets)].sort(), [
+    "PPV_CUSTODY_FUNDER_KEYPAIR",
+    "PPV_CUSTODY_RPC_URL",
+  ]);
+});
+
+test("mainnet refusal is still decided by genesis hash, not by the URL", () => {
+  const harness = readFileSync(join(REPO, "scripts", "lib", "custody-runner.mjs"), "utf8");
+  assert.match(harness, /export async function requireDevnet/);
+  assert.match(harness, /MAINNET_GENESIS/);
+  assert.match(harness, /DEVNET_GENESIS/);
+  // A secret endpoint could be pointed anywhere, so the name check stays as a
+  // cheap early refusal and the genesis check remains the one that binds.
+  assert.match(harness, /export function requireNoMainnetEndpoint/);
 });
 
 test("no mainnet endpoint appears anywhere in the workflow", () => {
@@ -144,9 +218,12 @@ test("it holds no program keypair and no deployer keypair", () => {
   }
 });
 
-test("the only PPV secret it takes is the disposable funder", () => {
+test("the only PPV secrets it takes are the funder keypair and the dedicated RPC URL", () => {
   const secrets = [...CODE.matchAll(/secrets\.([A-Z_0-9]+)/g)].map((match) => match[1]);
-  assert.deepEqual([...new Set(secrets)], ["PPV_CUSTODY_FUNDER_KEYPAIR"]);
+  assert.deepEqual([...new Set(secrets)].sort(), [
+    "PPV_CUSTODY_FUNDER_KEYPAIR",
+    "PPV_CUSTODY_RPC_URL",
+  ]);
 });
 
 test("the funder keypair is removed whatever happens", () => {

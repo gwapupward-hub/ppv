@@ -15,6 +15,7 @@
 
 import { createHash } from "node:crypto";
 
+import { SAFE_ENDPOINT_LABEL } from "./endpoint-safety.mjs";
 import { UPGRADEABLE_LOADER_ID } from "./identity.mjs";
 import { encodeBase58 } from "./pubkey.mjs";
 
@@ -152,6 +153,30 @@ export function rateLimitDelayMs(attempt, retryAfterHeader, { now = Date.now(), 
   return Math.round(capped / 2 + random() * (capped / 2));
 }
 
+/**
+ * One safe word for why a request never got an answer.
+ *
+ * Drawn from a fixed list rather than from the error's own text: undici puts
+ * the full request — endpoint included — inside a transport error, so the
+ * message is classified, never quoted.
+ */
+export function transportReason(error) {
+  const code = String(error?.cause?.code ?? error?.code ?? "");
+  const known = {
+    ENOTFOUND: "the host could not be resolved",
+    EAI_AGAIN: "the host could not be resolved",
+    ECONNREFUSED: "the connection was refused",
+    ECONNRESET: "the connection was reset",
+    ETIMEDOUT: "the connection timed out",
+    UND_ERR_CONNECT_TIMEOUT: "the connection timed out",
+    UND_ERR_HEADERS_TIMEOUT: "the response headers timed out",
+    UND_ERR_BODY_TIMEOUT: "the response body timed out",
+    CERT_HAS_EXPIRED: "the TLS certificate is not valid",
+    ERR_TLS_CERT_ALTNAME_INVALID: "the TLS certificate is not valid",
+  };
+  return known[code] ?? "the request failed before a response arrived";
+}
+
 const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Genesis hashes that identify a cluster. Mainnet is here to be refused. */
@@ -195,11 +220,21 @@ export function rpc(
 
     let waitedMs = 0;
     for (let attempt = 0; ; attempt += 1) {
-      const response = await fetchImpl(endpoint, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ jsonrpc: "2.0", id: nextId++, method, params }),
-      });
+      let response;
+      try {
+        response = await fetchImpl(endpoint, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ jsonrpc: "2.0", id: nextId++, method, params }),
+        });
+      } catch (error) {
+        // A transport failure — DNS, TLS, a refused connection — is reported by
+        // undici with the request in the error, and for a dedicated endpoint
+        // that request carries a credential. Only the method and a one-word
+        // reason survive; the original is not chained, because a `cause` is
+        // exactly what a future `console.error(error)` would print.
+        throw new RpcError(`${method} could not reach ${SAFE_ENDPOINT_LABEL}: ${transportReason(error)}`);
+      }
 
       if (response.status === RATE_LIMIT_STATUS) {
         if (attempt >= maxRetries) {
