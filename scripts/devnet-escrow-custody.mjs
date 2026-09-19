@@ -2221,6 +2221,54 @@ function finish(ctx, handle, negatives, scenarioKey) {
 /* ============================================================= PHASE 12 ==== */
 
 /**
+ * The fields this harness reads off an `EscrowEventEnvelope`.
+ *
+ * Declared rather than inferred, so `scripts/test/reconstruction-envelope-
+ * contract.test.mjs` can hold this list against the type the SDK actually
+ * exports and fail on drift in either direction.
+ */
+export const ESCROW_EVENT_ENVELOPE_FIELDS_READ = Object.freeze([
+  "event",
+  "programId",
+  "transactionSignature",
+]);
+
+/**
+ * One reconstructed event, checked against the envelope contract.
+ *
+ * Live run 35457793117 completed the entire custody matrix — every scenario,
+ * every negative, every funded vault back to zero — and then failed here with
+ *
+ *     ordinaryEscrow: an event was attributed to undefined, not ppv_escrow
+ *
+ * `undefined` was the finding. The harness read `envelope.program` and
+ * `envelope.signature`; `EscrowEventEnvelope` carries neither. It has
+ * `programId` and `transactionSignature`, and the literal `"ppv_escrow"` the
+ * old check wanted lives one level in, on `envelope.event.program`, where the
+ * decoder writes it. So the check compared `undefined` against a string and
+ * failed every event of every scenario. Nothing was wrong with the chain, the
+ * program, or the events.
+ *
+ * Attribution is now bound to the deployed program id rather than to a decoder
+ * literal, which is the stronger claim: `programId` is the program whose event
+ * authority signed the CPI these bytes came from, while `event.program` is a
+ * constant this repository's own decoder writes into every event it builds and
+ * could not disagree with itself.
+ */
+export function assertEscrowEventEnvelope(envelope, { key, programId }) {
+  if (envelope?.programId !== programId) {
+    throw new CustodyDefect(
+      `${key}: an event was attributed to program id ${envelope?.programId ?? "undefined"}, not ` +
+        `${programId}`,
+    );
+  }
+  if (typeof envelope.transactionSignature !== "string" || envelope.transactionSignature === "") {
+    throw new CustodyDefect(`${key}: an event carries no transaction signature`);
+  }
+  return envelope;
+}
+
+/**
  * Every generated transaction, read back and reconstructed.
  *
  * Nothing here is built from what the harness remembers doing. The histories
@@ -2249,14 +2297,7 @@ export async function reconstruct(ctx) {
     });
 
     for (const envelope of replay.events) {
-      if (envelope.program !== "ppv_escrow") {
-        throw new CustodyDefect(
-          `${key}: an event was attributed to ${envelope.program}, not ppv_escrow`,
-        );
-      }
-      if (!envelope.signature) {
-        throw new CustodyDefect(`${key}: an event carries no transaction signature`);
-      }
+      assertEscrowEventEnvelope(envelope, { key, programId: ESCROW_PROGRAM_ID.toBase58() });
     }
 
     const live = await readAgreement(ctx, new PublicKey(scenario.agreement));
