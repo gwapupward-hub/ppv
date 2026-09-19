@@ -34,7 +34,7 @@ false now, and kept only so the sequence of events stays legible.
 | Live devnet read-only preflight | PASS — https://github.com/gwapupward-hub/ppv/actions/runs/35053809296 |
 | RR-6 event/history reconstruction | OPEN — written, not run live |
 | RR-7 live Squads decode | CLOSED for the custody multisig; OPEN for Core/Commerce |
-| Live devnet custody validation | NOT RUN |
+| Live devnet custody validation | ATTEMPTED — NOT COMPLETED (no custody matrix has run; `CANONICAL_LIVE_CUSTODY_EVIDENCE=NONE`) |
 | Independent security review (RR-13) | OPEN |
 | Legal review | OPEN |
 | **Custody gate** | **CLOSED** |
@@ -222,12 +222,13 @@ doing. It also asserts duplicate-delivery idempotence and reversed-delivery
 convergence per family, and that the events' own accounting of what was paid out
 equals the agreement's `settled_total`.
 
-**RR-6 remains OPEN.** That code has not been run against devnet: the
-environment that maintains this repository has no route to any Solana RPC host,
-and the run is `workflow_dispatch` only. Writing the reconstruction is not the
-same as proving it, and the entry closes only when a live run has reconstructed
-every family named above and the evidence is committed under
-`deployments/validation/`. Decoding cleanly is explicitly not sufficient — RR-6
+**RR-6 remains OPEN.** That code has still not been run against devnet. Several
+controlled executions have been dispatched; none reached the reconstruction
+phase, because none created a PPV agreement — see
+`deployments/validation/README.md` for each attempt and where it stopped.
+Writing the reconstruction is not the same as proving it, and the entry closes
+only when a live run has reconstructed every family named above and the evidence
+is committed under `deployments/validation/`. Decoding cleanly is explicitly not sufficient — RR-6
 is about complete projection agreeing with chain state, and an indexer that
 decodes every event and projects the wrong lifecycle is worse than one that
 fails loudly.

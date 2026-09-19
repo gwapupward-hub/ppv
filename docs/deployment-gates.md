@@ -121,7 +121,7 @@ false now, and kept only so the sequence of events stays legible.
 | Authority transfer | FINALIZED |
 | Deployment provenance | CLOSED — `deployments/evidence/ppv-escrow-devnet-231dceb.json` |
 | Live devnet read-only preflight | PASS — https://github.com/gwapupward-hub/ppv/actions/runs/35053809296 |
-| Live devnet custody validation | NOT RUN |
+| Live devnet custody validation | ATTEMPTED — NOT COMPLETED (no custody matrix has run; `CANONICAL_LIVE_CUSTODY_EVIDENCE=NONE`) |
 | Independent security review (RR-13) | OPEN |
 | Legal review | OPEN |
 | **Custody gate** | **CLOSED** |
@@ -177,13 +177,26 @@ each, and a vault index 0 that derives to
 `FD2spnsMVgsuddPSRWAe3ee4DMbgDx5ivpvVfvKcNrLE`. That is what closed **RR-7** for
 the custody multisig.
 
-The value-moving half has **NOT RUN**. The harness and its deterministic refusal
-suite exist and pass, but no transaction has been sent, because the environment
-that maintains this repository has no route to any Solana RPC host and the
-execute workflow is `workflow_dispatch` only. Until a run exists and its evidence
-is committed under `deployments/validation/`, the correct reading of every
-custody-behaviour claim in this repository is the one it already carries, and
-**RR-6** stays open.
+The value-moving half is **ATTEMPTED — NOT COMPLETED**. The harness and its
+deterministic refusal suite exist and pass, and several controlled executions
+have been dispatched; each reached an infrastructure or setup stage and stopped
+there. Disposable wallet, mint and associated-token-account transactions did
+occur in the later attempts, so it is not true that nothing has been sent to
+devnet. What is true, and what matters, is narrower:
+
+> **No PPV agreement was created, no vault existed, no token entered PPV
+> custody, and no complete custody matrix has run.**
+
+`deployments/validation/README.md` lists each attempt and where it stopped. An
+aborted attempt is neither a custody PASS nor a custody FAIL; none of them is a
+finding about the deployed program.
+
+The blocking causes are fixed and separately tested — full-history checkout,
+funder-secret parsing, bounded read-side rate-limit handling, and a dedicated
+devnet RPC endpoint replacing the shared public one. What remains is one
+authorized execution. Until a run completes and its evidence is committed under
+`deployments/validation/`, the correct reading of every custody-behaviour claim
+in this repository is the one it already carries, and **RR-6** stays open.
 
 **A passing run would not open this gate.** It would close the coverage rows in
 the smoke suite's table and could close RR-6 and RR-7. The gate's remaining
