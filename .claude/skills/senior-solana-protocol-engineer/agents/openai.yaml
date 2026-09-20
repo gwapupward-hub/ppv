@@ -1,0 +1,4 @@
+interface:
+  display_name: "Senior Solana Protocol Engineer"
+  short_description: "Build, audit, and ship Solana protocols safely"
+  default_prompt: "Use $senior-solana-protocol-engineer to review this Solana protocol and produce a production deployment plan."
