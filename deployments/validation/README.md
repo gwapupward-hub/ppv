@@ -21,14 +21,68 @@ canonical deployment evidence.
 ## Current contents
 
 ```
-CANONICAL_LIVE_CUSTODY_EVIDENCE=NONE
+CANONICAL_LIVE_CUSTODY_EVIDENCE=deployments/validation/ppv-escrow-devnet-live-custody-35465469908.json
+LIVE_CUSTODY_MATRIX=PASS
+HISTORY_RECONSTRUCTION=PASS
+FINAL_LIVE_VAULT_BALANCE_TOTAL=0
+RR_6=CLOSED
 ```
 
-This directory holds this README and nothing else. **No live custody validation
-record exists**, and none may be written by hand: it is written either by a
-complete, successful run of `devnet-escrow-custody-validation.yml`, or by a
-`RECOVERY=PASS` from `devnet-escrow-custody-recovery.yml`, which rebuilds a
-completed run read-only from public chain state.
+`sha256:c95943d6a658ee7723c18b5696f543fe98e0a49ad9b4a57269ca3a0b8411ad3c`
+
+### How that record came to exist
+
+It was not produced by a single run, and the distinction is the whole point of
+this section.
+
+**The custody behaviour happened in run
+[35465469908](https://github.com/gwapupward-hub/ppv/actions/runs/35465469908).**
+That run created agreements, funded vaults, moved tokens, and drove every
+lifecycle family to a terminal state. It then stopped in Phase 12 — the
+*read-only* history reconstruction — because the RPC provider answered
+`getTransaction` with HTTP 429. Nothing about the chain or the program was
+wrong; only the reading of it did not finish, so the run wrote a failure
+diagnostic and no evidence.
+
+**The evidence was produced later, read-only, by recovery run
+[35481530878](https://github.com/gwapupward-hub/ppv/actions/runs/35481530878).**
+It read that run's public diagnostic for coordinates — addresses and signatures
+— and checked every claim against public chain state: each recorded success
+exists carrying no error, each expected refusal landed carrying one, each
+agreement holds the recorded terminal state, each vault reads zero, and each
+history reconstructs through `@gwap/ppv-indexer` to the state the live account
+reports.
+
+**Recovery sent zero transactions**, and **no behaviour matrix was repeated**.
+Re-running the matrix to recover from a rate-limited *read* would have sent ~70
+fresh value-moving transactions to re-learn what the chain already records.
+
+The recovered file is now the canonical validation evidence. It is a record of
+run 35465469908's behaviour, reconstructed independently, and it says so in its
+own `recoveryMode`, `liveMatrixExecuted`, `liveMatrixRepeated` and
+`valueMovingTransactionsSentDuringRecovery` fields.
+
+### What it establishes
+
+| | |
+| --- | --- |
+| Primary scenarios | 8, all terminal, every vault `0` |
+| | `ordinaryEscrow` Settled · `cancel` Cancelled · `refund` Refunded · `disputeToSeller` Settled · `disputeToBuyer` Refunded · `milestones` Settled (2 milestones) · `bounty` Settled · `proofs` Settled (2 proofs) |
+| Expected refusals | 43, each a landed transaction with `err != null` |
+| Proof bindings | 2 escrow Proof PDAs owned by `ppv_escrow`, 2 `coreProof` records owned by `ppv_core`, stored `core_proof` matching the emitted event binding |
+| Disposable fixtures | `foreign-milestone-source` and `foreign-proof-source`, both vault `0` |
+| `PRIMARY_SCENARIO_VAULT_TOTAL` | `0` |
+| `FIXTURE_VAULT_TOTAL` | `0` |
+| `TOTAL_RUN_PPV_VAULT_BALANCE` | `0` |
+| Lifecycle families | all nine true — funding, settlement, cancellation, refund, disputeToSeller, disputeToBuyer, milestoneRelease, bountySelection, proofApproval |
+
+**RR-6 is CLOSED** on that basis. It does not open the custody gate, and it is
+not a substitute for RR-13 or legal review — see *What a record does not
+authorize*, below.
+
+A record is still never written by hand: it comes from a complete, successful
+run of `devnet-escrow-custody-validation.yml`, or from a `RECOVERY=PASS` of
+`devnet-escrow-custody-recovery.yml`.
 
 Several controlled executions have been dispatched:
 
@@ -42,6 +96,7 @@ Several controlled executions have been dispatched:
 | [35439828941](https://github.com/gwapupward-hub/ppv/actions/runs/35439828941) | escrow, cancel, refund, both disputes | the first state-only step was sent without a read client (fixed in #39) |
 | [35457793117](https://github.com/gwapupward-hub/ppv/actions/runs/35457793117) | **the whole matrix** | Phase 12 read `envelope.program`, which `EscrowEventEnvelope` does not have (fixed in #40) |
 | [35465469908](https://github.com/gwapupward-hub/ppv/actions/runs/35465469908) | **the whole matrix** | Phase 12 `getTransaction` returned HTTP 429 |
+| [35481530878](https://github.com/gwapupward-hub/ppv/actions/runs/35481530878) | **recovered run 35465469908 in full, read-only** | nothing — `RECOVERY=PASS`, and it produced the canonical evidence above |
 
 Each cause is fixed and separately tested. The last three rows are a different
 kind of stop from the first four, and the distinction is the point of this
@@ -132,22 +187,23 @@ now created, used and refunded entirely inside the proof scenario, before the
 settlement that failed, instead of being opened at the start of the run and
 torn down at the end.
 
-### Run 35465469908's aborted fixture
+### Run 35465469908's disposable fixtures
 
-The run stopped in Phase 12, after the matrix, and before the harness's final
-cancel of `foreign-milestone-source`.
+The run stopped in Phase 12, after the matrix, so the concern was whether its
+two disposable fixtures had been left holding anything. Recovery answered that
+from chain rather than from the run's own claims:
 
-That fixture was **never funded**. Its vault balance is 0, so it holds no
-customer or economic value of any kind — it is an empty disposable devnet
-agreement. Its state may remain `Open` permanently, because the disposable
-signer that could cancel it existed only inside that process and was destroyed
-with it.
+| fixture | live state | vault balance |
+| --- | --- | --- |
+| `foreign-milestone-source` | `Cancelled` | `0` |
+| `foreign-proof-source` | `Refunded` | `0` |
 
-No signer is to be reconstructed and no recovery instruction invented. An
-unfunded disposable fixture resting in `Open` is **not stranded custody value**,
-and recovery records it explicitly as an aborted disposable fixture after
-reading its vault balance from chain rather than taking the claim on trust. A
-fixture whose vault reads anything other than zero fails recovery outright.
+Both are terminal and both are empty, so **no Run 16 custody value is
+stranded**. The record carries them under `abortedDisposableFixtures` with the
+standing disposition: no signer is to be reconstructed and no recovery
+instruction invented, because the disposable signers existed only inside that
+process. A fixture whose vault read anything other than zero would have failed
+recovery outright — the check is on the balance, not on the label.
 
 ## What a record may contain
 

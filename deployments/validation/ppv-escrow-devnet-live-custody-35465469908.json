@@ -1,0 +1,1523 @@
+{
+  "artifact": "ppv-escrow-devnet-live-custody-validation",
+  "schemaVersion": 1,
+  "note": "Custody behaviour was executed during the source workflow run. This record was produced later, read-only, from public chain state. No transaction was sent during recovery.",
+  "sourceWorkflowRun": "35465469908",
+  "sourceCommit": "6053b1ede324b03a5064da53c7ebae25b13f1ee6",
+  "sourceHarnessRunId": "ad1632a24282f8d3",
+  "recoveryMode": "READ_ONLY",
+  "recoveryHarnessVersion": "1.0.0",
+  "originalFailureClassification": "RPC_PROVIDER_FAILURE",
+  "originalFailure": "getTransaction failed with HTTP 429",
+  "liveMatrixExecuted": true,
+  "liveMatrixRepeated": false,
+  "valueMovingTransactionsSentDuringRecovery": 0,
+  "historyReconstruction": "PASS",
+  "cluster": "devnet",
+  "genesisHash": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+  "program": {
+    "name": "ppv_escrow",
+    "programId": "7U1bCHQcr8Jg6J8G69JGaAWCRtsrZB1RYx4zo1sNEVF4",
+    "programDataAddress": "2bWfopyJ8LxJ6azd9ZhaGmfs9S2gGRQKx6TX88ddULAa",
+    "programOwner": "BPFLoaderUpgradeab1e11111111111111111111111",
+    "upgradeAuthority": "FD2spnsMVgsuddPSRWAe3ee4DMbgDx5ivpvVfvKcNrLE",
+    "liveBinaryHash": "sha256:0acc61defeb2ee810cf3a4bc87f93f8ef457399fe6b52d170055ed7e0c96f9bf",
+    "releaseCommit": "231dceb91c141e1afe6e57ef48fafb199da5c678",
+    "canonicalEvidence": "deployments/evidence/ppv-escrow-devnet-231dceb.json",
+    "canonicalEvidenceSha256": "7c74113405ec4a537aeb13a931c4c07c00bc476a8e4b899a5fbe2ac79ac15196"
+  },
+  "custodyGovernance": {
+    "program": "SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf",
+    "multisig": "GEE6nE9xN4GsHGo8QHvyqNLH7eM7yLBrtFtfsmH9ip46",
+    "threshold": 2,
+    "members": [
+      "5y12g4GKbba3k6WDUyZT8eUfeBdboxxGrjkdjM4kX2Wo",
+      "BJmFM4k7Q32CiCYSdoYkAhXdD5Sk3BegMh2cbEAsgSwJ",
+      "HDkMBufpYfm1LN6apVkeV3aA2dhMk57PmBujwJ4j4Ecx"
+    ],
+    "permissions": [
+      7,
+      7,
+      7
+    ],
+    "permissionNames": [
+      "Initiate+Vote+Execute",
+      "Initiate+Vote+Execute",
+      "Initiate+Vote+Execute"
+    ],
+    "vaultIndex": 0,
+    "vaultDerived": "FD2spnsMVgsuddPSRWAe3ee4DMbgDx5ivpvVfvKcNrLE",
+    "vaultBump": 255,
+    "timeLock": 0,
+    "decodedFrom": "live-chain-state"
+  },
+  "scenarios": {
+    "ordinaryEscrow": {
+      "agreement": "5DknnqrFr3bDStBj46aKBxAUTBJUP8cmsfu1hexSNWNG",
+      "vault": "B8sL8h4t7pHz5fveXg7FUaWynaqnyMVuRkTQzwbjfqFd",
+      "liveState": "Settled",
+      "amount": "25",
+      "settledTotal": "25",
+      "finalVaultBalance": "0",
+      "signatures": [
+        {
+          "step": "initialize_agreement",
+          "signature": "6N2WFG6YmRpEU7MDNMED8u2NMYrG57ZMiKnQn5dWxX1SxsdsdcX78knPPXLAiZn5mDyJGSKHsiXne7VebFEchVD",
+          "onChain": true,
+          "err": null,
+          "slot": 501018426
+        },
+        {
+          "step": "ordinary: fund",
+          "signature": "123HVx1XUL2TpKgW9X9xVJh29Wf7fogmBxG9KrTgsb5MuQGgrswLmKxyrg94ZjacH3nakefFLqSrnh27M1mEpBEB",
+          "onChain": true,
+          "err": null,
+          "slot": 501018433
+        },
+        {
+          "step": "ordinary: mark_completed",
+          "signature": "4jn6zRofkRbLNPuaZZVxSMiFr56FZRTFeDpWZpCtgKebSi6GrnNE6Z4NaDiEy4BK48MBvAftSRh4JEkpKj38Xsr4",
+          "onChain": true,
+          "err": null,
+          "slot": 501018456
+        },
+        {
+          "step": "ordinary: settle",
+          "signature": "5xYur9J71UDeQX8PDJw4LTzCLiks91CeNCdZ7fbDbTW7Rfk4GtjxeWSiuT2WyKwyQdodGz2sVvQ5GXfmoqsp7uM9",
+          "onChain": true,
+          "err": null,
+          "slot": 501018486
+        }
+      ]
+    },
+    "cancel": {
+      "agreement": "z1eZqHunVRNyMbz1nbhtsN6Ct8p64vX7KG4kmhAEA5J",
+      "vault": "8pNXnegKMLXetG9ccrygHHkh6P62eBhLC22R6oKamrhj",
+      "liveState": "Cancelled",
+      "amount": "11",
+      "settledTotal": "0",
+      "finalVaultBalance": "0",
+      "signatures": [
+        {
+          "step": "initialize_agreement",
+          "signature": "43LKUWAVbpTLQNiyapYTgnnTVJnhiHy4mQ5737SwuWKyNyykNhpiVUvZMedRuT11WQd6Nj7MzaPXY8kME148LGAN",
+          "onChain": true,
+          "err": null,
+          "slot": 501018508
+        },
+        {
+          "step": "cancel: cancel",
+          "signature": "4GVLWXDTbMYhpLKFDGC8FpWUrAiRSDQfRmYoQfhLMNJL9VLzKRszVbZZ4SnVSSPF9YHEJh8PLuYpRyzRe8xM4hzm",
+          "onChain": true,
+          "err": null,
+          "slot": 501018522
+        }
+      ]
+    },
+    "refund": {
+      "agreement": "Fx43afuGP5X4eiwpXnjQez94ey6d7SQ358LacLN47miZ",
+      "vault": "CfiKficYJgKMCon3MDBU2stX9eSQQXQjvDMLzLc3DcaK",
+      "liveState": "Refunded",
+      "amount": "13",
+      "settledTotal": "13",
+      "finalVaultBalance": "0",
+      "signatures": [
+        {
+          "step": "initialize_agreement",
+          "signature": "3FSURepReUdSGCqzBNMRtTiBV3F6cnxF89x2CTUC1CbmNcxBg3R16iqTKN593Tz7faxo4Tw9BuKmtDcvv4sZcFvS",
+          "onChain": true,
+          "err": null,
+          "slot": 501018535
+        },
+        {
+          "step": "refund: fund",
+          "signature": "5FG9nEHN8V9YcavBr3Gs8aTtEsBbgUvL2iv75mptZpyMuj5sCgjdyev9pzmsJEfsXhVBqxQUKyrDgt2VBYYoLBWG",
+          "onChain": true,
+          "err": null,
+          "slot": 501018541
+        },
+        {
+          "step": "refund: refund",
+          "signature": "4gdKmKExxG1fQBtR8KCWho9YB9XHT93YcAN891kDCPaS8zZHwT5UzZZBaBPMN4w5kFFVRqCF2CY5Nkhd2Mecaept",
+          "onChain": true,
+          "err": null,
+          "slot": 501018564
+        }
+      ]
+    },
+    "disputeToSeller": {
+      "agreement": "8hEdoge3B14zU4CShS5oidEJrBBD6zdDH6fFGS94eagu",
+      "vault": "866HRo9V6VHGAd61iAcbvDsDi5ggkHNopffdDDM9XLLB",
+      "liveState": "Settled",
+      "amount": "17",
+      "settledTotal": "17",
+      "finalVaultBalance": "0",
+      "signatures": [
+        {
+          "step": "initialize_agreement",
+          "signature": "UZfG5r6YhbHSmmYEDZdKXw613F4kgErJ6Sz7UbAjEDAH5xPQBVZSFguqQ6soeJseJdDLBzfPifJHCmLQPmrJK2F",
+          "onChain": true,
+          "err": null,
+          "slot": 501018580
+        },
+        {
+          "step": "dispute-to-seller: fund",
+          "signature": "3JvLYwYbtBKZQuxux6p58mZpdczHGrPkRNcfL7skGwnYuYioDLh3LxZD1bxNeB9YkXycm42GxLmwe6rs5amyy6QU",
+          "onChain": true,
+          "err": null,
+          "slot": 501018587
+        },
+        {
+          "step": "dispute-to-seller: open_dispute",
+          "signature": "5uw12KbY7fdm3Jk5McKUxq1ohDUgkzK3hCZ1kjh7Nc99f8W521UkuiJjjPCpQdd2KJxRhKqR5WR3PUofxyb7b6Sz",
+          "onChain": true,
+          "err": null,
+          "slot": 501018601
+        },
+        {
+          "step": "dispute-to-seller: resolve_dispute",
+          "signature": "4aXNe6LqkGYSy4SgsZwmE6Rbp2XEr85Hp68xb7eKNFT9Hwe3rLRcMwkzNbrZeevKVF5hVJtdpK9tpTQH26xeqwis",
+          "onChain": true,
+          "err": null,
+          "slot": 501018637
+        }
+      ]
+    },
+    "disputeToBuyer": {
+      "agreement": "yfegGvqDLApQ2hmXSZnGnFWrScuEctktz7woStH7Nhk",
+      "vault": "5gd7K24kDwgFknrEzys9C8gFJNL7XZ9v4QdSQKpQWg8U",
+      "liveState": "Refunded",
+      "amount": "17",
+      "settledTotal": "17",
+      "finalVaultBalance": "0",
+      "signatures": [
+        {
+          "step": "initialize_agreement",
+          "signature": "22EroJ1FAtgh3e6GtgVe5YbN1e4QXXYgBqfrVQbmdAQAJAhVwjrmuQRHL3vucvbKqNVUDzXqRn9vkReRBjKqQbgC",
+          "onChain": true,
+          "err": null,
+          "slot": 501018652
+        },
+        {
+          "step": "dispute-to-buyer: fund",
+          "signature": "5ypoX5FumqaixhJefNN2eQwfuyekH8MFaYGzdJTuKqi3jt7tKsrmDbwhZopenzA7aU7bKHoyVjSsSNVSRnUFG1Cx",
+          "onChain": true,
+          "err": null,
+          "slot": 501018658
+        },
+        {
+          "step": "dispute-to-buyer: mark_completed",
+          "signature": "5RZDR6YQWKQgcmXLAFsUmfZtbVVwnbiPiM2sk4QH9j5zTyc4oL4WiyC7PHQ7dq3B6PYUDHbvtRQPKtCbxqJzJavB",
+          "onChain": true,
+          "err": null,
+          "slot": 501018665
+        },
+        {
+          "step": "dispute-to-buyer: open_dispute",
+          "signature": "3udGuusDAsUCXXf7caDcKr9f5DZ4da4PSpXUVvdSrhcizzqWTWQrWJSoYLWQjHdyJ6GGtqpXyPiF8SUbUBJXgRTd",
+          "onChain": true,
+          "err": null,
+          "slot": 501018680
+        },
+        {
+          "step": "dispute-to-buyer: resolve_dispute",
+          "signature": "3Nd23pui2onD5N5dUhShEirAGzdfV63GqdYwmagbM5StrCTiQ4pwAESRBKJcD1w3CTdNZ52qLRAGizTM91AycdZR",
+          "onChain": true,
+          "err": null,
+          "slot": 501018718
+        }
+      ]
+    },
+    "milestones": {
+      "agreement": "BC7dkA7sX64FcERSyeCaRL65SK8m6tEAjjv5TMkuYjHv",
+      "vault": "D2KyRGrN1p5Xh2ADz2pGBxJQDWXXHJVaNm4MViLpPCTP",
+      "liveState": "Settled",
+      "amount": "100",
+      "settledTotal": "100",
+      "finalVaultBalance": "0",
+      "signatures": [
+        {
+          "step": "initialize_agreement",
+          "signature": "3N3oYjfnm7vhcFtbJZ9tDZVbi2PNRNxtBaFNBdeqkmjdLCcfHUZMytDiS1XCRQVtnxNKT6TBit8oMyuSyEEbJQtM",
+          "onChain": true,
+          "err": null,
+          "slot": 501018734
+        },
+        {
+          "step": "milestones: create_milestone 0 (40)",
+          "signature": "5ayQbTxTkYCsobsGtT5VCb6WyJdP2RNdUjgCTNGp4Akgbfh3n7rZW1gf6FPWVk8ZHq9qvyiKcLSsBiUMf3d12xhJ",
+          "onChain": true,
+          "err": null,
+          "slot": 501018743
+        },
+        {
+          "step": "milestones: create_milestone 1 (60)",
+          "signature": "2um9fP4MNW6oD7zUp4JxkHWwhTdNXbABvsjtnbfhgh9coL5Fm2YorWXRDCzc4aKAGmUBWRmgYTAU4SDKeDBwHHEx",
+          "onChain": true,
+          "err": null,
+          "slot": 501018749
+        },
+        {
+          "step": "milestones: fund",
+          "signature": "3uF35Jg2fKRYE7DVr3CvcH2Pv4zrc1te9ZCuvhJqUtUhNLZ29FrxpZ8gUB5jcPQ4cYVMM5zbkC7aaLnqjUzPUdTX",
+          "onChain": true,
+          "err": null,
+          "slot": 501018764
+        },
+        {
+          "step": "milestones: submit_milestone 0",
+          "signature": "2dEFhz6wqR4973x6kqp1xy7MuJNjLhSmwNeVTnKDX1av47ZYTEB7EBuEANteUmPyLU5VYtFwnKW7AGUdnty4ghDp",
+          "onChain": true,
+          "err": null,
+          "slot": 501018782
+        },
+        {
+          "step": "milestones: approve_milestone 0",
+          "signature": "52wcdsb726vN72ndhFd8ctZxqsMBq6Ls6xrHiXNNrBK5P2M9jdDwo2xWs7C3VE1U2U28Umr6QvjXUUKqAQc3ZDqy",
+          "onChain": true,
+          "err": null,
+          "slot": 501018806
+        },
+        {
+          "step": "milestones: settle_milestone 0",
+          "signature": "5J1dgeybEkESrb2fTuM2tFCeaMqkwwTrpNjcPhFYzwHxFWkmG5jRZ9a65TXzyPQKrEyg5yYVFaioaxJrpkVGka5Q",
+          "onChain": true,
+          "err": null,
+          "slot": 501018813
+        },
+        {
+          "step": "milestones: submit_milestone 1",
+          "signature": "KvTrkudhGDgFA9CjhXHs3VALy5o79C4913z8sPaMD3VNEzRAKrBRBaSPiMMDaxkodwBKtZ7DWuRmFAZrnvvPt6K",
+          "onChain": true,
+          "err": null,
+          "slot": 501018828
+        },
+        {
+          "step": "milestones: reject_milestone 1",
+          "signature": "5Kz73tU7aELXaRWGVKyB4DThdnac8PMJ78M6FQThtCiSyofVovsatKmhTeUY9jHnVZLu7uedwoqenMZHVkMVEUvt",
+          "onChain": true,
+          "err": null,
+          "slot": 501018836
+        },
+        {
+          "step": "milestones: submit_milestone 1",
+          "signature": "4jgKu5uNdNp8L4zLYG1ufjufzj1Pf6kqGMW2XFJuw19A7NsJb6yCuPA2MxpmmVz5FxnNeFWfBAsB9yALvMKD1wNu",
+          "onChain": true,
+          "err": null,
+          "slot": 501018844
+        },
+        {
+          "step": "milestones: approve_milestone 1",
+          "signature": "2b9QGrwmXcvV3o7er8tEMkb2YczicM9BSKbYT9uw8hMguUY3XgyKi1Sj9ktqC3yZPeGnPbk17etzrPViP8Vi2AHe",
+          "onChain": true,
+          "err": null,
+          "slot": 501018852
+        },
+        {
+          "step": "milestones: settle_milestone 1",
+          "signature": "3p4Mh6gLP2nZsEv4QShtxvJd5y5mbgZS2wh6P3WTSpEcz7C3urN122VGgHNanBvYFYEBEmSoswf8638ryzuQiXhZ",
+          "onChain": true,
+          "err": null,
+          "slot": 501018874
+        }
+      ]
+    },
+    "bounty": {
+      "agreement": "511cX2kNyZGeFSzbCiyapkZNSyEC7Z9EFTCGKxLJiFca",
+      "vault": "5UTuCfsAXhMsbTLFctJtwCrTgDNgYm5pdNffTcuBJWci",
+      "liveState": "Settled",
+      "amount": "21",
+      "settledTotal": "21",
+      "finalVaultBalance": "0",
+      "signatures": [
+        {
+          "step": "initialize_agreement",
+          "signature": "3AxjNvJyoV24DK37KJfSoDePCNPpPubHh28eKe5oSWv6ii2bfNsD2oD4ssakSbSM5HoowhR2j58RKpSJ3n25EC6r",
+          "onChain": true,
+          "err": null,
+          "slot": 501018894
+        },
+        {
+          "step": "bounty: select_counterparty",
+          "signature": "2w74o7k9YdiZdgE15rEhv5euXskYG2DhYhhP2tQTb4JHDag6MQU8qRjrXFM4AQHXakaASjyAKT69nu9irfGWmDFa",
+          "onChain": true,
+          "err": null,
+          "slot": 501018924
+        },
+        {
+          "step": "bounty: fund",
+          "signature": "22m23ZxMDiXXX2vM1cfFC1ZBzfv31f951dLghdypSge4q5Hg6f1VzuKzhaQG2P4ZAr3md8Z4EpGBLCEH9V15EgB2",
+          "onChain": true,
+          "err": null,
+          "slot": 501018941
+        },
+        {
+          "step": "bounty: mark_completed",
+          "signature": "5WXAXEh5vQfWS2B2iSHAGPsnGbLK1RTLQct26XcvciEiLN58Dh2EurEovgQToTKqy3iTT8PGjJaJ9aDesXJVfpMF",
+          "onChain": true,
+          "err": null,
+          "slot": 501018956
+        },
+        {
+          "step": "bounty: settle",
+          "signature": "JCHVqa5rbMH8hjTgmiZJm78MvYQxsEyQwRj6mQhKgLhrYyZv5Cfo2i1Qxprjxdte7ht6aiDMUgX6TttrVqV5MwY",
+          "onChain": true,
+          "err": null,
+          "slot": 501018970
+        }
+      ]
+    },
+    "proofs": {
+      "agreement": "8swt4rpd3Zx5czfhU1axz5eHxShCX92JV4TtBHjdnC8k",
+      "vault": "EMsdqVrRBhenURbVmLZrCbG2mw4mygcq4ZStiMaTZeMV",
+      "liveState": "Settled",
+      "amount": "9",
+      "settledTotal": "9",
+      "finalVaultBalance": "0",
+      "signatures": [
+        {
+          "step": "initialize_agreement",
+          "signature": "38Uef2krnLNp4MXPdjHXxFnn4HHmjNk4fpMyCrprtYnrwG2C5ARbKRmeA7sNtFk1pVN82wEieTUTWXG5hnf2pgYR",
+          "onChain": true,
+          "err": null,
+          "slot": 501018987
+        },
+        {
+          "step": "proofs: fund",
+          "signature": "52egrCPTirufWnr4GiSBYtVZoaLyzaqj9jYhB9p5NbViwpW1ibFbfd4N171KkD6f3Q6DPyV12UGDS3agatB9pXR5",
+          "onChain": true,
+          "err": null,
+          "slot": 501018994
+        },
+        {
+          "step": "proofs: submit_proof 0",
+          "signature": "453S3ftb8FLVtF8xRxkddTm3sbg6mZqA7Cq19rR3T9RZtQKNufEkBZCNGUww94cCDotEBDC3UQtf7YXFTmDC5kmr",
+          "onChain": true,
+          "err": null,
+          "slot": 501019002
+        },
+        {
+          "step": "proofs: approve_proof 0",
+          "signature": "3yGdatUpKjh2GmRDowkVnbAdD4a6s5FQBuZjXYutquoEaYod4WZnXJqKjQpwFf2pvrJ5fhB1e3L5LesGGMzrrqiZ",
+          "onChain": true,
+          "err": null,
+          "slot": 501019025
+        },
+        {
+          "step": "proofs: submit_proof 1",
+          "signature": "eYSARTSHKJmXuNdwmTZDaEFDjER4KzXrpNBMruMV1T7YesXFZtjvGZU1w6UTxyNXLq8H7PoDqpBQvqLyMq55xZn",
+          "onChain": true,
+          "err": null,
+          "slot": 501019039
+        },
+        {
+          "step": "proofs: reject_proof 1",
+          "signature": "A5WkqYgGFVVCDHsX3JzKP9fZchYDqu39pBcLy58g6zpregLzSMKbnm1wwiz66af21ZbDYWTdcPpgZrHhG8wJN55",
+          "onChain": true,
+          "err": null,
+          "slot": 501019047
+        },
+        {
+          "step": "proofs: mark_completed",
+          "signature": "5bDMJR2y54pXgue1G1JNf3igmP12xgVpX92antYDeg2uBRqdKTqun1tM2nNNkvqTTciiKPztS71E77UvdvgQhmoR",
+          "onChain": true,
+          "err": null,
+          "slot": 501019088
+        },
+        {
+          "step": "proofs: settle citing the approved proof",
+          "signature": "sEKP3Xcx2naMKvFphTcJLdEZZ4L29TFE3zyDtfzJMQMS3uhxWn82a73vJU5NRuAgNBdFVQ9mQpNawS81JFC9h7M",
+          "onChain": true,
+          "err": null,
+          "slot": 501019107
+        }
+      ]
+    }
+  },
+  "expectedFailures": [
+    {
+      "label": "ordinary: fund a second time",
+      "signature": "3XDndG3K4CeA7zfBZ8Gmv1C87k3PxdaqB493y61VFCy8L9hpNJB4J3wy3nnGK1Lntc3jawCinQDQJ1Wy22GQQTUK",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6007
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 6007,
+        "kind": "Custom"
+      },
+      "slot": 501018442
+    },
+    {
+      "label": "ordinary: buyer marks the seller's work completed",
+      "signature": "2s21uH3cUgnWoQxnb4eVbGuAvk1nfoJJfRg4BAw5nhCQVYT5qzRjB1w9MhCjBapZFJ2qEsFnwC8jAgrrw4D4tXo3",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6005
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 6005,
+        "kind": "Custom"
+      },
+      "slot": 501018449
+    },
+    {
+      "label": "ordinary: settle to an outsider's token account",
+      "signature": "2Ja4y3yBLjEMGygSMXLWXSkW7e2ZwQ918Y94cNnRShpiHodvryPD3QKzFyE1Ec58a8hrm9Rw7tmNBGNQpfs7xC24",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6010
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 6010,
+        "kind": "Custom"
+      },
+      "slot": 501018463
+    },
+    {
+      "label": "ordinary: settle under the wrong mint",
+      "signature": "5wQEm6i7LnW6np8ST7TRJTqpZVXMqudAWiWgJHFf1cG9y9mNnLseSm3jEtFfGkEEgMp69WiHvZrYFTzpknMB2rzx",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6008
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 6008,
+        "kind": "Custom"
+      },
+      "slot": 501018471
+    },
+    {
+      "label": "ordinary: an outsider settles",
+      "signature": "5q3WepZGp1mZYWu2owWvz2VAwkZuf2i1EqnzV565gJTza3wnxY5HTswgFLd9qfsT2SRRLBYZ8wgXEnWk1XxFb7hP",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6006
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 6006,
+        "kind": "Custom"
+      },
+      "slot": 501018479
+    },
+    {
+      "label": "ordinary: settle a second time",
+      "signature": "677vwjGcpxxeYiwpAmZH8DkJDskrrcKZcErwDvxbPqZrVQChUisc7RiJkDHTFsjfEXeLdPUfYC2kWesev1DwxdXu",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6007
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 6007,
+        "kind": "Custom"
+      },
+      "slot": 501018493
+    },
+    {
+      "label": "ordinary: refund after settlement",
+      "signature": "4rFKuS7pS6kQnrwyLypoJwteYtnnfyudXRguEB5oufooLsRqbcGM8huj6fg9dSoWti5RDoR7TtXs6qptidV1iAV9",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6007
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 6007,
+        "kind": "Custom"
+      },
+      "slot": 501018501
+    },
+    {
+      "label": "cancel: the seller cancels the buyer's agreement",
+      "signature": "5hrSJbXMfCJageCaEQvYxfmifGe2GJWJyh82bMNrYDbbFf8CjQRnGraKCZDaknaKJw8PYSDTaHuSnb83CNcSVXAs",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6004
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 6004,
+        "kind": "Custom"
+      },
+      "slot": 501018514
+    },
+    {
+      "label": "cancel: fund after cancellation",
+      "signature": "3MGx3RjadoQf2YvvWoDF7bQ9SYDzPShYwhvMR4TMrzugnHik9jmiEDVo37MXkBkns8C7o7JM5Jn13SS4C9Ze5GLr",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6007
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 6007,
+        "kind": "Custom"
+      },
+      "slot": 501018528
+    },
+    {
+      "label": "refund: the buyer refunds itself",
+      "signature": "vWLYbiYppqN3uhmHjsT671dXr3wMg7tCkzVGxZeEafyRX854KuchB9FusTqAn6MQ1pzmbGAmjy5gzPGhYNaPhEM",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6005
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 6005,
+        "kind": "Custom"
+      },
+      "slot": 501018549
+    },
+    {
+      "label": "refund: the seller refunds to its own account",
+      "signature": "3YqkeNonkik2ythTWgTbBXR2a3eAxNLxkxCW5uJywu1cAPehScAPr5zkQhENaWRbNNsNBF9M86m8T4fKvSCRLnaX",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6011
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 6011,
+        "kind": "Custom"
+      },
+      "slot": 501018557
+    },
+    {
+      "label": "refund: refund a second time",
+      "signature": "4nS4DVDj4jcixRWwVigjMZJQxJ6gYbPECWwReYjTGjz9LRRsLtHCn1fa9S6a4cFoeDcUFSE5Fduijmm7QgDFZogU",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6007
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 6007,
+        "kind": "Custom"
+      },
+      "slot": 501018573
+    },
+    {
+      "label": "dispute-to-seller: an outsider opens the dispute",
+      "signature": "2FQoYFs1Uq5WT68DCwzn1SQJp7ZqRJS3vHyKbiWGZvUnSxfn88fpxYjMVvGeVs1LYRLoqv4ErsZVEutCzakTc8L4",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6006
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 6006,
+        "kind": "Custom"
+      },
+      "slot": 501018594
+    },
+    {
+      "label": "dispute-to-seller: the buyer resolves the dispute to its own account",
+      "signature": "2QQeDMTEH1R7JbiuBuPSEDH6D4F33FqQDTeut2Spm3uX5sJrrU8oatjpEDC9LfCizE9d6EbAaf7htXQVibtqYqaJ",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6018
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 6018,
+        "kind": "Custom"
+      },
+      "slot": 501018608
+    },
+    {
+      "label": "dispute-to-seller: a non-party resolves the dispute",
+      "signature": "3n2AV4MgrvUjYkJH68XE3hMTRnqjPrZ5AQothd1DsQ3FBKjseR1F74EyrhT6avr8VMS85rzVAtuhsXsntrhF9dqz",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6006
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 6006,
+        "kind": "Custom"
+      },
+      "slot": 501018615
+    },
+    {
+      "label": "dispute-to-seller: resolution to an account owned by nobody in the agreement",
+      "signature": "62dw4f8UBAUy6wTZpgRvHddAHP2qGVNiGyru5rmGBtz9UAu1SXitgcFDgXW8hVhiG3ZRi8Rb7YMAaxZ1u4zwh9yz",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6019
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 6019,
+        "kind": "Custom"
+      },
+      "slot": 501018622
+    },
+    {
+      "label": "dispute-to-seller: resolution under the wrong mint",
+      "signature": "5kpQ6s4TCEn2G7jjoA3nARSYhXH6REN4uCaN1pFNU5K5huQaFuUp91HGXtmgSmZKeRsRZguwTBUB8ewtKmnEwUXD",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6008
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 6008,
+        "kind": "Custom"
+      },
+      "slot": 501018629
+    },
+    {
+      "label": "dispute-to-seller: resolve the dispute a second time",
+      "signature": "4fQj9wo9HGxtRmdvSSgGSv2cJYZjL673amq6a3mx3kg43fkbH6Ps6GmoQDsWM4f4gd7cuKM3tta46wTD48t1wmwA",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6007
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 6007,
+        "kind": "Custom"
+      },
+      "slot": 501018644
+    },
+    {
+      "label": "dispute-to-buyer: an outsider opens the dispute",
+      "signature": "3dCodynE9WCn82EA61epYVW9CqzBfB9jexsgN2gRv8uPrTMYmTZxfBoiv9BvKxFsGd8C4qSz5jn26tGvLwcLdyLf",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6006
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 6006,
+        "kind": "Custom"
+      },
+      "slot": 501018672
+    },
+    {
+      "label": "dispute-to-buyer: the seller resolves the dispute to its own account",
+      "signature": "4gLwGWwHQyaD4g2euvGR3PVNZ85kCeUKPH14PvvifJ7GMspRN1HybuQZUg11iMGpk88ZoEU8mWtHDTMrbYHwwxfe",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6018
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 6018,
+        "kind": "Custom"
+      },
+      "slot": 501018688
+    },
+    {
+      "label": "dispute-to-buyer: a non-party resolves the dispute",
+      "signature": "3J9sxtGA5EoU8JHcG2Y3sAcw2sWcFe3b7NZCPjbuEzuYbsPe7BMWbkLhfsbCi3in5xe3NMHJN7engkixZyx4ytVy",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6006
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 6006,
+        "kind": "Custom"
+      },
+      "slot": 501018696
+    },
+    {
+      "label": "dispute-to-buyer: resolution to an account owned by nobody in the agreement",
+      "signature": "3z4tXRk5n6QR7MgWpgSYdw4ZMWqchVbquEVDJFufnN3AKQnua5DWXkwsFA8UeXTCLx2ygVoo4CigyxQvqWufm5VX",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6019
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 6019,
+        "kind": "Custom"
+      },
+      "slot": 501018703
+    },
+    {
+      "label": "dispute-to-buyer: resolution under the wrong mint",
+      "signature": "5nvaj8KZgXSCgNAAqNg9UG3YpZyXWikFqQV98NiHTYj45oU1cVa8YKPf1f2uzjL2XCPahnxWqKTrvsvSjgutAU73",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6008
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 6008,
+        "kind": "Custom"
+      },
+      "slot": 501018711
+    },
+    {
+      "label": "dispute-to-buyer: resolve the dispute a second time",
+      "signature": "3cQFAvdz3V8qHZ6CS66X5bEWk6YCbS59669Mg3kDDZ5kWLbrvFUP9NcpJKQBtoXfv1nXKvr41M1gTjnS9tWj6y9D",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6007
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 6007,
+        "kind": "Custom"
+      },
+      "slot": 501018728
+    },
+    {
+      "label": "milestones: schedule a tranche beyond the agreement amount",
+      "signature": "Pq7aHqur7QSfiiLsSxNRww1VfzrSQQ9vL6kgB5qkEk5GaVSnjoX3bhjgZsyHJu66psFEKuQhnW7GvKFGiMbNafZ",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6023
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 6023,
+        "kind": "Custom"
+      },
+      "slot": 501018757
+    },
+    {
+      "label": "milestones: release tranche 0 before it is submitted",
+      "signature": "cikenBJD3NJKPUYgbKc4dWEcJL8nmtia8bb5CybaFWhSnXZSUPF5coWGQm9LjPWnu67sGEX2KCKb3AkJd4Ah47E",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6026
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 6026,
+        "kind": "Custom"
+      },
+      "slot": 501018776
+    },
+    {
+      "label": "milestones: release tranche 0 after submission but before approval",
+      "signature": "2aVvpesb7ELVywvxuCnwExoZV4GcMg9swMJTgbbHaNVLv2HaRC9QCaLvL9cZJ2qnePCU1SWF8UexZ33uMg5t9Acm",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6026
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 6026,
+        "kind": "Custom"
+      },
+      "slot": 501018789
+    },
+    {
+      "label": "milestones: the seller approves its own tranche",
+      "signature": "67p2ttzRDwKwCu87spZFwFgHNK5VkZzEG44F8ERaqPj124xw8WordeWT6ZhwtTimLyPiJbqBU1m8nrXNnqNF5W95",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6004
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 6004,
+        "kind": "Custom"
+      },
+      "slot": 501018799
+    },
+    {
+      "label": "milestones: release tranche 0 a second time",
+      "signature": "5bgQvqXCE7QU81C1cPvwsnYKu8qJjwintqy8sqxZ4syRBPJzdFGHm3jep5ngYg9wXmrX9FDJDYq5hL2znYF9MjxH",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6026
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 6026,
+        "kind": "Custom"
+      },
+      "slot": 501018820
+    },
+    {
+      "label": "milestones: release using a foreign milestone PDA",
+      "signature": "5HVWL9xnT9qFeMMxCDGTdRpg14K19SYqZJMtDsBdYuiwgvgvug1TFCvRwBa5rq94CaeGn1eWfyUW94pPV3AGfVo",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 2006
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 2006,
+        "kind": "Custom"
+      },
+      "slot": 501018859
+    },
+    {
+      "label": "milestones: release tranche 1 to the buyer's account",
+      "signature": "LhYmkZfNZUBEKwUfkXijiJMVg7BNN2UUbenHt6ddb9C8kAh2Zbk2H7N7AsCaDpQC3hcvfSMMgHF5Se4eCVCoTMq",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6010
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 6010,
+        "kind": "Custom"
+      },
+      "slot": 501018867
+    },
+    {
+      "label": "milestones: release a tranche after the agreement settled",
+      "signature": "4rGGoPS9JTcgGL3E825QUNjgVNcsyromc7U2sQAu39jn9qbrfVrH3vfhCaner6XB4nj4E5NqU979dKeMpCyTcq9g",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6007
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 6007,
+        "kind": "Custom"
+      },
+      "slot": 501018887
+    },
+    {
+      "label": "bounty: the sponsor selects itself",
+      "signature": "54oCdpejDtAd47pvWQSpRoYAKHgdCxhKRJ95Xat79vDCvpsbtGz6A558F1atxfvwoNKAiK8bZ7z6Vzn5EhczCY9u",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6000
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 6000,
+        "kind": "Custom"
+      },
+      "slot": 501018901
+    },
+    {
+      "label": "bounty: the sponsor selects the default address",
+      "signature": "XoNUidpF9xXUVQ6ZpjJfWJ8EN12Wss1sCSiH9yT7wE57TZ4rA2MNXdJKCBedQUhWjb7UuYzFy23dNs2G8C5W2qV",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6000
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 6000,
+        "kind": "Custom"
+      },
+      "slot": 501018909
+    },
+    {
+      "label": "bounty: a non-sponsor selects the winner",
+      "signature": "snZN8oFRiSin8hPddtR5wKeihonPR9kUQjSxu95NYgVGcgRqNYvjGZNCqYzMGSy7WDJnuKgYQxncMReHvZZKNcG",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6004
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 6004,
+        "kind": "Custom"
+      },
+      "slot": 501018917
+    },
+    {
+      "label": "bounty: replace the winner after selection",
+      "signature": "37FpUQBkV2AitZSwZybMcHUXA2LayQFTn8wC5g2SYJNEhtBU3CdADKM1QJVa6YgvszdWhZA1jPEBfvG4tjbMAZp1",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6021
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 6021,
+        "kind": "Custom"
+      },
+      "slot": 501018934
+    },
+    {
+      "label": "bounty: replace the winner after the money is escrowed",
+      "signature": "3JxM43kv4i8621Qkd9EpPSQSEL3ptvYcyGUv8ytyKFUzNQx4YqscrqwXZjDZ3oKrsaMaifJQPLWvTFSQvnLhL89Y",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6021
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 6021,
+        "kind": "Custom"
+      },
+      "slot": 501018948
+    },
+    {
+      "label": "bounty: settle to an account the selected winner does not own",
+      "signature": "3kBUpsJokamHdug5xh26LLDdYy4RVWkG4zzkcvDd5AxEQnugXAWTRGesvV3yhs8DQZFfVX5pHvkbhEBoK2by7Udf",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6010
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 6010,
+        "kind": "Custom"
+      },
+      "slot": 501018964
+    },
+    {
+      "label": "proofs: the submitter approves its own proof",
+      "signature": "3mkQRrhFhfYKRBa2FPQUKvZDcjTyWmTYCxtUPAGoz7Xw6SMLxwAGx1fKL6Pc6PQ3Wh59iWQuTNDjn99LyZmXFitb",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6015
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 6015,
+        "kind": "Custom"
+      },
+      "slot": 501019010
+    },
+    {
+      "label": "proofs: a non-party approves a proof",
+      "signature": "2Yq9CgfjNUeUJs3FgFwq48hec2pgJb21tkTUSym9WZ85KVzHWk7WuPnReSaB216xmXLy1UpDU4q9KjE7wJKH8wHz",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6006
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 6006,
+        "kind": "Custom"
+      },
+      "slot": 501019017
+    },
+    {
+      "label": "proofs: decide an already-decided proof",
+      "signature": "3VG5qxzsUX9VmQKBf7iXnHrqJ2F3kiUNi1PM4h1Uq22p6qSeLaiN4bcoaJSKpKp2mYQhjNEhYtBtZZr8o3jxMs8Z",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6016
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 6016,
+        "kind": "Custom"
+      },
+      "slot": 501019032
+    },
+    {
+      "label": "proofs: decide a proof belonging to another agreement",
+      "signature": "3Grj59tm1JTtHkDJJNLM6KGMq69DYMUL5NAR4gjMMRVF31e7sMfNYmxvaLC8dm3rmo99aQDNhvv7LyVqp4AjvKfb",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 2006
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 2006,
+        "kind": "Custom"
+      },
+      "slot": 501019075
+    },
+    {
+      "label": "proofs: settle citing the rejected proof",
+      "signature": "3EHSKirWnZn34tbt3R8c4zeevV2RgCpQhZsfhNpneW5DseTgdrnRWfhUBbcTo1LZ2JgAFezZf481eoSLnELbvuxu",
+      "onChain": true,
+      "err": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6017
+          }
+        ]
+      },
+      "errorCode": {
+        "name": null,
+        "number": 6017,
+        "kind": "Custom"
+      },
+      "slot": 501019096
+    }
+  ],
+  "abortedDisposableFixtures": [
+    {
+      "label": "foreign-milestone-source",
+      "agreement": "BnfCb16ccQqAPfWiPw3CxmKqpDhpULjg1sDs2htvXvKZ",
+      "vault": "6EDcuuYjRqsVqo3q5dXsdjzsh6dryfKxRwdU2yDYFLz",
+      "liveState": "Cancelled",
+      "vaultBalance": "0",
+      "funded": false,
+      "disposition": "Aborted disposable devnet fixture. Its vault balance is 0, so it holds no customer or economic value. Its signer was generated in memory for the run and destroyed with the failed process, so it may rest in a non-terminal state permanently. No signer was reconstructed and no recovery transaction was attempted."
+    },
+    {
+      "label": "foreign-proof-source",
+      "agreement": "CXAWWzMeaa7PcLjzeaPWYGBUPwD3smAFH8CfNRSb7t3y",
+      "vault": "FVDpxwqEvF7SKrdfvdHarEwqQPN389N8hNLer12D86Qj",
+      "liveState": "Refunded",
+      "vaultBalance": "0",
+      "funded": false,
+      "disposition": "Aborted disposable devnet fixture. Its vault balance is 0, so it holds no customer or economic value. Its signer was generated in memory for the run and destroyed with the failed process, so it may rest in a non-terminal state permanently. No signer was reconstructed and no recovery transaction was attempted."
+    }
+  ],
+  "reconstruction": {
+    "ordinaryEscrow": {
+      "agreement": "5DknnqrFr3bDStBj46aKBxAUTBJUP8cmsfu1hexSNWNG",
+      "events": 4,
+      "eventNames": [
+        "AgreementOpened",
+        "AgreementFunded",
+        "WorkCompleted",
+        "SettlementExecuted"
+      ],
+      "transactionsScanned": 4,
+      "failedTransactionsSkipped": 7,
+      "projectedState": "Settled",
+      "liveState": "Settled",
+      "projectionAgreesWithChain": true,
+      "duplicateDeliveryIdempotent": true,
+      "reversedDeliveryConverges": true,
+      "settledAmount": "25",
+      "refundedAmount": "0",
+      "milestones": 0,
+      "proofs": 0,
+      "proofAddresses": []
+    },
+    "cancel": {
+      "agreement": "z1eZqHunVRNyMbz1nbhtsN6Ct8p64vX7KG4kmhAEA5J",
+      "events": 2,
+      "eventNames": [
+        "AgreementOpened",
+        "AgreementAbandoned"
+      ],
+      "transactionsScanned": 2,
+      "failedTransactionsSkipped": 2,
+      "projectedState": "Cancelled",
+      "liveState": "Cancelled",
+      "projectionAgreesWithChain": true,
+      "duplicateDeliveryIdempotent": true,
+      "reversedDeliveryConverges": true,
+      "settledAmount": "0",
+      "refundedAmount": "0",
+      "milestones": 0,
+      "proofs": 0,
+      "proofAddresses": []
+    },
+    "refund": {
+      "agreement": "Fx43afuGP5X4eiwpXnjQez94ey6d7SQ358LacLN47miZ",
+      "events": 3,
+      "eventNames": [
+        "AgreementOpened",
+        "AgreementFunded",
+        "RefundExecuted"
+      ],
+      "transactionsScanned": 3,
+      "failedTransactionsSkipped": 3,
+      "projectedState": "Refunded",
+      "liveState": "Refunded",
+      "projectionAgreesWithChain": true,
+      "duplicateDeliveryIdempotent": true,
+      "reversedDeliveryConverges": true,
+      "settledAmount": "0",
+      "refundedAmount": "13",
+      "milestones": 0,
+      "proofs": 0,
+      "proofAddresses": []
+    },
+    "disputeToSeller": {
+      "agreement": "8hEdoge3B14zU4CShS5oidEJrBBD6zdDH6fFGS94eagu",
+      "events": 5,
+      "eventNames": [
+        "AgreementOpened",
+        "AgreementFunded",
+        "DisputeOpened",
+        "DisputeResolved",
+        "SettlementExecuted"
+      ],
+      "transactionsScanned": 4,
+      "failedTransactionsSkipped": 6,
+      "projectedState": "Settled",
+      "liveState": "Settled",
+      "projectionAgreesWithChain": true,
+      "duplicateDeliveryIdempotent": true,
+      "reversedDeliveryConverges": true,
+      "settledAmount": "17",
+      "refundedAmount": "0",
+      "milestones": 0,
+      "proofs": 0,
+      "proofAddresses": []
+    },
+    "disputeToBuyer": {
+      "agreement": "yfegGvqDLApQ2hmXSZnGnFWrScuEctktz7woStH7Nhk",
+      "events": 6,
+      "eventNames": [
+        "AgreementOpened",
+        "AgreementFunded",
+        "WorkCompleted",
+        "DisputeOpened",
+        "DisputeResolved",
+        "RefundExecuted"
+      ],
+      "transactionsScanned": 5,
+      "failedTransactionsSkipped": 6,
+      "projectedState": "Refunded",
+      "liveState": "Refunded",
+      "projectionAgreesWithChain": true,
+      "duplicateDeliveryIdempotent": true,
+      "reversedDeliveryConverges": true,
+      "settledAmount": "0",
+      "refundedAmount": "17",
+      "milestones": 0,
+      "proofs": 0,
+      "proofAddresses": []
+    },
+    "milestones": {
+      "agreement": "BC7dkA7sX64FcERSyeCaRL65SK8m6tEAjjv5TMkuYjHv",
+      "events": 14,
+      "eventNames": [
+        "AgreementOpened",
+        "MilestoneCreated",
+        "MilestoneCreated",
+        "AgreementFunded",
+        "MilestoneSubmitted",
+        "MilestoneApproved",
+        "MilestoneSettled",
+        "SettlementExecuted",
+        "MilestoneSubmitted",
+        "MilestoneRejected",
+        "MilestoneSubmitted",
+        "MilestoneApproved",
+        "MilestoneSettled",
+        "SettlementExecuted"
+      ],
+      "transactionsScanned": 12,
+      "failedTransactionsSkipped": 8,
+      "projectedState": "Settled",
+      "liveState": "Settled",
+      "projectionAgreesWithChain": true,
+      "duplicateDeliveryIdempotent": true,
+      "reversedDeliveryConverges": true,
+      "settledAmount": "100",
+      "refundedAmount": "0",
+      "milestones": 2,
+      "proofs": 0,
+      "proofAddresses": []
+    },
+    "bounty": {
+      "agreement": "511cX2kNyZGeFSzbCiyapkZNSyEC7Z9EFTCGKxLJiFca",
+      "events": 5,
+      "eventNames": [
+        "AgreementOpened",
+        "CounterpartyAssigned",
+        "AgreementFunded",
+        "WorkCompleted",
+        "SettlementExecuted"
+      ],
+      "transactionsScanned": 5,
+      "failedTransactionsSkipped": 6,
+      "projectedState": "Settled",
+      "liveState": "Settled",
+      "projectionAgreesWithChain": true,
+      "duplicateDeliveryIdempotent": true,
+      "reversedDeliveryConverges": true,
+      "settledAmount": "21",
+      "refundedAmount": "0",
+      "milestones": 0,
+      "proofs": 0,
+      "proofAddresses": []
+    },
+    "proofs": {
+      "agreement": "8swt4rpd3Zx5czfhU1axz5eHxShCX92JV4TtBHjdnC8k",
+      "events": 8,
+      "eventNames": [
+        "AgreementOpened",
+        "AgreementFunded",
+        "ProofSubmitted",
+        "ProofApproved",
+        "ProofSubmitted",
+        "ProofRejected",
+        "WorkCompleted",
+        "SettlementExecuted"
+      ],
+      "transactionsScanned": 8,
+      "failedTransactionsSkipped": 5,
+      "projectedState": "Settled",
+      "liveState": "Settled",
+      "projectionAgreesWithChain": true,
+      "duplicateDeliveryIdempotent": true,
+      "reversedDeliveryConverges": true,
+      "settledAmount": "9",
+      "refundedAmount": "0",
+      "milestones": 0,
+      "proofs": 2,
+      "proofAddresses": [
+        "CkQ2svTDYnKftVG36Ds12zfBwngakmAooLKro9QPKnLo",
+        "HGDP73zQuY9Y6Qwf8y6cABqwyAsqWZD3GtubaCWXDz8v"
+      ]
+    }
+  },
+  "proofBindings": [
+    {
+      "scenario": "proofs",
+      "proof": "CkQ2svTDYnKftVG36Ds12zfBwngakmAooLKro9QPKnLo",
+      "coreProof": "4GoeRcGbGvQoqcsBmWD9K4cegW7CSAiCTNwXhSDZZsqB",
+      "proofIndex": 0,
+      "escrowOwner": "7U1bCHQcr8Jg6J8G69JGaAWCRtsrZB1RYx4zo1sNEVF4",
+      "coreOwner": "9cWE41ZDNQChvFrRoVuPQDeoVLg46ACTiZRCZaBZzfwU",
+      "storedCoreProofMatchesEvent": true,
+      "decisions": [
+        "ProofApproved"
+      ]
+    },
+    {
+      "scenario": "proofs",
+      "proof": "HGDP73zQuY9Y6Qwf8y6cABqwyAsqWZD3GtubaCWXDz8v",
+      "coreProof": "RBMrqyynNdgTWucuVqu9RYTYjcbqvUoYsP3dAdus6e4",
+      "proofIndex": 1,
+      "escrowOwner": "7U1bCHQcr8Jg6J8G69JGaAWCRtsrZB1RYx4zo1sNEVF4",
+      "coreOwner": "9cWE41ZDNQChvFrRoVuPQDeoVLg46ACTiZRCZaBZzfwU",
+      "storedCoreProofMatchesEvent": true,
+      "decisions": [
+        "ProofRejected"
+      ]
+    }
+  ],
+  "accounting": {
+    "PRIMARY_SCENARIO_VAULT_TOTAL": "0",
+    "FIXTURE_VAULT_TOTAL": "0",
+    "TOTAL_RUN_PPV_VAULT_BALANCE": "0",
+    "finalVaultTotal": "0"
+  },
+  "lifecycleFamilies": {
+    "funding": true,
+    "settlement": true,
+    "cancellation": true,
+    "refund": true,
+    "disputeToSeller": true,
+    "disputeToBuyer": true,
+    "milestoneRelease": true,
+    "bountySelection": true,
+    "proofApproval": true
+  },
+  "gates": {
+    "RR-6": "CLOSED",
+    "RR-13": "OPEN",
+    "legalReview": "OPEN",
+    "custodyGate": "CLOSED",
+    "mainnetAuthorized": false
+  },
+  "generatedAt": "2026-09-20T01:31:06.559Z"
+}
