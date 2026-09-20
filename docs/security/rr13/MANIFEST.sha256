@@ -1,27 +1,33 @@
 # RR-13 audit package manifest
 #
-# Review target: 02b5b5286fab95ce68a4ca53d8b7768a738a1013
-# Generated:     2026-09-20T06:43:28Z
+# Frozen RR-13 security target: 02b5b5286fab95ce68a4ca53d8b7768a738a1013
+# Package reconciled against:   bd99f2419ae0becdd52e5cb05d01cc79ce8dc26b
+# Generated:                    2026-09-20T10:06:36Z
 #
-# Verify:  sha256sum -c MANIFEST.sha256   (run from docs/security/rr13/)
+# Every path below is relative to the REPOSITORY ROOT.
+# Verify from the repository root:
 #
-# --- package documents (paths relative to this file) ---
-d0301420b5892e68c7870fa01b442a5df0f735c01c9a02de53a36be4eb1b7393  00-scope.md
-be30bd6d1b24224a20d68e5d9e41cb76ec97d660ed80b9b585c1d8df8b26e586  01-architecture.md
-26e838f108cc608af99a28cba09988e15e2bcc192255e8aa64b2d089f596e2be  02-program-identities.md
-7739288299b8f56dc8b4a252f37d88fc192e8dfaa61b66fc13cc1dee4396f767  03-trust-boundaries.md
-abb6af831594418af6fd2ecf13d1f142a9bff82ce1cdee8d68f6800574c4ea7b  04-escrow-attack-surface.md
-3732d685b102aa68bd4f394a42d5ca24d5704e8bfbc87073183f490f779b9379  05-security-invariants.md
-156136b7df8cd3c54264c02ad2fe94693f442ba79d5890f9aa87f8b053a1f592  06-test-and-evidence-map.md
-eb0d83783fb201c3db59c4752161cb868afd7c8573eb1e3bbddd300262aa36e9  07-known-risks.md
-465adbabf780ab272dcb5771a6a9ac0703461604a88b28545780c4b473ee1ce9  08-deployment-governance.md
-3fd2a7c397b1b37846ed09759f76b15a057c06bb13e1e4062f175634a216398c  09-reproduction.md
-9ee6a69bbd24c082d122704d28b24f48e59f36ebdb2e45788775c9f1f3411883  10-auditor-checklist.md
-06362d4b2e01b1b59ca3e2e4486b07c825ce00c05453f05ce369cf72017f59de  14-change-control.md
-9d4ba45919c2806bd497485e5abb67f37ec44e28540fe11dd553d00f38fd124f  README.md
-83d546a7013030fc517caa7577826fb54c5a78b7df556fd8e6f06cd0ea1925d3  finding-register.md
+#   sha256sum -c docs/security/rr13/MANIFEST.sha256
 #
-# --- reviewed program source (paths relative to repository root) ---
+# This file does not hash itself.
+#
+# --- RR-13 package documents ---
+6e027a74b6b54a120cbe5c54590bdbe745c75e2591ebe3bb21a95f6601ba3a11  docs/security/rr13/00-scope.md
+be30bd6d1b24224a20d68e5d9e41cb76ec97d660ed80b9b585c1d8df8b26e586  docs/security/rr13/01-architecture.md
+26e838f108cc608af99a28cba09988e15e2bcc192255e8aa64b2d089f596e2be  docs/security/rr13/02-program-identities.md
+7739288299b8f56dc8b4a252f37d88fc192e8dfaa61b66fc13cc1dee4396f767  docs/security/rr13/03-trust-boundaries.md
+abb6af831594418af6fd2ecf13d1f142a9bff82ce1cdee8d68f6800574c4ea7b  docs/security/rr13/04-escrow-attack-surface.md
+3732d685b102aa68bd4f394a42d5ca24d5704e8bfbc87073183f490f779b9379  docs/security/rr13/05-security-invariants.md
+156136b7df8cd3c54264c02ad2fe94693f442ba79d5890f9aa87f8b053a1f592  docs/security/rr13/06-test-and-evidence-map.md
+eb0d83783fb201c3db59c4752161cb868afd7c8573eb1e3bbddd300262aa36e9  docs/security/rr13/07-known-risks.md
+465adbabf780ab272dcb5771a6a9ac0703461604a88b28545780c4b473ee1ce9  docs/security/rr13/08-deployment-governance.md
+385cce2f8a4242ce51d1c320aab71d30e629e6f6a2926900326b0a8e8f51568c  docs/security/rr13/09-reproduction.md
+9ee6a69bbd24c082d122704d28b24f48e59f36ebdb2e45788775c9f1f3411883  docs/security/rr13/10-auditor-checklist.md
+b5d89fec4984a99c2e3bbfb74e25a2d4bca12dfa1ae62874cc4a5e94e6da5c49  docs/security/rr13/14-change-control.md
+f7f1a1536e9faac195badc454b2865c4c39f98e23f6f09310b08f532ef0fe6fc  docs/security/rr13/README.md
+83d546a7013030fc517caa7577826fb54c5a78b7df556fd8e6f06cd0ea1925d3  docs/security/rr13/finding-register.md
+#
+# --- reviewed program source ---
 211aebac07193647e2fb960c501dc8aa017d04c8487bd3e1d67b369297ba5f2a  programs/ppv_commerce/src/errors.rs
 eb560582f2ee078ea8931dcfe8ed96b7ebc748c7c9f14e2cc8ff3aa881c766ed  programs/ppv_commerce/src/events.rs
 93d2bb3f51856b90c047580b5d6e009a48f36fa107f3c99822f5cf21d0a67be2  programs/ppv_commerce/src/lib.rs
