@@ -32,9 +32,9 @@ false now, and kept only so the sequence of events stays legible.
 | Authority transfer | FINALIZED |
 | Deployment provenance | CLOSED — `deployments/evidence/ppv-escrow-devnet-231dceb.json` |
 | Live devnet read-only preflight | PASS — https://github.com/gwapupward-hub/ppv/actions/runs/35053809296 |
-| RR-6 event/history reconstruction | OPEN — written, not run live |
+| RR-6 event/history reconstruction | CLOSED — reconstructed live from chain, run 35465469908 via recovery 35481530878 |
 | RR-7 live Squads decode | CLOSED for the custody multisig; OPEN for Core/Commerce |
-| Live devnet custody validation | ATTEMPTED — NOT COMPLETED (the custody matrix executed in run 35465469908; history reconstruction did not complete, so `CANONICAL_LIVE_CUSTODY_EVIDENCE=NONE`) |
+| Live devnet custody validation | PASS — custody run 35465469908, reconstructed read-only by recovery run 35481530878; `deployments/validation/ppv-escrow-devnet-live-custody-35465469908.json` |
 | Independent security review (RR-13) | OPEN |
 | Legal review | OPEN |
 | **Custody gate** | **CLOSED** |
@@ -203,7 +203,7 @@ racing payouts cannot both execute against the same pre-state.
 *What would close it:* nothing available in a local-validator harness; this is
 a property of the runtime rather than of the program.
 
-### RR-6 — Reconstruction is not proven for every lifecycle family
+### RR-6 — Reconstruction proven for every lifecycle family (CLOSED)
 
 `escrow.ts` reconstructs agreement and proof history from chain data.
 Milestone, refund, dispute and bounty histories are emitted as events and
@@ -222,16 +222,31 @@ doing. It also asserts duplicate-delivery idempotence and reversed-delivery
 convergence per family, and that the events' own accounting of what was paid out
 equals the agreement's `settled_total`.
 
-**RR-6 remains OPEN.** That code has still not been run against devnet. Several
-controlled executions have been dispatched; none reached the reconstruction
-phase, because none created a PPV agreement — see
-`deployments/validation/README.md` for each attempt and where it stopped.
-Writing the reconstruction is not the same as proving it, and the entry closes
-only when a live run has reconstructed every family named above and the evidence
-is committed under `deployments/validation/`. Decoding cleanly is explicitly not sufficient — RR-6
-is about complete projection agreeing with chain state, and an indexer that
-decodes every event and projects the wrong lifecycle is worse than one that
-fails loudly.
+**RR-6 is CLOSED.** Run
+[35465469908](https://github.com/gwapupward-hub/ppv/actions/runs/35465469908)
+executed the live custody matrix; it stopped in the read-only reconstruction
+phase on an RPC rate limit, and recovery run
+[35481530878](https://github.com/gwapupward-hub/ppv/actions/runs/35481530878)
+reconstructed that exact run from public chain state without sending a
+transaction.
+
+All nine lifecycle families reconstruct — funding, settlement, cancellation,
+refund, dispute to either party, milestone release, bounty selection and proof
+approval. Every projection was compared against the live account rather than
+against what the harness remembered doing, duplicate-delivery idempotence and
+reversed-delivery convergence hold per family, and the events' own accounting of
+what was paid out equals each agreement's `settled_total`.
+
+The standard that was set here was met, not lowered: decoding cleanly was
+explicitly not sufficient, and what closed this entry is complete projection
+agreeing with chain state. The evidence is
+`deployments/validation/ppv-escrow-devnet-live-custody-35465469908.json`
+(`sha256:c95943d6a658ee7723c18b5696f543fe98e0a49ad9b4a57269ca3a0b8411ad3c`);
+`deployments/validation/README.md` records its provenance and the earlier
+attempts.
+
+Closing RR-6 does not open the custody gate and does not substitute for RR-13 or
+legal review, both of which remain OPEN.
 
 ### RR-7 — The Squads threshold is declared, not read from chain — **CLOSED for the Escrow custody multisig; NARROWED to Core/Commerce governance**
 

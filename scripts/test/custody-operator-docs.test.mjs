@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
@@ -149,20 +150,41 @@ for (const relative of STATUS_DOCS) {
   const source = readFileSync(join(REPO, relative), "utf8");
 
   test(`${relative} states the custody status precisely`, () => {
-    assert.match(
-      source,
-      /\| Live devnet custody validation \| ATTEMPTED — NOT COMPLETED/,
-      "the custody row is not the precise current status",
+    // Two legitimate shapes, and the bound on each is what matters. An
+    // ATTEMPTED row must say what was not achieved; a PASS row must cite the
+    // evidence that proves it, so "PASS" can never be asserted on its own.
+    const row = source.match(/\| Live devnet custody validation \| ([^|]+)\|/);
+    assert.ok(row, `${relative} has no live-custody-validation row`);
+    const status = row[1].trim();
+    assert.ok(
+      /^ATTEMPTED — NOT COMPLETED\b/.test(status) || /^PASS — /.test(status),
+      `${relative} reports live custody validation as ${JSON.stringify(status)}`,
     );
     assert.ok(
       !/\| Live devnet custody validation \| NOT RUN \|/.test(source),
       "the custody row understates it: executions were dispatched and sent setup transactions",
     );
+    if (status.startsWith("PASS")) {
+      assert.match(
+        status,
+        /deployments\/validation\/[\w.-]+\.json/,
+        "a PASS row must name the evidence record that proves it",
+      );
+      assert.match(status, /\b\d{8,}\b/, "a PASS row must name the run it came from");
+    }
   });
 
-  test(`${relative} claims no custody pass`, () => {
-    assert.ok(!/\| Live devnet custody validation \| PASS/.test(source));
+  /**
+   * RR-6 closing is not the custody gate opening.
+   *
+   * Recovery run 35481530878 reconstructed run 35465469908 from chain and
+   * closed RR-6. The gate turns on RR-13 and legal review as well, and those
+   * are untouched by any custody result — so the row may say PASS while these
+   * three must not move.
+   */
+  test(`${relative} does not let a custody pass open the gate`, () => {
     assert.ok(!/custody gate \| \*\*OPEN\*\*/i.test(source));
+    assert.ok(!/\| Mainnet authorized \| YES \|/i.test(source));
     assert.match(source, /\| Mainnet authorized \| NO \|/);
   });
 
@@ -181,4 +203,42 @@ test("the gates document keeps RR-13, legal review and the custody gate unchange
   assert.match(gates, /\| Independent security review \(RR-13\) \| OPEN \|/);
   assert.match(gates, /\| Legal review \| OPEN \|/);
   assert.match(gates, /\| \*\*Custody gate\*\* \| \*\*CLOSED\*\* \|/);
+});
+
+/**
+ * The evidence a PASS row points at has to be there, and be the right bytes.
+ *
+ * A status row naming a record that does not exist, or that has been edited
+ * since it was produced, is worse than no row at all: it reads as proof.
+ */
+test("a PASS row's evidence record exists and matches its recorded hash", () => {
+  const gates = readFileSync(join(REPO, "docs", "deployment-gates.md"), "utf8");
+  const row = gates.match(/\| Live devnet custody validation \| ([^|]+)\|/)[1];
+  if (!row.trim().startsWith("PASS")) return;
+
+  const path = row.match(/deployments\/validation\/[\w.-]+\.json/)[0];
+  const raw = readFileSync(join(REPO, path));
+  const sha = createHash("sha256").update(raw).digest("hex");
+
+  const declared = VALIDATION_README.match(/sha256:([0-9a-f]{64})/);
+  assert.ok(declared, "deployments/validation/README.md records no hash for the evidence");
+  assert.equal(sha, declared[1], `${path} does not hash to the value the README records`);
+
+  const record = JSON.parse(raw.toString("utf8"));
+  assert.equal(record.artifact, "ppv-escrow-devnet-live-custody-validation");
+  assert.equal(record.historyReconstruction, "PASS");
+  assert.equal(record.valueMovingTransactionsSentDuringRecovery, 0);
+  assert.equal(record.accounting.finalVaultTotal, "0");
+  assert.ok(
+    Object.values(record.lifecycleFamilies).every(Boolean),
+    "a PASS row rests on a record whose lifecycle families are not all true",
+  );
+  // The record must not claim more than the repository does.
+  assert.equal(record.gates["RR-13"], "OPEN");
+  assert.equal(record.gates.legalReview, "OPEN");
+  assert.equal(record.gates.custodyGate, "CLOSED");
+  assert.equal(record.gates.mainnetAuthorized, false);
+  // And it must not have been produced by re-running the matrix.
+  assert.equal(record.recoveryMode, "READ_ONLY");
+  assert.equal(record.liveMatrixRepeated, false);
 });

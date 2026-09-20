@@ -121,7 +121,8 @@ false now, and kept only so the sequence of events stays legible.
 | Authority transfer | FINALIZED |
 | Deployment provenance | CLOSED — `deployments/evidence/ppv-escrow-devnet-231dceb.json` |
 | Live devnet read-only preflight | PASS — https://github.com/gwapupward-hub/ppv/actions/runs/35053809296 |
-| Live devnet custody validation | ATTEMPTED — NOT COMPLETED (the custody matrix executed in run 35465469908; history reconstruction did not complete, so `CANONICAL_LIVE_CUSTODY_EVIDENCE=NONE`) |
+| Live devnet custody validation | PASS — custody run 35465469908, reconstructed read-only by recovery run 35481530878; `deployments/validation/ppv-escrow-devnet-live-custody-35465469908.json` |
+| Custody behaviour reconstructed from chain (RR-6) | CLOSED |
 | Independent security review (RR-13) | OPEN |
 | Legal review | OPEN |
 | **Custody gate** | **CLOSED** |
@@ -177,43 +178,38 @@ each, and a vault index 0 that derives to
 `FD2spnsMVgsuddPSRWAe3ee4DMbgDx5ivpvVfvKcNrLE`. That is what closed **RR-7** for
 the custody multisig.
 
-The value-moving half is **ATTEMPTED — NOT COMPLETED**, and the reason has
-moved. Run [35465469908](https://github.com/gwapupward-hub/ppv/actions/runs/35465469908)
-executed the whole custody behaviour matrix against the deployed program —
-ordinary escrow, cancellation, refund, both dispute outcomes, milestones,
-bounty, proof submission, approval and rejection, a live CPI into `ppv_core`,
-the foreign-proof relationship negative and its cleanup, and the proof-backed
-final settlement — with every completed funded scenario vault back to zero. It
-then stopped in Phase 12, the *read-only* history reconstruction, because the
-RPC provider answered `getTransaction` with HTTP 429.
+The value-moving half is now **PASS**, and it was established in two steps.
 
-So agreements were created, vaults existed, and tokens did enter and leave PPV
-custody. What is missing is narrower, and it is what this gate turns on:
+Run [35465469908](https://github.com/gwapupward-hub/ppv/actions/runs/35465469908)
+**executed the live custody matrix** against the deployed program — ordinary
+escrow, cancellation, refund, both dispute outcomes, milestones, bounty, proof
+submission, approval and rejection, a live CPI into `ppv_core`, the
+foreign-proof relationship negative and its cleanup, and the proof-backed final
+settlement. It then stopped in Phase 12, the *read-only* history
+reconstruction, because the RPC provider answered `getTransaction` with HTTP
+429 — a fact about the endpoint, not about the program.
 
-> **No complete custody matrix has been independently reconstructed from chain
-> state, so no canonical validation record exists.**
+Recovery run [35481530878](https://github.com/gwapupward-hub/ppv/actions/runs/35481530878)
+**independently reconstructed that exact run from public chain state.** It
+verified all eight primary terminal states, verified 43 expected refusals as
+landed transactions carrying an error, verified the `ppv_escrow` proof →
+`ppv_core` `coreProof` relationships against both accounts' owners and the
+escrow account's own stored `core_proof` field, reconstructed every required
+history through `@gwap/ppv-indexer` to the state each live account reports, and
+proved that all current-run PPV vault balances total **zero**. It sent **no
+transactions**, and no behaviour matrix was repeated.
 
-`scripts/recover-devnet-escrow-custody-evidence.mjs` and
-`.github/workflows/devnet-escrow-custody-recovery.yml` exist to close that
-read-only, from run 35465469908's public diagnostic, without repeating a single
-value-moving transaction. Until that recovery runs and reports `RECOVERY=PASS`,
-this row stays as it is.
+**RR-6 is therefore CLOSED.** The evidence is
+`deployments/validation/ppv-escrow-devnet-live-custody-35465469908.json`
+(`sha256:c95943d6a658ee7723c18b5696f543fe98e0a49ad9b4a57269ca3a0b8411ad3c`), and
+`deployments/validation/README.md` records its provenance and the earlier
+attempts.
 
-`deployments/validation/README.md` lists each attempt and where it stopped. An
-aborted attempt is neither a custody PASS nor a custody FAIL; none of them is a
-finding about the deployed program.
-
-The blocking causes are fixed and separately tested — full-history checkout,
-funder-secret parsing, bounded read-side rate-limit handling, and a dedicated
-devnet RPC endpoint replacing the shared public one. What remains is one
-authorized execution. Until a run completes and its evidence is committed under
-`deployments/validation/`, the correct reading of every custody-behaviour claim
-in this repository is the one it already carries, and **RR-6** stays open.
-
-**A passing run would not open this gate.** It would close the coverage rows in
-the smoke suite's table and could close RR-6 and RR-7. The gate's remaining
-requirements — an independent Solana security review (**RR-13**) and legal
-review — are untouched by it, which is why they are listed separately below.
+**This does not open the custody gate.** A passing custody validation is not a
+substitute for RR-13 or legal review. It closes RR-6, and RR-7 was closed
+separately by the live Squads decode above. The gate's remaining requirements —
+an independent Solana security review (**RR-13**) and legal review — are
+untouched by it, which is why they are listed separately below.
 
 Before any cluster deployment of `ppv_escrow`:
 

@@ -30,7 +30,7 @@ false now, and kept only so the sequence of events stays legible.
 | Authority transfer | FINALIZED |
 | Deployment provenance | CLOSED — `deployments/evidence/ppv-escrow-devnet-231dceb.json` |
 | Live devnet read-only preflight | PASS — https://github.com/gwapupward-hub/ppv/actions/runs/35053809296 |
-| Live devnet custody validation | ATTEMPTED — NOT COMPLETED (the custody matrix executed in run 35465469908; history reconstruction did not complete, so `CANONICAL_LIVE_CUSTODY_EVIDENCE=NONE`) |
+| Live devnet custody validation | PASS — custody run 35465469908, reconstructed read-only by recovery run 35481530878; `deployments/validation/ppv-escrow-devnet-live-custody-35465469908.json` |
 | Independent security review (RR-13) | OPEN |
 | Legal review | OPEN |
 | **Custody gate** | **CLOSED** |
