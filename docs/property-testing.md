@@ -73,15 +73,30 @@ Deliberately narrow, and stated so it cannot be overclaimed.
 
 | Covered now | Not covered |
 | --- | --- |
-| `AgreementType::Escrow` only | milestone contracts, bounties, invoices, proof-only agreements |
-| `fund`, `mark_completed`, `settle`, `cancel` | `open_dispute`, `resolve_dispute`, `refund`, proofs and proof decisions, milestone instructions, `select_counterparty` |
-| buyer, seller, attacker | arbiters, sponsors, third-party cranks |
-| classic SPL Token | Token-2022 and its extensions |
-| single-payment settlement | partial payouts, `settled_total` accounting across tranches, fee math |
-| one program | Marketplace / `ppv_core` / `ppv_commerce` CPI composition |
+| `AgreementType::Escrow`, `MilestoneContract` and `Bounty` | `Invoice`, `Contract`, `ProofOnly` — refused at initialization, so unreachable |
+| `fund`, `mark_completed`, `settle`, `cancel`, `refund`, `open_dispute`, `resolve_dispute`, `select_counterparty`, `create_milestone`, `submit_milestone`, `approve_milestone`, `reject_milestone`, `settle_milestone` | **`submit_proof`, `approve_proof`, `reject_proof`, and settlement citing an approved proof** |
+| buyer, seller, attacker, outsider, and wrong-mint variants of buyer and seller | arbiters, third-party cranks |
+| classic SPL Token | **Token-2022 and its extensions** |
+| single-payment settlement, partial payouts, and `settled_total` accounting across tranches | fee math (no fee path exists) |
+| one program | **`ppv_core` CPI composition**, `ppv_commerce`, Marketplace |
 | the live schema | migrations (no migration instruction exists yet) |
 
 Nothing in this document claims coverage of a row in the right-hand column.
+
+The left-hand column is generated from `ActionKind` in
+`tests/invariants/actions.ts` and `AgreementFlavour`'s three members; the
+`scripts/test/coverage-docs.test.mjs` guard fails if this table and those
+declarations disagree, in either direction. Understating coverage is a defect
+here too: it sends a reviewer to attack a path that is already modelled and
+away from one that is not.
+
+**The proof lifecycle is the gap that matters.** It is not untested — the
+deterministic suite asserts `CannotDecideOwnProof`, `ProofAlreadyDecided`,
+`ProofNotApproved`, `ProofAgreementMismatch` and `CoreProofMismatch` against a
+real validator, and the RR-6 live run carries two escrow `Proof` PDAs, two
+`ppv_core` records and a proof-backed settlement. What it lacks is the
+randomized tier and the mutation tier that every other custody path now has.
+See `docs/security/rr13/06-test-and-evidence-map.md`.
 
 ## The invariants
 

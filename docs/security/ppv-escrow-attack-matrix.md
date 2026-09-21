@@ -23,18 +23,28 @@ always available:
 | **STATICALLY VERIFIED** | Asserted about the repository — a workflow, a manifest, a constant — rather than about running code. |
 | **NOT COVERED** | No executable evidence. Named here so it appears in the residual-risk register rather than in nobody's list. |
 
-**No row here is LIVE DEVNET VERIFIED.** Not because the program is undeployed
-— it is deployed, as of 2026-09-15 — but because no row's behaviour has been
-executed and asserted against the deployed devnet program. Sprint 3 is
-qualification for deployment, not proof from one, and a deployment is not proof
-either. `scripts/devnet-escrow-custody.mjs` is the harness that would produce
-LIVE DEVNET VERIFIED rows; it has not been run against devnet. Until a run
-exists, its evidence is committed, and each row is mapped to a transaction in
-it, the correct level for every row below is the one it already carries.
+**No row here is LIVE DEVNET VERIFIED**, and the reason has narrowed twice.
 
-*Historical note.* This paragraph previously read "`ppv_escrow` is not
-deployed, so no row is LIVE DEVNET VERIFIED and none can be." The premise is no
-longer true; the conclusion still is, for a different reason.
+The program is deployed, as of 2026-09-15. The custody harness
+`scripts/devnet-escrow-custody.mjs` has been run against devnet — run
+35465469908 — and its evidence is committed at
+`deployments/validation/ppv-escrow-devnet-live-custody-35465469908.json`,
+which is what closed **RR-6**. Two of the three conditions this paragraph once
+named are therefore met.
+
+The third is not: **no row below is mapped to a transaction in that
+evidence.** The run proves nine lifecycle families end-to-end with every vault
+at 0 and 43 landed refusals; it does not say which of its transactions
+discharges which row here. Until that mapping exists and is checkable, the
+correct level for every row below is the one it already carries, and promoting
+a row on the strength of "the matrix ran" would be exactly the overclaim this
+column exists to prevent.
+
+*Historical note.* This paragraph has read two earlier ways. First:
+"`ppv_escrow` is not deployed, so no row is LIVE DEVNET VERIFIED and none can
+be." Then, after the deployment: "the harness has not been run against
+devnet." Both premises have since become false. The conclusion has survived
+both, for a third reason.
 
 ## Authorization
 
@@ -151,20 +161,22 @@ longer true; the conclusion still is, for a different reason.
 | E-2 | A failed transaction contributes to protocol history | PPV-P8 | Inner instructions of a failed transaction are not committed | `tests/integration/core-commerce.ts` | LOCAL-VALIDATOR | pass |
 | E-3 | An "event" emitted without the program's own event authority | PPV-X4 | `#[event_cpi]` requires the program's `__event_authority` PDA as signer | `tests/integration/core-commerce.ts` | LOCAL-VALIDATOR | pass |
 | E-4 | Duplicate or reordered delivery changes the reconstruction | PPV-R1 | Reconstruction is keyed by account and idempotent | `tests/integration/core-commerce.ts`, `escrow.ts` "chain-data reconstruction" | LOCAL-VALIDATOR | pass |
-| E-5 | Escrow-specific reconstruction of milestone, refund, dispute and bounty history | — | — | `escrow.ts` "chain-data reconstruction" covers agreement and proof history | partial | see residual risk RR-6 |
+| E-5 | Escrow-specific reconstruction of milestone, refund, dispute and bounty history | PPV-R1 | Reconstructed live from chain for all nine lifecycle families, twice and in reverse delivery order, each agreeing with the live account state | `deployments/validation/ppv-escrow-devnet-live-custody-35465469908.json`, `scripts/test/custody-recovery.test.mjs` | LOCAL-VALIDATOR | pass — **RR-6 CLOSED** |
 
 ## Deployment surface
 
 | ID | Attack | Invariant | Defence | Evidence | Level | Result |
 | --- | --- | --- | --- | --- | --- | --- |
-| G-1 | Deploy `ppv_escrow` through the devnet workflow | custody gate | Not among the workflow's program choices; no escrow signing material exists | `scripts/test/custody-gate.test.mjs` | STATICALLY VERIFIED | pass |
-| G-2 | Write an escrow release record | custody gate | `record-deployment.sh` refuses any program but Core and Commerce | `scripts/test/custody-gate.test.mjs` | STATICALLY VERIFIED | pass |
-| G-3 | Escrow appears in `[programs.devnet]` | custody gate | Absent; asserted | `scripts/test/custody-gate.test.mjs` | STATICALLY VERIFIED | pass |
-| G-4 | A permanent escrow identity appears in one source and not another | identity | All sources agree it is a build-only placeholder; `identity.mjs` names escrow unreleased explicitly | `scripts/test/custody-gate.test.mjs` | STATICALLY VERIFIED | pass |
-| G-5 | A "2-of-3" authority whose members repeat | governance | **Fixed in this sprint.** Evidence collection refuses duplicate members and a vault listed as its own member | `scripts/test/deployed-program.test.mjs` | STATICALLY VERIFIED | pass (was a finding) |
+| G-1 | Deploy `ppv_escrow` to devnet outside the frozen checks | custody gate | Escrow **is** a workflow program choice, and is selectable only alongside the full set of frozen identity and governance checks | `scripts/test/custody-gate.test.mjs` "escrow is selectable only alongside the full set of frozen checks" | STATICALLY VERIFIED | pass |
+| G-2 | Write an escrow release record that disagrees with chain | provenance | Every committed record must satisfy the verifier, and its built, on-chain and recorded binary hashes must be equal | `scripts/test/deployed-program.test.mjs` "every committed release record is one the verifier accepts" | STATICALLY VERIFIED | pass |
+| G-3 | Escrow's `[programs.devnet]` id disagrees with source or tooling | identity | Present in both `Anchor.toml` sections, and asserted equal to `declare_id!` and to `identity.mjs` | `scripts/test/custody-gate.test.mjs` "every committed identity source names the permanent id" | STATICALLY VERIFIED | pass |
+| G-4 | A permanent escrow identity appears in one source and not another | identity | All committed sources name the same permanent id; the build-only placeholder is asserted absent from every identity and deploy path | `scripts/test/custody-gate.test.mjs` "the build-only placeholder is gone from every identity and deploy path" | STATICALLY VERIFIED | pass |
+| G-5 | A "2-of-3" authority whose members repeat | governance | Evidence collection refuses duplicate members and a vault listed as its own member | `scripts/test/deployed-program.test.mjs` | STATICALLY VERIFIED | pass (was a finding) |
 | G-6 | An on-curve wallet as upgrade authority | governance | Refused before a record is written | `collect-deployment-evidence.mjs`, `deployed-program.test.mjs` | STATICALLY VERIFIED | pass |
 | G-7 | Mainnet as a target | mainnet block | Every live path refuses a genesis that is not devnet's, and refuses mainnet by name first | `deployed-program.test.mjs` "mainnet is refused outright" | STATICALLY VERIFIED | pass |
-| G-8 | The declared Squads threshold does not match the on-chain multisig | governance | — | — | **NOT COVERED** | see residual risk RR-7 |
+| G-8a | The declared **Escrow custody** Squads threshold does not match the on-chain multisig | governance | `scripts/lib/squads.mjs` decodes the Squads V4 `Multisig` account and `verify-custody-governance.mjs --live-squads` compares the decoded account against the declared configuration; it has been run against `GEE6nE9x…` and agreed on program, threshold 2, the exact 3 members, mask 7 each, vault index 0 and time lock 0 | `scripts/test/squads-decode.test.mjs`, `scripts/test/custody-governance.test.mjs`, RR-7 | STATICALLY VERIFIED | pass — **RR-7 CLOSED for the custody multisig** |
+| G-8b | The declared **Core/Commerce** Squads threshold does not match the on-chain multisig | governance | — | — | **NOT COVERED** | RR-7, narrowed to Core/Commerce governance |
+| G-9 | The custody gate opens on a deployment or a custody pass | custody gate | The gate is asserted CLOSED independently of any deployment or custody result; RR-13 and legal review are its remaining requirements | `scripts/test/custody-gate.test.mjs`, `scripts/test/custody-operator-docs.test.mjs` | STATICALLY VERIFIED | pass |
 
 ## Does the suite detect real defects?
 

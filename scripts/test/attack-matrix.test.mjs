@@ -117,17 +117,96 @@ test("the register classifies every risk it defines", () => {
   assert.match(highBody, /\*\*None\.\*\*/, "the HIGH section must state None explicitly");
 });
 
-test("the matrix claims no live verification, because escrow is not deployed", () => {
+test("no row claims live devnet verification, because no row is mapped to a transaction", () => {
   // The one claim that would be false rather than merely stale. Checked on
   // table rows only: the prose says the words in order to rule them out.
+  //
+  // The reason has narrowed twice — the program is deployed, and the custody
+  // matrix has run with committed evidence — so the check is now on the
+  // surviving condition rather than on the original premise.
   const rows = MATRIX.split("\n").filter((line) => line.startsWith("|"));
   const claiming = rows.filter((line) => line.includes("LIVE DEVNET VERIFIED"));
   assert.deepEqual(
     claiming,
     [],
-    "the attack matrix claims live devnet verification of an undeployed program",
+    "a row claims LIVE DEVNET VERIFIED, but no row is mapped to a transaction in the committed run",
   );
-  assert.match(MATRIX, /no row is LIVE DEVNET VERIFIED/);
+  assert.match(MATRIX, /\*\*No row here is LIVE DEVNET VERIFIED\*\*/);
+  assert.match(
+    MATRIX,
+    /no row below is mapped to a transaction in that\s+evidence/,
+    "the matrix must state the surviving reason, not a premise that has become false",
+  );
+});
+
+/**
+ * A row's evidence column is a claim about a test, and a claim about a test
+ * goes stale the same way any other claim does.
+ *
+ * `every Rust test the matrix cites exists` checks the Rust citations. This
+ * checks the quoted JavaScript ones: a row that cites `foo.test.mjs` and then
+ * quotes "some test name" must be quoting a test that file actually defines.
+ * Deployment-surface rows drifted exactly this way once — G-1 and G-3 cited
+ * `custody-gate.test.mjs` for defences that file had come to assert the
+ * negation of — so the citation shape is now mechanically checked.
+ */
+test("every quoted JavaScript test the matrix cites is defined in the file cited beside it", () => {
+  const rows = MATRIX.split("\n").filter((line) => line.startsWith("| "));
+  const checked = [];
+  const missing = [];
+  for (const row of rows) {
+    const files = [...row.matchAll(/`(scripts\/[A-Za-z0-9_./-]+\.mjs)`/g)].map(([, f]) => f);
+    if (files.length === 0) continue;
+    const quoted = [...row.matchAll(/"([^"]{8,})"/g)].map(([, q]) => q);
+    for (const name of quoted) {
+      checked.push(name);
+      const defined = files.some((file) => {
+        const path = join(REPO, file);
+        return existsSync(path) && readFileSync(path, "utf8").includes(`test("${name}"`);
+      });
+      if (!defined) missing.push(`${files.join(", ")} :: "${name}"`);
+    }
+  }
+  assert.ok(
+    checked.length >= 4,
+    `expected several quoted JS citations to check, found ${checked.length}`,
+  );
+  assert.deepEqual(
+    missing,
+    [],
+    "the matrix quotes tests that the file it cites does not define",
+  );
+});
+
+/**
+ * Residual-risk references in a row must agree with the register's own
+ * headline for that risk.
+ *
+ * G-8 said "NOT COVERED — see RR-7" for a sprint after RR-7 closed for the
+ * custody multisig. A row may still point at a risk that is closed *in part*,
+ * but it may not point at one the register calls CLOSED outright while
+ * claiming the risk is uncovered.
+ */
+test("a row citing a risk the register calls closed does not also call it NOT COVERED", () => {
+  const rows = MATRIX.split("\n").filter((line) => line.startsWith("| "));
+  const contradictions = [];
+  for (const row of rows) {
+    if (!row.includes("NOT COVERED")) continue;
+    for (const [, id] of row.matchAll(/\bRR-(\d+)\b/g)) {
+      const heading = REGISTER.split("\n").find((line) =>
+        line.startsWith(`### RR-${id} —`),
+      );
+      if (!heading) continue;
+      const closedOutright =
+        /\*\*CLOSED\*\*/.test(heading) || /\(CLOSED\)/.test(heading);
+      if (closedOutright) contradictions.push(`RR-${id}: ${heading.trim()}`);
+    }
+  }
+  assert.deepEqual(
+    contradictions,
+    [],
+    "a NOT COVERED row cites a residual risk the register records as closed",
+  );
 });
 
 test("the token-program scope is stated and matches the code", () => {
