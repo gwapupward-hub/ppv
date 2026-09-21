@@ -1,8 +1,10 @@
 # RR-13 audit package manifest
 #
 # Frozen RR-13 security target: 02b5b5286fab95ce68a4ca53d8b7768a738a1013
-# Package reconciled against:   bd99f2419ae0becdd52e5cb05d01cc79ce8dc26b
-# Generated:                    2026-09-20T10:06:36Z
+#   PENDING RE-FREEZE — the F-01..F-05 remediation changes commentary in
+#   scripts/lib/identity.mjs, a target-invalidating path. The new target is
+#   the remediation's merge commit; see 14-change-control.md.
+# Generated:                    2026-09-21T02:50:08Z
 #
 # Every path below is relative to the REPOSITORY ROOT.
 # Verify from the repository root:
@@ -12,7 +14,7 @@
 # This file does not hash itself.
 #
 # --- RR-13 package documents ---
-6e027a74b6b54a120cbe5c54590bdbe745c75e2591ebe3bb21a95f6601ba3a11  docs/security/rr13/00-scope.md
+fe60450141e63a883347f67fcbd115fc51c57e7386410c44c7628ac252da3257  docs/security/rr13/00-scope.md
 be30bd6d1b24224a20d68e5d9e41cb76ec97d660ed80b9b585c1d8df8b26e586  docs/security/rr13/01-architecture.md
 26e838f108cc608af99a28cba09988e15e2bcc192255e8aa64b2d089f596e2be  docs/security/rr13/02-program-identities.md
 7739288299b8f56dc8b4a252f37d88fc192e8dfaa61b66fc13cc1dee4396f767  docs/security/rr13/03-trust-boundaries.md
@@ -22,10 +24,10 @@ abb6af831594418af6fd2ecf13d1f142a9bff82ce1cdee8d68f6800574c4ea7b  docs/security/
 eb0d83783fb201c3db59c4752161cb868afd7c8573eb1e3bbddd300262aa36e9  docs/security/rr13/07-known-risks.md
 465adbabf780ab272dcb5771a6a9ac0703461604a88b28545780c4b473ee1ce9  docs/security/rr13/08-deployment-governance.md
 385cce2f8a4242ce51d1c320aab71d30e629e6f6a2926900326b0a8e8f51568c  docs/security/rr13/09-reproduction.md
-9ee6a69bbd24c082d122704d28b24f48e59f36ebdb2e45788775c9f1f3411883  docs/security/rr13/10-auditor-checklist.md
-b5d89fec4984a99c2e3bbfb74e25a2d4bca12dfa1ae62874cc4a5e94e6da5c49  docs/security/rr13/14-change-control.md
-f7f1a1536e9faac195badc454b2865c4c39f98e23f6f09310b08f532ef0fe6fc  docs/security/rr13/README.md
-83d546a7013030fc517caa7577826fb54c5a78b7df556fd8e6f06cd0ea1925d3  docs/security/rr13/finding-register.md
+77e4eacb05617811d1670f51cb8e7b172d8fbf9d9d4e33acebc71839ccb99e07  docs/security/rr13/10-auditor-checklist.md
+bdc773e9938297f590d8db37ccd7451a9be31b2d34674d874a35da5c49a6870f  docs/security/rr13/14-change-control.md
+521beac714a6ddc55be64815dfa360f14751935da7040a07baf1ad323e3d033b  docs/security/rr13/README.md
+4b85b0ed7d15804688b3acd759b5f3deea7ac14c19fe159e1f19581247b3a6dd  docs/security/rr13/finding-register.md
 #
 # --- reviewed program source ---
 211aebac07193647e2fb960c501dc8aa017d04c8487bd3e1d67b369297ba5f2a  programs/ppv_commerce/src/errors.rs
@@ -73,7 +75,7 @@ a70a5c6a7497edcc5c83f33c3a9887f9fed2b66882421522d309e3dd160c7fe5  programs/ppv_e
 24e1453b4e314d5d4407c1da60e7c7eac3914e7483b5098efd436cdd5978fccd  rust-toolchain.toml
 4c0dd10cef21c6ee1b7ad06d41b2bc7e27692400515fba88fda348672984c0a9  package.json
 2fbd8e013973e974eb935433cbe3c5b83c7615455389e034d5b033d16dba055d  package-lock.json
-0f64ecdf706f4880e737ff442d834695e8aa037f67a86627833d8d146c8ac331  scripts/lib/identity.mjs
+ed9d866d2df28ceb4ed600c2196783c0143f012f1d794fd013d5cd12e417a543  scripts/lib/identity.mjs
 #
 # --- canonical evidence ---
 7c74113405ec4a537aeb13a931c4c07c00bc476a8e4b899a5fbe2ac79ac15196  deployments/evidence/ppv-escrow-devnet-231dceb.json
@@ -81,10 +83,10 @@ e23f6ad5d5f94634eb90ba73fbc3c66b3f3d81fff32c5990dac3432d5623103c  deployments/ev
 c95943d6a658ee7723c18b5696f543fe98e0a49ad9b4a57269ca3a0b8411ad3c  deployments/validation/ppv-escrow-devnet-live-custody-35465469908.json
 #
 # --- security documentation referenced by this package ---
-b401944238f103e128e51858b55dbf2183edf5bd558947c12d8bf2ee6b42ae7b  docs/invariants.md
-00cf306bf46d296f7d5ddab775a3adc09e7ad385b892255636892457f38bc78d  docs/property-testing.md
+09765ea57d0653d1edb03289fe04f88cf1bb87d830bd8c99d91b2acd7a3e0bdc  docs/invariants.md
+0e0f04bf6c69a16cea24ba51d84d618d790f9353dfc6a8a92b6aaccd8ea74301  docs/property-testing.md
 7a96b411d1a3ea9fbbb1ef4a25f29af2d931621f85ea51988de4d2ea178363e7  docs/deployment-gates.md
-624e58e16be14ada611ee226262f555ffb603020a94072aceec953b891f18111  docs/security/ppv-escrow-attack-matrix.md
+843520ab8dc0f98744175a97938f47d7adacde3ba14e369e7644f1470f4b4188  docs/security/ppv-escrow-attack-matrix.md
 b82dc78293bd847280ed938d4bdb88b2f204e36451ea41c53d9b1f991e815970  docs/security/ppv-escrow-residual-risk.md
 2a44ec6248bfcb13b425cb26704b227ebf0c83c1f99dbe0b9c9f8c7188a6e464  docs/security/ppv-escrow-readiness-verdict.md
 61743429c158ad46374d328615e6e48efa6ccfe8146b53888ceef3c75eb104f5  docs/security/ppv-escrow-surface.md

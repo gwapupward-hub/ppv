@@ -45,19 +45,40 @@ function escrowReleaseRecords() {
     .filter((record) => record.program === "ppv_escrow");
 }
 
-function markdownFiles(dir, out = []) {
+function filesUnder(dir, extensions, out = []) {
   for (const entry of readdirSync(dir)) {
+    if (entry === "node_modules" || entry === "target" || entry === ".git") continue;
     const path = join(dir, entry);
-    if (statSync(path).isDirectory()) markdownFiles(path, out);
-    else if (entry.endsWith(".md")) out.push(path);
+    if (statSync(path).isDirectory()) filesUnder(path, extensions, out);
+    else if (extensions.some((ext) => entry.endsWith(ext))) out.push(path);
   }
   return out;
 }
 
-const DOCS = [
-  ...markdownFiles(join(REPO, "docs")),
+/**
+ * This file defines the stale claims, so it necessarily contains every one of
+ * them. Scanning it would make the guard permanently red on its own source.
+ */
+const SELF = join(REPO, "scripts", "test", "escrow-current-state-docs.test.mjs");
+
+/**
+ * Prose is prose wherever it lives.
+ *
+ * The first version of this guard scanned Markdown only. That was the whole
+ * gap: `scripts/lib/identity.mjs` — the single record every release and
+ * deployment gate reads — carried "Escrow is not deployed and no authority has
+ * been transferred to this address" for four commits after both had happened,
+ * and four of the patterns below matched it. A reader who opens the canonical
+ * identity module is exactly the reader who must not be told that.
+ *
+ * So the scan follows the claim, not the file extension: Markdown, plus the
+ * scripts that the gates actually execute.
+ */
+const SCANNED = [
+  ...filesUnder(join(REPO, "docs"), [".md"]),
   join(REPO, "README.md"),
   join(REPO, "SECURITY.md"),
+  ...filesUnder(join(REPO, "scripts"), [".mjs", ".sh"]).filter((path) => path !== SELF),
 ];
 
 /**
@@ -105,6 +126,24 @@ function paragraphAt(text, offset) {
   return text.slice(start === -1 ? 0 : start + 2, end === -1 ? text.length : end);
 }
 
+/**
+ * Every unlabelled stale claim in one piece of text.
+ *
+ * Extracted from the file scan so a tamper case can ask the question directly
+ * rather than writing a defect into the repository to see the guard fire.
+ */
+export function staleClaimsIn(text) {
+  const found = [];
+  for (const pattern of STALE_CLAIMS) {
+    for (const match of text.matchAll(new RegExp(pattern.source, `${pattern.flags}g`))) {
+      const paragraph = paragraphAt(text, match.index);
+      if (HISTORICAL_MARKERS.some((marker) => marker.test(paragraph))) continue;
+      found.push(match[0].trim());
+    }
+  }
+  return found;
+}
+
 const RECORDS = escrowReleaseRecords();
 
 test("a committed ppv_escrow release record exists and names the deployed program", () => {
@@ -122,14 +161,9 @@ test("a committed ppv_escrow release record exists and names the deployed progra
 test("no document makes an unlabelled pre-deployment claim about ppv_escrow", () => {
   if (RECORDS.length === 0) return;
   const offenders = [];
-  for (const path of DOCS) {
-    const text = readFileSync(path, "utf8");
-    for (const pattern of STALE_CLAIMS) {
-      for (const match of text.matchAll(new RegExp(pattern.source, `${pattern.flags}g`))) {
-        const paragraph = paragraphAt(text, match.index);
-        if (HISTORICAL_MARKERS.some((marker) => marker.test(paragraph))) continue;
-        offenders.push(`${relative(REPO, path)}: ${match[0].trim()}`);
-      }
+  for (const path of SCANNED) {
+    for (const claim of staleClaimsIn(readFileSync(path, "utf8"))) {
+      offenders.push(`${relative(REPO, path)}: ${claim}`);
     }
   }
   assert.deepEqual(
@@ -218,4 +252,69 @@ test("the current-state block does not claim a live custody validation that has 
       );
     }
   }
+});
+
+/**
+ * Tamper cases.
+ *
+ * A guard nobody has watched fail is a guard nobody has tested. These restore
+ * the exact sentences this suite exists to catch and require it to catch them
+ * — without writing a defect into the repository to find out.
+ */
+
+/** The sentence `scripts/lib/identity.mjs` carried, verbatim, until it did not. */
+const RESTORED_IDENTITY_COMMENT = `  /**
+   * Vault index 0, and the *intended future* upgrade authority for
+   * \`ppv_escrow\`. Escrow is not deployed and no authority has been transferred
+   * to this address; recording it here is what lets every gate check the same
+   * destination, not a claim that it holds anything yet.
+   */`;
+
+test("restoring the identity.mjs pre-deployment comment fails the guard", () => {
+  const claims = staleClaimsIn(RESTORED_IDENTITY_COMMENT);
+  assert.ok(
+    claims.length >= 3,
+    `expected the restored comment to trip several patterns, tripped ${claims.length}`,
+  );
+  for (const expected of [
+    /escrow is not deployed/i,
+    /no authority has been transferred/i,
+    /intended future/i,
+  ]) {
+    assert.ok(
+      claims.some((claim) => expected.test(claim)),
+      `the restored comment did not trip ${expected}`,
+    );
+  }
+});
+
+test("a historical label rescues the same sentence, and only in its own paragraph", () => {
+  const labelled = `Historical note: this was true until 2026-09-15.\n${RESTORED_IDENTITY_COMMENT}`;
+  assert.deepEqual(
+    staleClaimsIn(labelled),
+    [],
+    "a labelled historical claim must be allowed",
+  );
+
+  const labelElsewhere = `Historical note: this was true until 2026-09-15.\n\n${RESTORED_IDENTITY_COMMENT}`;
+  assert.ok(
+    staleClaimsIn(labelElsewhere).length > 0,
+    "a label in a different paragraph must not rescue the claim",
+  );
+});
+
+test("the guard scans the scripts that the gates execute, not only Markdown", () => {
+  const scanned = new Set(SCANNED.map((path) => relative(REPO, path)));
+  assert.ok(
+    scanned.has("scripts/lib/identity.mjs"),
+    "the canonical identity module is not scanned; that was the original gap",
+  );
+  const shapes = [".md", ".mjs", ".sh"].filter((ext) =>
+    [...scanned].some((path) => path.endsWith(ext)),
+  );
+  assert.deepEqual(shapes, [".md", ".mjs", ".sh"], "a whole file shape is unscanned");
+  assert.ok(
+    !scanned.has("scripts/test/escrow-current-state-docs.test.mjs"),
+    "this file defines the patterns and must exclude itself",
+  );
 });

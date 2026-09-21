@@ -7,7 +7,9 @@ commits ahead, both non-invalidating (this package, and `.claude/skills/**`
 development tooling). Every security-sensitive subtree is identical across the
 two. See [00-scope.md](00-scope.md) for the tree-hash evidence.
 
-**Entry verdict:** `RR13_AUDIT_ENTRY=NOT_READY` — see
+**Entry verdict:** `RR13_AUDIT_ENTRY=READY_FOR_INDEPENDENT_REVIEW` — internal
+findings F-01…F-05 resolved; F-06…F-09 remain open by design. This is not an
+RR-13 closure and not a passed audit. See
 [finding-register.md](finding-register.md).
 
 > Core proves facts. Commerce proves agreements. Escrow controls value.

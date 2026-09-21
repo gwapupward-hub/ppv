@@ -85,18 +85,30 @@ export const ESCROW_PLACEHOLDER_ID = "7BECot7zFqH2oCxTu9uLmmwvzQSBtxWro47jMa2MqU
  * release and deployment gate reads, so that "the custody multisig" means one
  * address everywhere rather than whatever each check was configured with.
  *
- * Recording it is not the same as granting it anything: `vault` is the
- * *intended* future upgrade authority, and the custody gate in
- * `docs/deployment-gates.md` stays closed on its remaining requirements.
+ * `vault` is the live upgrade authority for the deployed `ppv_escrow`, and
+ * holding that authority is not the same as being cleared to use it: the
+ * custody gate in `docs/deployment-gates.md` stays closed on its remaining
+ * requirements, RR-13 and legal review among them.
  */
 export const ESCROW_CUSTODY_GOVERNANCE = Object.freeze({
   /** The Squads V4 multisig account created for Escrow custody, on devnet. */
   multisig: "GEE6nE9xN4GsHGo8QHvyqNLH7eM7yLBrtFtfsmH9ip46",
   /**
-   * Vault index 0, and the *intended future* upgrade authority for
-   * `ppv_escrow`. Escrow is not deployed and no authority has been transferred
-   * to this address; recording it here is what lets every gate check the same
-   * destination, not a claim that it holds anything yet.
+   * Vault index 0, and the upgrade authority `ppv_escrow` is deployed under.
+   *
+   * Historical note: before the Sprint 4 deployment on 2026-09-15 this field
+   * was the *intended future* authority and said so. It is now live.
+   * `deployments/evidence/ppv-escrow-devnet-231dceb.json` records the
+   * deployment at slot 498656161 and the authority transfer to this address at
+   * slot 498656235, both finalized, and carries it as its `upgradeAuthority`.
+   *
+   * The address is deliberately not repeated in this comment. The freeze
+   * tamper suite mutates the first occurrence of the vault address in this
+   * file, so a copy sitting above the constant would absorb the mutation and
+   * leave the real one intact — a comment silently blunting a security test.
+   *
+   * Recording it here is what lets every gate check the same destination
+   * rather than whatever each check was configured with.
    */
   vault: "FD2spnsMVgsuddPSRWAe3ee4DMbgDx5ivpvVfvKcNrLE",
   threshold: 2,

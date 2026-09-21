@@ -48,6 +48,12 @@ moved silently while review is underway.
 | 2026-09-20 | — | `02b5b5286fab95ce68a4ca53d8b7768a738a1013` | initial freeze | — |
 | 2026-09-20 | `02b5b528…` | **unchanged** | `main` advanced to `bd99f2419ae0becdd52e5cb05d01cc79ce8dc26b` via #45 (this package) and #44 (`.claude/skills/**`). Both are non-invalidating paths. Verified by tree hash: `programs/`, `sdk/`, `indexer/`, `tests/`, `scripts/` and `deployments/` are identical across `02b5b52`, `1c24aaa` and `bd99f24`, as are all six root build/identity files. CI green on the combined head (run 35498756470, four of four jobs). **The target was not moved.** | `docs/security/rr13/**`, `.claude/skills/**` |
 | 2026-09-20 | `02b5b528…` | **unchanged** | Package reconciliation: `00-scope.md` now distinguishes `FROZEN_RR13_SECURITY_TARGET` from `CURRENT_REPOSITORY_HEAD`; `MANIFEST.sha256` re-rooted (see below). Documentation only; no claim about the target changed meaning. | `docs/security/rr13/**` |
+| 2026-09-21 | `02b5b528…` | **PENDING MERGE** | Pre-audit remediation of F-01…F-05. `scripts/lib/identity.mjs` is an invalidating path and its commentary changed, so the target must be re-frozen at the merge commit. `SECURITY_BEHAVIOR_CHANGED=NO`: the change is comment-only and proven so — with comments stripped, the file's text is byte-identical before and after — and `programs/`, `sdk/` and `indexer/` are untouched. | invalidating: `scripts/lib/identity.mjs` (comment only). non-invalidating: `docs/**`, `scripts/test/**`, `scripts/test/coverage-docs.test.mjs` (new, additive) |
+
+The new target SHA is deliberately left **PENDING MERGE**. It is not knowable
+until the remediation lands on `main`, and writing a guess here would be the
+same class of defect the remediation exists to fix. Re-freezing is a separate,
+explicit step once the merge commit is known.
 
 ### Note on the manifest re-rooting
 

@@ -79,10 +79,19 @@ reachable graph from the program source alone and compare. Specifically:
 ## 8. Documentation accuracy
 
 The team's own internal review found stale claims in the security
-documentation — see [finding-register](finding-register.md) F-01 … F-05. Treat
-`docs/security/ppv-escrow-attack-matrix.md` deployment-surface rows and
-`docs/property-testing.md`'s scope table as **suspect until re-derived**, and
-prefer this package plus the source over either.
+documentation — see [finding-register](finding-register.md) F-01 … F-05. All
+five are **resolved**, and each now carries a guard that fails if the claim
+drifts again: `scripts/test/escrow-current-state-docs.test.mjs` (widened to
+scan `scripts/**/*.mjs` and `**/*.sh`), two new drift tests in
+`scripts/test/attack-matrix.test.mjs`, and
+`scripts/test/coverage-docs.test.mjs`.
+
+Worth spending a little scepticism here anyway, because this class of defect
+is what the guards were written *after*:
+
+- [ ] Pick two attack-matrix rows and confirm the cited test asserts what the row claims — not merely that the test exists.
+- [ ] Re-derive `docs/property-testing.md`'s covered column from `ActionKind` yourself and confirm it matches.
+- [ ] Confirm the guards' tamper cases fail for the right reason, by restoring one stale sentence locally and watching which test goes red.
 
 ## 9. Governance
 

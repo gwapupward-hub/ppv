@@ -37,6 +37,14 @@ is about.
 `main` points at when you read this. The commit is permanent and directly
 checkoutable — see [09-reproduction](09-reproduction.md).
 
+> **Pending re-freeze.** The F-01…F-05 remediation changes commentary in
+> `scripts/lib/identity.mjs`, which [14-change-control](14-change-control.md)
+> lists as a target-invalidating path. The target is therefore re-frozen at
+> that remediation's merge commit, recorded in the amendment table there. The
+> change is comment-only and `SECURITY_BEHAVIOR_CHANGED=NO`, but the path is
+> listed precisely so "it's only a comment" is never a judgement call made in
+> passing.
+
 ### `CURRENT_REPOSITORY_HEAD` — what `main` points at
 
 | Fact | Value |
