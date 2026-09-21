@@ -213,6 +213,7 @@ export function executeAction(
             vaultAuthority: authorityFor(fixture, world, action),
             sellerTokenAccount: fixture.tokens[action.accounts.destination],
             settlementProof: null,
+            coreProof: null,
             tokenProgram: TOKEN_PROGRAM_ID,
           })
           .signers([signer])
@@ -350,6 +351,7 @@ export function executeAction(
             vaultAuthority: authorityFor(fixture, world, action),
             sellerTokenAccount: fixture.tokens[action.accounts.destination],
             settlementProof: null,
+            coreProof: null,
             tokenProgram: TOKEN_PROGRAM_ID,
           })
           .signers([signer])
