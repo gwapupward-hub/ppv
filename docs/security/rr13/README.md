@@ -1,11 +1,17 @@
 # RR-13 — Independent security review package
 
-**Frozen RR-13 security target:** `02b5b5286fab95ce68a4ca53d8b7768a738a1013`
+**Frozen RR-13 security target:** `0190248f6199398dfe4ce632e513123cb00b0cb0`
 
-**Current repository head:** `bd99f2419ae0becdd52e5cb05d01cc79ce8dc26b` — two
-commits ahead, both non-invalidating (this package, and `.claude/skills/**`
-development tooling). Every security-sensitive subtree is identical across the
-two. See [00-scope.md](00-scope.md) for the tree-hash evidence.
+Re-frozen 2026-09-21 from `02b5b5286fab95ce68a4ca53d8b7768a738a1013`, because
+the F-01…F-05 remediation touched `scripts/lib/identity.mjs` — a
+target-invalidating path, even for a comment. `SECURITY_BEHAVIOR_CHANGED=NO`:
+every security-sensitive subtree is the same git tree object across the move,
+and `identity.mjs` is byte-identical with comments stripped. See
+[00-scope.md](00-scope.md) for the evidence and
+[14-change-control.md](14-change-control.md) for the amendment.
+
+**Review the target, not `main`.** `docs/security/rr13/**` is non-invalidating,
+so this package's own edits advance `main` without moving the target.
 
 **Entry verdict:** `RR13_AUDIT_ENTRY=READY_FOR_INDEPENDENT_REVIEW` — internal
 findings F-01…F-05 resolved; F-06…F-09 remain open by design. This is not an
@@ -38,6 +44,8 @@ RR-13 closure and not a passed audit. See
 | [08-deployment-governance.md](08-deployment-governance.md) | toolchain, reproducibility, Squads governance |
 | [09-reproduction.md](09-reproduction.md) | exact commands, no secrets required |
 | [10-auditor-checklist.md](10-auditor-checklist.md) | ranked review targets |
+| [11-handoff.md](11-handoff.md) | independent-review handoff: the two SHAs, access, archive recipe |
+| [PPV-RR13-INDEPENDENT-REVIEW-BRIEF.md](PPV-RR13-INDEPENDENT-REVIEW-BRIEF.md) | the brief to send the reviewer |
 | [finding-register.md](finding-register.md) | internal pre-audit findings |
 | [14-change-control.md](14-change-control.md) | what invalidates the target |
 | [MANIFEST.sha256](MANIFEST.sha256) | hashes of this package and the source artifacts; verify from the repository root |

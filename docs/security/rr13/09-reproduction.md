@@ -13,7 +13,7 @@ review `main`.
 ```bash
 git clone https://github.com/gwapupward-hub/ppv.git
 cd ppv
-git checkout 02b5b5286fab95ce68a4ca53d8b7768a738a1013
+git checkout 0190248f6199398dfe4ce632e513123cb00b0cb0
 git status --porcelain          # must print nothing
 ```
 
@@ -22,7 +22,7 @@ security-sensitive moved:
 
 ```bash
 for t in programs sdk indexer tests scripts deployments; do
-  echo "$t $(git rev-parse 02b5b52:$t) $(git rev-parse main:$t)"
+  echo "$t $(git rev-parse 0190248:$t) $(git rev-parse main:$t)"
 done
 ```
 

@@ -1,7 +1,9 @@
 # Program identities — verified from the repository
 
-Every value below was read from the repository at commit
-`02b5b5286fab95ce68a4ca53d8b7768a738a1013`, not supplied by a prompt.
+Every value below was read from the repository at the frozen target,
+`0190248f6199398dfe4ce632e513123cb00b0cb0`, not supplied by a prompt. The values are
+unchanged from the previous target `02b5b5286fab95ce68a4ca53d8b7768a738a1013`: the
+re-freeze moved no program source, configuration or evidence.
 
 ## Permanent program IDs
 
