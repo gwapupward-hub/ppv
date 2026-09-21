@@ -149,6 +149,34 @@ Please report severity, confidence, evidence, exploit or failure path, impact,
 remediation and a regression test per finding, and separate confirmed
 vulnerabilities from defence-in-depth improvements.
 
+### What closes RR-13
+
+Completing the review does not close RR-13. RR-13 becomes **eligible** for
+closure only when all of the following hold:
+
+1. the independent review is complete;
+2. every Critical finding is remediated;
+3. every High finding is remediated;
+4. those Critical and High remediations have been **independently
+   re-reviewed**;
+5. every Medium finding has an explicit disposition — fixed, accepted with
+   rationale, or deferred with an owner;
+6. the required review artifacts exist and the final target reconciliation is
+   complete.
+
+**Critical and High findings block closure until remediated *and*
+independently re-reviewed.** Internal remediation alone is never sufficient.
+
+Two statuses, and only one party may set each:
+
+| Status | Who sets it | Meaning |
+| --- | --- | --- |
+| `REMEDIATED_PENDING_REVIEW` | the PPV team | a fix has been written and the team believes it addresses the finding |
+| `VERIFIED_FIXED` | **the independent reviewer, only** | the fix has been examined and does address the finding |
+
+The PPV team must not mark anything `VERIFIED_FIXED`, and a finding sitting at
+`REMEDIATED_PENDING_REVIEW` still blocks closure if it is Critical or High.
+
 ## 7. Evidence you can verify independently
 
 | Record | SHA-256 |
@@ -170,7 +198,7 @@ transactions to re-learn what the committed evidence already records.
 | --- | --- |
 | RR-6 — custody behaviour reconstructed from chain | CLOSED |
 | RR-7 — live Squads decode | CLOSED for the Escrow custody multisig; narrowed to Core/Commerce |
-| **RR-13 — independent security review** | **OPEN — closed only by your review** |
+| **RR-13 — independent security review** | **OPEN** — eligible for closure only after the independent review is complete and all closure-blocking findings have been remediated and independently re-reviewed |
 | Legal review | **OPEN** |
 | Custody gate | **CLOSED** |
 | Mainnet authorized | **NO** |

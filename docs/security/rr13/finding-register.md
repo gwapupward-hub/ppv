@@ -350,9 +350,14 @@ This answers one question and no other: **is the package internally coherent
 enough to hand to an independent reviewer?** It is.
 
 It does **not** mean RR-13 is closed, that a security audit has passed, or
-that anything is production ready. RR-13 is OPEN and is closed only by the
-independent review this package exists to enable. Legal review is OPEN. The
-custody gate is CLOSED. Mainnet is NOT AUTHORIZED.
+that anything is production ready. RR-13 is OPEN, and completing the
+independent review does not by itself close it: Critical and High findings
+block closure until remediated **and** independently re-reviewed, Medium
+findings need an explicit disposition, and the review artifacts and final
+target reconciliation must be complete. The rule is stated in full in
+[PPV-RR13-INDEPENDENT-REVIEW-BRIEF.md](PPV-RR13-INDEPENDENT-REVIEW-BRIEF.md),
+§6. Legal review is OPEN. The custody gate is CLOSED. Mainnet is NOT
+AUTHORIZED.
 
 **What changed since `NOT_READY`.** The blocking criterion was "evidence
 package complete", failed because three MEDIUM findings showed the

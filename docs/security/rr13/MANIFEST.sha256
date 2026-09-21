@@ -25,11 +25,11 @@ eb0d83783fb201c3db59c4752161cb868afd7c8573eb1e3bbddd300262aa36e9  docs/security/
 465adbabf780ab272dcb5771a6a9ac0703461604a88b28545780c4b473ee1ce9  docs/security/rr13/08-deployment-governance.md
 d42ab511ca4d9ebfa3c0320b6c15ee4bb0b7c13ffb1a2ea4287a0e2173fef543  docs/security/rr13/09-reproduction.md
 77e4eacb05617811d1670f51cb8e7b172d8fbf9d9d4e33acebc71839ccb99e07  docs/security/rr13/10-auditor-checklist.md
-cdcf00f86ce6dbfa15c1a4a116a60e2858b9ed875ea04d0bdc3db8eac43d2e98  docs/security/rr13/11-handoff.md
+930e52db44a9fd5ba630e437193cd69443212a165b8049245d5b0e64523a7372  docs/security/rr13/11-handoff.md
 387bebd944679fdd76266797982aaf0c8ae88a7bd891c23819bd8365a72fc5e0  docs/security/rr13/14-change-control.md
-b2d8eab58a114781b7c451f56ccb2ebacf2333e939b55ee45cc5eb09c5e99b57  docs/security/rr13/PPV-RR13-INDEPENDENT-REVIEW-BRIEF.md
+b38d42b411382f07355ec62141447c4888409969724df22b5d62d9f2a40c2737  docs/security/rr13/PPV-RR13-INDEPENDENT-REVIEW-BRIEF.md
 a67ef7682b57127f56ac7966dae41a5171717f629cf39645d5885fef11820bf2  docs/security/rr13/README.md
-43caaace3e4176c47b2bc92d867bf6ea4047701bf8d53c0afef5ec938788d612  docs/security/rr13/finding-register.md
+42022314c54c7c504479c3a233b99c00ca8e942e4b8e76b486d11c81255b564a  docs/security/rr13/finding-register.md
 #
 # --- reviewed program source ---
 211aebac07193647e2fb960c501dc8aa017d04c8487bd3e1d67b369297ba5f2a  programs/ppv_commerce/src/errors.rs

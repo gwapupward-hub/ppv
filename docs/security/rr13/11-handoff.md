@@ -168,10 +168,20 @@ mainnet is authorized.
 | --- | --- |
 | RR-6 | CLOSED |
 | RR-7 | CLOSED (scoped: Escrow custody governance) |
-| **RR-13** | **OPEN — closed only by your review** |
+| **RR-13** | **OPEN** — eligible for closure only after the independent review is complete and all closure-blocking findings have been remediated and independently re-reviewed |
 | Legal review | **OPEN** |
 | Custody gate | **CLOSED** |
 | Mainnet authorized | **NO** |
+
+Completing the review does not close RR-13. **Critical and High findings block
+closure until remediated *and* independently re-reviewed**, Medium findings
+need an explicit disposition, and the review artifacts and final target
+reconciliation must be complete. The PPV team may mark a fix
+`REMEDIATED_PENDING_REVIEW`; only the independent reviewer may mark it
+`VERIFIED_FIXED`. Internal remediation alone is never sufficient. The full rule
+is in
+[PPV-RR13-INDEPENDENT-REVIEW-BRIEF.md](PPV-RR13-INDEPENDENT-REVIEW-BRIEF.md),
+§6.
 
 No independent reviewer has yet examined this code. Nothing in this repository,
 including the repository-local engineering skill under `.claude/skills/`, is an
