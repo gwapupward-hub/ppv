@@ -76,3 +76,47 @@ final, must include the RR13-001 remediation and independent-review records, and
 must not hash itself.
 
 No program was deployed or upgraded as part of this re-freeze.
+
+## Final re-freeze completion — 2026-09-21
+
+The pending state above is historical. The re-freeze is now complete.
+
+PR #50 merged as docs-only commit:
+
+`54af83c405873eadf9ea24d0165e70312fff535f`
+
+Post-merge CI run `35630872920` (CI #194) completed successfully with all
+four required jobs green:
+
+- Solana programs (host)
+- SDK
+- Anchor local validator
+- Property-suite mutation qualification
+
+The frozen security target remains:
+
+`e574c69570979081e34e0358673c62f87ba9220d`
+
+The following security-sensitive trees and root build/config files are
+byte-identical between the frozen target and package base `54af83c4…`:
+`programs/`, `sdk/`, `indexer/`, `tests/`, `scripts/`,
+`deployments/`, `.github/`, `Anchor.toml`, `Cargo.toml`, `Cargo.lock`,
+`package.json`, `package-lock.json`, and `rust-toolchain.toml`.
+
+Therefore CI #194 validates the exact same security-sensitive source tree while
+the docs-only package reconciliation lives one commit ahead.
+
+```text
+POST_MERGE_CI_STATUS=SUCCESS
+RE_FREEZE_FINAL=YES
+RR13_001=VERIFIED_FIXED
+F06=OPEN_NARROWED
+RR13_002=OPEN_INFORMATIONAL
+RR_13=OPEN
+LEGAL_REVIEW=OPEN
+CUSTODY_GATE=CLOSED
+MAINNET_AUTHORIZED=NO
+```
+
+The regenerated `MANIFEST.sha256` attests the reconciled package and reviewed
+source/config/evidence set and is verifiable from the repository root.
