@@ -207,3 +207,16 @@ transactions to re-learn what the committed evidence already records.
 the package coherent enough to hand over. It does not mean RR-13 passed, that a
 security audit passed, that the system is production ready, or that mainnet is
 authorized.
+
+## Amendment — 2026-09-21
+
+This brief was the instructions for the review that produced RR13-001 and is
+preserved as that historical artifact. RR13-001 has since been independently
+re-reviewed and assigned `VERIFIED_FIXED`.
+
+For subsequent RR-13 review activity, use target
+`e574c69570979081e34e0358673c62f87ba9220d` and read
+[17-rr13-001-independent-review.md](17-rr13-001-independent-review.md) plus
+[18-rr13-001-post-merge-refreeze.md](18-rr13-001-post-merge-refreeze.md).
+
+This amendment does not close RR-13 or authorize mainnet.
