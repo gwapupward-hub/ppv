@@ -73,6 +73,44 @@ key or private RPC credential is needed for any part of the static review.
 | `deployments/validation/ppv-escrow-devnet-live-custody-35465469908.json` | `c95943d6a658ee7723c18b5696f543fe98e0a49ad9b4a57269ca3a0b8411ad3c` |
 | `deployments/evidence/ppv-core-devnet-861a8df.json` | in manifest |
 
+## The archive, and why the commit is the real artifact
+
+A zip is a convenience copy. The authoritative artifact is the git commit
+`0190248f6199398dfe4ce632e513123cb00b0cb0`, because it is what CI ran against
+and what the manifest attests.
+
+If you want a single file to send or receive, build it deterministically —
+fixed timestamps, sorted entries, no extra attributes — so two people building
+it from the same commit get byte-identical output and the same SHA-256:
+
+```bash
+git checkout 0190248f6199398dfe4ce632e513123cb00b0cb0
+find docs/security/rr13 programs deployments \
+     Anchor.toml Cargo.toml Cargo.lock rust-toolchain.toml \
+     package.json package-lock.json scripts/lib/identity.mjs \
+     docs/invariants.md docs/property-testing.md docs/deployment-gates.md \
+     docs/security/ppv-escrow-attack-matrix.md \
+     docs/security/ppv-escrow-residual-risk.md \
+     docs/security/ppv-escrow-readiness-verdict.md \
+     docs/security/ppv-escrow-surface.md \
+     scripts/mutation-qualify.sh scripts/mutation-qualify-property.sh \
+     scripts/test/escrow-freeze-tampering.test.mjs \
+     scripts/test/escrow-current-state-docs.test.mjs \
+     scripts/test/attack-matrix.test.mjs \
+     scripts/test/coverage-docs.test.mjs \
+  -type f | LC_ALL=C sort > /tmp/rr13-files.txt
+
+TZ=UTC zip -X -q PPV-RR13-FINAL-HANDOFF.zip -@ < /tmp/rr13-files.txt
+sha256sum PPV-RR13-FINAL-HANDOFF.zip > PPV-RR13-FINAL-HANDOFF.sha256
+```
+
+The archive's SHA-256 is deliberately **not** recorded in this package. Any
+file inside the archive that quoted its own archive's hash would change that
+hash by being edited — the hash is a property of the commit you build from, and
+that commit is stated above. Verify the contents with
+[MANIFEST.sha256](MANIFEST.sha256), which has no such circularity, and treat
+the archive hash as a transport checksum agreed between sender and receiver.
+
 ## Reviewer brief
 
 **Claim under review.** Core proves facts. Commerce proves agreements. Escrow

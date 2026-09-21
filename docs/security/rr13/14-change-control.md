@@ -52,11 +52,16 @@ moved silently while review is underway.
 
 ### Re-freeze of 2026-09-21 — the evidence
 
-`OLD_AUDIT_TARGET_SHA` `02b5b5286fab95ce68a4ca53d8b7768a738a1013`
-`NEW_AUDIT_TARGET_SHA` `0190248f6199398dfe4ce632e513123cb00b0cb0`
-`REASON` Pre-audit remediation of internal findings F-01 through F-05.
-`TARGET_INVALIDATING_PATH` `scripts/lib/identity.mjs`
-`SECURITY_BEHAVIOR_CHANGED` **NO**
+| Field | Value |
+| --- | --- |
+| `OLD_AUDIT_TARGET_SHA` | `02b5b5286fab95ce68a4ca53d8b7768a738a1013` |
+| `NEW_AUDIT_TARGET_SHA` | `0190248f6199398dfe4ce632e513123cb00b0cb0` |
+| `REASON` | Pre-audit remediation of internal documentation-integrity findings F-01 through F-05 |
+| `TARGET_INVALIDATING_PATH` | `scripts/lib/identity.mjs` |
+| `CHANGE_TYPE` | `COMMENT_ONLY_FOR_TARGET_INVALIDATING_PATH` |
+| `SECURITY_BEHAVIOR_CHANGED` | **NO** |
+| `POST_MERGE_CI_RUN` | `35560538644` |
+| `POST_MERGE_CI` | **SUCCESS** — four of four required jobs |
 
 The new SHA was read off `main` after the merge, not predicted. #47 was
 **squash-merged**, so its head `76ba5e28…` is not an ancestor of `main` and is

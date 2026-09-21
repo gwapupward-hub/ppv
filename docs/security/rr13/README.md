@@ -44,7 +44,8 @@ RR-13 closure and not a passed audit. See
 | [08-deployment-governance.md](08-deployment-governance.md) | toolchain, reproducibility, Squads governance |
 | [09-reproduction.md](09-reproduction.md) | exact commands, no secrets required |
 | [10-auditor-checklist.md](10-auditor-checklist.md) | ranked review targets |
-| [11-handoff.md](11-handoff.md) | independent-review handoff: the two SHAs, access, reviewer brief |
+| [11-handoff.md](11-handoff.md) | independent-review handoff: the two SHAs, access, archive recipe |
+| [PPV-RR13-INDEPENDENT-REVIEW-BRIEF.md](PPV-RR13-INDEPENDENT-REVIEW-BRIEF.md) | the brief to send the reviewer |
 | [finding-register.md](finding-register.md) | internal pre-audit findings |
 | [14-change-control.md](14-change-control.md) | what invalidates the target |
 | [MANIFEST.sha256](MANIFEST.sha256) | hashes of this package and the source artifacts; verify from the repository root |

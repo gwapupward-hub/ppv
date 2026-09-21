@@ -4,7 +4,7 @@
 #   Re-frozen 2026-09-21 from 02b5b5286fab95ce68a4ca53d8b7768a738a1013.
 #   SECURITY_BEHAVIOR_CHANGED=NO; see 14-change-control.md for the evidence.
 #   Post-merge CI on the target: run 35560538644, four of four jobs green.
-# Generated:                    2026-09-21T05:29:56Z
+# Generated:                    2026-09-21T05:34:39Z
 #
 # Every path below is relative to the REPOSITORY ROOT.
 # Verify from the repository root:
@@ -25,9 +25,10 @@ eb0d83783fb201c3db59c4752161cb868afd7c8573eb1e3bbddd300262aa36e9  docs/security/
 465adbabf780ab272dcb5771a6a9ac0703461604a88b28545780c4b473ee1ce9  docs/security/rr13/08-deployment-governance.md
 d42ab511ca4d9ebfa3c0320b6c15ee4bb0b7c13ffb1a2ea4287a0e2173fef543  docs/security/rr13/09-reproduction.md
 77e4eacb05617811d1670f51cb8e7b172d8fbf9d9d4e33acebc71839ccb99e07  docs/security/rr13/10-auditor-checklist.md
-614f89838ebf79b5959c4742b5bf44731f905b8bf24543e3e56a42f18d7ad0c0  docs/security/rr13/11-handoff.md
-486c1c8b82f6c8555576d24523a6c12204cf4ac677ccc363461fe11508157804  docs/security/rr13/14-change-control.md
-09411488f83f6db0a2f9cccb47c35d65af5fa57178eb1e17bd062718d707f3d6  docs/security/rr13/README.md
+cdcf00f86ce6dbfa15c1a4a116a60e2858b9ed875ea04d0bdc3db8eac43d2e98  docs/security/rr13/11-handoff.md
+387bebd944679fdd76266797982aaf0c8ae88a7bd891c23819bd8365a72fc5e0  docs/security/rr13/14-change-control.md
+b2d8eab58a114781b7c451f56ccb2ebacf2333e939b55ee45cc5eb09c5e99b57  docs/security/rr13/PPV-RR13-INDEPENDENT-REVIEW-BRIEF.md
+a67ef7682b57127f56ac7966dae41a5171717f629cf39645d5885fef11820bf2  docs/security/rr13/README.md
 43caaace3e4176c47b2bc92d867bf6ea4047701bf8d53c0afef5ec938788d612  docs/security/rr13/finding-register.md
 #
 # --- reviewed program source ---
