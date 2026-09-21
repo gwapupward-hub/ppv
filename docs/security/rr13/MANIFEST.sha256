@@ -1,10 +1,10 @@
 # RR-13 audit package manifest
 #
-# Frozen RR-13 security target: 02b5b5286fab95ce68a4ca53d8b7768a738a1013
-#   PENDING RE-FREEZE — the F-01..F-05 remediation changes commentary in
-#   scripts/lib/identity.mjs, a target-invalidating path. The new target is
-#   the remediation's merge commit; see 14-change-control.md.
-# Generated:                    2026-09-21T02:50:08Z
+# Frozen RR-13 security target: 0190248f6199398dfe4ce632e513123cb00b0cb0
+#   Re-frozen 2026-09-21 from 02b5b5286fab95ce68a4ca53d8b7768a738a1013.
+#   SECURITY_BEHAVIOR_CHANGED=NO; see 14-change-control.md for the evidence.
+#   Post-merge CI on the target: run 35560538644, four of four jobs green.
+# Generated:                    2026-09-21T05:29:56Z
 #
 # Every path below is relative to the REPOSITORY ROOT.
 # Verify from the repository root:
@@ -14,20 +14,21 @@
 # This file does not hash itself.
 #
 # --- RR-13 package documents ---
-fe60450141e63a883347f67fcbd115fc51c57e7386410c44c7628ac252da3257  docs/security/rr13/00-scope.md
+5639e4e695e5e6aa2f3373569c48e5728c61866b548ffbf5b00995b27798d71e  docs/security/rr13/00-scope.md
 be30bd6d1b24224a20d68e5d9e41cb76ec97d660ed80b9b585c1d8df8b26e586  docs/security/rr13/01-architecture.md
-26e838f108cc608af99a28cba09988e15e2bcc192255e8aa64b2d089f596e2be  docs/security/rr13/02-program-identities.md
+b127da07428159ab9574cb6c2da32588800213cbb50fb2d84cb39f87ddcd15c2  docs/security/rr13/02-program-identities.md
 7739288299b8f56dc8b4a252f37d88fc192e8dfaa61b66fc13cc1dee4396f767  docs/security/rr13/03-trust-boundaries.md
 abb6af831594418af6fd2ecf13d1f142a9bff82ce1cdee8d68f6800574c4ea7b  docs/security/rr13/04-escrow-attack-surface.md
 3732d685b102aa68bd4f394a42d5ca24d5704e8bfbc87073183f490f779b9379  docs/security/rr13/05-security-invariants.md
 156136b7df8cd3c54264c02ad2fe94693f442ba79d5890f9aa87f8b053a1f592  docs/security/rr13/06-test-and-evidence-map.md
 eb0d83783fb201c3db59c4752161cb868afd7c8573eb1e3bbddd300262aa36e9  docs/security/rr13/07-known-risks.md
 465adbabf780ab272dcb5771a6a9ac0703461604a88b28545780c4b473ee1ce9  docs/security/rr13/08-deployment-governance.md
-385cce2f8a4242ce51d1c320aab71d30e629e6f6a2926900326b0a8e8f51568c  docs/security/rr13/09-reproduction.md
+d42ab511ca4d9ebfa3c0320b6c15ee4bb0b7c13ffb1a2ea4287a0e2173fef543  docs/security/rr13/09-reproduction.md
 77e4eacb05617811d1670f51cb8e7b172d8fbf9d9d4e33acebc71839ccb99e07  docs/security/rr13/10-auditor-checklist.md
-bdc773e9938297f590d8db37ccd7451a9be31b2d34674d874a35da5c49a6870f  docs/security/rr13/14-change-control.md
-521beac714a6ddc55be64815dfa360f14751935da7040a07baf1ad323e3d033b  docs/security/rr13/README.md
-4b85b0ed7d15804688b3acd759b5f3deea7ac14c19fe159e1f19581247b3a6dd  docs/security/rr13/finding-register.md
+614f89838ebf79b5959c4742b5bf44731f905b8bf24543e3e56a42f18d7ad0c0  docs/security/rr13/11-handoff.md
+486c1c8b82f6c8555576d24523a6c12204cf4ac677ccc363461fe11508157804  docs/security/rr13/14-change-control.md
+09411488f83f6db0a2f9cccb47c35d65af5fa57178eb1e17bd062718d707f3d6  docs/security/rr13/README.md
+43caaace3e4176c47b2bc92d867bf6ea4047701bf8d53c0afef5ec938788d612  docs/security/rr13/finding-register.md
 #
 # --- reviewed program source ---
 211aebac07193647e2fb960c501dc8aa017d04c8487bd3e1d67b369297ba5f2a  programs/ppv_commerce/src/errors.rs
@@ -91,6 +92,10 @@ b82dc78293bd847280ed938d4bdb88b2f204e36451ea41c53d9b1f991e815970  docs/security/
 2a44ec6248bfcb13b425cb26704b227ebf0c83c1f99dbe0b9c9f8c7188a6e464  docs/security/ppv-escrow-readiness-verdict.md
 61743429c158ad46374d328615e6e48efa6ccfe8146b53888ceef3c75eb104f5  docs/security/ppv-escrow-surface.md
 #
-# --- mutation qualification harnesses ---
+# --- documentation and tamper guards this package's claims rest on ---
 ae49d27bdff9d24700b1be8b7f125b0393a45d5f8db7092679b0769672756d54  scripts/mutation-qualify.sh
 4975edeb15e503f8b91a0b206e0c30a7e9d9b22215da3f97077612ed20eb4089  scripts/mutation-qualify-property.sh
+ba8e6a48f8812c8c85b732bf514debf98421738ee6ff59b914c2c92cf956396e  scripts/test/escrow-freeze-tampering.test.mjs
+3e488f75db74a31d420c5464c1d531db80046073ce79db56d0ecfe30cc28c2e2  scripts/test/escrow-current-state-docs.test.mjs
+e01415e4770bbdf4f050103949322e647b0876037b91683071cbbae1221deb08  scripts/test/attack-matrix.test.mjs
+98e53daa37e9f97fa7e2cb18e5788591fcf0c93b5a9d9bb2ba791ad5ce5f8fc6  scripts/test/coverage-docs.test.mjs

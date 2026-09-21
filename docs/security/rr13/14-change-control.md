@@ -48,12 +48,56 @@ moved silently while review is underway.
 | 2026-09-20 | — | `02b5b5286fab95ce68a4ca53d8b7768a738a1013` | initial freeze | — |
 | 2026-09-20 | `02b5b528…` | **unchanged** | `main` advanced to `bd99f2419ae0becdd52e5cb05d01cc79ce8dc26b` via #45 (this package) and #44 (`.claude/skills/**`). Both are non-invalidating paths. Verified by tree hash: `programs/`, `sdk/`, `indexer/`, `tests/`, `scripts/` and `deployments/` are identical across `02b5b52`, `1c24aaa` and `bd99f24`, as are all six root build/identity files. CI green on the combined head (run 35498756470, four of four jobs). **The target was not moved.** | `docs/security/rr13/**`, `.claude/skills/**` |
 | 2026-09-20 | `02b5b528…` | **unchanged** | Package reconciliation: `00-scope.md` now distinguishes `FROZEN_RR13_SECURITY_TARGET` from `CURRENT_REPOSITORY_HEAD`; `MANIFEST.sha256` re-rooted (see below). Documentation only; no claim about the target changed meaning. | `docs/security/rr13/**` |
-| 2026-09-21 | `02b5b528…` | **PENDING MERGE** | Pre-audit remediation of F-01…F-05. `scripts/lib/identity.mjs` is an invalidating path and its commentary changed, so the target must be re-frozen at the merge commit. `SECURITY_BEHAVIOR_CHANGED=NO`: the change is comment-only and proven so — with comments stripped, the file's text is byte-identical before and after — and `programs/`, `sdk/` and `indexer/` are untouched. | invalidating: `scripts/lib/identity.mjs` (comment only). non-invalidating: `docs/**`, `scripts/test/**`, `scripts/test/coverage-docs.test.mjs` (new, additive) |
+| 2026-09-21 | `02b5b5286fab95ce68a4ca53d8b7768a738a1013` | **`0190248f6199398dfe4ce632e513123cb00b0cb0`** | Pre-audit remediation of internal findings F-01 through F-05 (#47, squash-merged). `scripts/lib/identity.mjs` is a target-invalidating path and its commentary changed, so the target is **re-frozen** at the merge commit. `SECURITY_BEHAVIOR_CHANGED=NO` — evidence below. | invalidating: `scripts/lib/identity.mjs` (commentary only). non-invalidating: `docs/**`, `scripts/test/attack-matrix.test.mjs`, `scripts/test/escrow-current-state-docs.test.mjs`, `scripts/test/coverage-docs.test.mjs` (new, additive) |
 
-The new target SHA is deliberately left **PENDING MERGE**. It is not knowable
-until the remediation lands on `main`, and writing a guess here would be the
-same class of defect the remediation exists to fix. Re-freezing is a separate,
-explicit step once the merge commit is known.
+### Re-freeze of 2026-09-21 — the evidence
+
+`OLD_AUDIT_TARGET_SHA` `02b5b5286fab95ce68a4ca53d8b7768a738a1013`
+`NEW_AUDIT_TARGET_SHA` `0190248f6199398dfe4ce632e513123cb00b0cb0`
+`REASON` Pre-audit remediation of internal findings F-01 through F-05.
+`TARGET_INVALIDATING_PATH` `scripts/lib/identity.mjs`
+`SECURITY_BEHAVIOR_CHANGED` **NO**
+
+The new SHA was read off `main` after the merge, not predicted. #47 was
+**squash-merged**, so its head `76ba5e28…` is not an ancestor of `main` and is
+not the target; GitHub's tentative merge SHA is not the target either. Only the
+commit that exists on `main` is.
+
+**1. Every security-sensitive subtree is the same git tree object.** Not "no
+diff shown" — the same object id, which a change that merely looks equivalent
+cannot produce:
+
+| Subtree | `02b5b52` | `0190248` |
+| --- | --- | --- |
+| `programs/` | `1c3d2411ebbe06d2bc6645c1a38dc0db494bf64b` | identical |
+| `sdk/` | `b258cc9ff6afb4ebb5013217faff45a1b61ee4c8` | identical |
+| `indexer/` | `e2697bd31f59d39ec30262824915089f29a01944` | identical |
+| `tests/` | `84ee89320c0bcbc64de9624b8dda585eb9c8f000` | identical |
+| `deployments/` | `f06ac1a89e882893a4bc8ad5173b493f5bd6e2ae` | identical |
+| `.github/` | `5fba144e9f9c3d04ed51da58bba44a7df7773638` | identical |
+
+**2. All six root build and identity files are byte-identical:**
+`Anchor.toml`, `Cargo.toml`, `Cargo.lock`, `package.json`, `package-lock.json`,
+`rust-toolchain.toml`.
+
+**3. The one invalidating path carries commentary only.** Stripping block and
+line comments from `scripts/lib/identity.mjs` at both commits yields
+byte-identical text, 42 lines of code. No constant, derivation, program id,
+authority or threshold moved.
+
+**4. The guards were re-run against the merged tree**, not merely against the
+branch: `escrow-freeze-tampering` 19/19, `escrow-current-state-docs` 9/9,
+`attack-matrix` 8/8, `coverage-docs` 7/7, `custody-gate` 21/21.
+
+**5. Post-merge CI on the exact new target is green** — run 35560538644, all
+four required jobs: Solana programs (host), SDK, Anchor local validator
+(including the double build with IDL comparison and the PPV-P1…P10 suite), and
+the full property-suite mutation qualification.
+
+A note on method, since it is the point of this table: the new SHA sat as
+`PENDING MERGE` until the merge existed. Writing a predicted SHA would have
+been the same class of defect the remediation was fixing — a document asserting
+something the repository had not yet made true.
 
 ### Note on the manifest re-rooting
 
@@ -72,16 +116,19 @@ reconciliation.
 
 ## Note on the findings in this package
 
-F-01 … F-05 are documentation-only. Remediating them touches `docs/**` and one
-comment plus one test-file scope in `scripts/`. Under the table above:
+F-01 … F-05 were documentation-only and are **resolved**. Remediating them
+touched `docs/**`, three files under `scripts/test/`, and one comment block in
+`scripts/lib/identity.mjs`. Under the table above:
 
-* the `docs/**` edits are **non-invalidating**;
-* the `scripts/lib/identity.mjs` **comment** edit touches an invalidating path.
-  It changes no value, no derivation and no behaviour — but the path is listed
+* the `docs/**` and `scripts/test/**` edits are **non-invalidating**;
+* the `scripts/lib/identity.mjs` **comment** edit touched an invalidating path.
+  It changed no value, no derivation and no behaviour — but the path is listed
   precisely so that "it's only a comment" is not a judgement call made in
-  passing. It should be carried in a clearly-labelled remediation PR, and the
-  resulting SHA recorded above as an amendment before handoff.
+  passing. It was carried in a clearly-labelled remediation PR (#47), and the
+  resulting SHA is recorded above as the 2026-09-21 amendment.
 
-This is why the audit-freeze PR was **not** opened at this commit: the
-remediation must land first, so the reviewer receives one coherent target
-rather than a target plus an erratum.
+That sequencing was the point: the remediation landed first, so the reviewer
+receives one coherent target rather than a target plus an erratum. F-06 … F-09
+remain open, and are described in
+[06-test-and-evidence-map](06-test-and-evidence-map.md) and
+[finding-register](finding-register.md) rather than closed by documentation.

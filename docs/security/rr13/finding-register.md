@@ -1,8 +1,12 @@
 # RR-13 audit-readiness finding register
 
-Findings from the team's own pre-audit review of commit
-`02b5b5286fab95ce68a4ca53d8b7768a738a1013`. This is **not** the independent
+Findings from the team's own pre-audit review. They were raised against
+`02b5b5286fab95ce68a4ca53d8b7768a738a1013` and resolved at the current frozen
+target, `0190248f6199398dfe4ce632e513123cb00b0cb0`. This is **not** the independent
 review and does not anticipate its results.
+
+Internal findings are numbered **F-xx**. The identifiers `RR13-001`, `RR13-002`
+and onward are reserved for the independent reviewer and are not used here.
 
 | Severity | Count | Status |
 | --- | --- | --- |
