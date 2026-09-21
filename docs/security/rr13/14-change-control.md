@@ -170,3 +170,30 @@ receives one coherent target rather than a target plus an erratum. F-06 … F-09
 remain open, and are described in
 [06-test-and-evidence-map](06-test-and-evidence-map.md) and
 [finding-register](finding-register.md) rather than closed by documentation.
+
+## RR13-001 post-merge re-freeze amendment — 2026-09-21
+
+| Field | Value |
+| --- | --- |
+| `OLD_AUDIT_TARGET_SHA` | `0190248f6199398dfe4ce632e513123cb00b0cb0` |
+| `INDEPENDENTLY_REVIEWED_HEAD` | `a43dd0074a707b16117480a2871a4ef578edd07d` |
+| `INDEPENDENT_DISPOSITION` | `RR13_001_STATUS=VERIFIED_FIXED` |
+| `NEW_AUDIT_TARGET_SHA` | `e574c69570979081e34e0358673c62f87ba9220d` |
+| `MERGE_METHOD` | squash |
+| `SECURITY_BEHAVIOR_CHANGED` | **YES** |
+| `IDL_CHANGED` | **YES** |
+| `REVIEWED_TREE` | `c224791e4468b75a5cc2e89fb1da3e7c325b8c95` |
+| `MERGED_TREE` | `c224791e4468b75a5cc2e89fb1da3e7c325b8c95` — identical |
+| `PR_CI_RUN` | `35600960812` — SUCCESS |
+| `POST_MERGE_CI_RUN` | `35613748305` — exact target; infrastructure retry pending |
+| `RE_FREEZE_FINAL` | **NO** until exact-target CI retry and manifest regeneration complete |
+
+The independent review disposition is preserved verbatim in
+[17-rr13-001-independent-review.md](17-rr13-001-independent-review.md). The
+post-merge reconciliation record is
+[18-rr13-001-post-merge-refreeze.md](18-rr13-001-post-merge-refreeze.md).
+
+The first Anchor-local-validator attempt in post-merge CI did not reach protocol
+tests: `cargo_build_sbf` received HTTP 504 while fetching Solana
+`platform-tools`. No code change is attributed to that infrastructure event.
+The exact-target retry must complete before the package is marked re-frozen.
