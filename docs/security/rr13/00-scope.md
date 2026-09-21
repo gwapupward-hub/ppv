@@ -19,16 +19,58 @@ mainnet release.
 
 ## Review target
 
+`main` has advanced past the frozen target since this package was written. The
+two are distinguished here so a reviewer never has to guess which one a claim
+is about.
+
+### `FROZEN_RR13_SECURITY_TARGET` — what is under review
+
 | Fact | Value |
 | --- | --- |
 | Repository | `gwapupward-hub/ppv` |
-| Branch | `main` |
 | Commit under review | `02b5b5286fab95ce68a4ca53d8b7768a738a1013` |
+| Reached `main` as | "Land PPV Escrow live custody evidence and close RR-6" (#43) |
 | Worktree at capture | clean |
 | Baseline CI | green (workflow run 35486148014) |
 
-Every claim in this package is made about that commit. Section
-[14-change-control](14-change-control.md) states what invalidates it.
+**Every claim in this package is made about that commit**, not about whatever
+`main` points at when you read this. The commit is permanent and directly
+checkoutable — see [09-reproduction](09-reproduction.md).
+
+### `CURRENT_REPOSITORY_HEAD` — what `main` points at
+
+| Fact | Value |
+| --- | --- |
+| Commit | `bd99f2419ae0becdd52e5cb05d01cc79ce8dc26b` |
+| Ahead of the target by | 2 commits, both merged after the target was frozen |
+| `1c24aaa624c9c89083d48cdf7bf25e55d24141f9` | this package itself (#45), `docs/security/rr13/**` only |
+| `bd99f2419ae0becdd52e5cb05d01cc79ce8dc26b` | repository-local development tooling (#44), `.claude/skills/**` only |
+| CI on that head | green — workflow run 35498756470, all four jobs |
+
+### Why the newer head does not move the target
+
+Neither commit touches a security-sensitive path. This is asserted by tree
+hash rather than by reading a diff, so it cannot be satisfied by a change that
+merely looks equivalent:
+
+| Subtree | `02b5b52` | `1c24aaa` | `bd99f24` |
+| --- | --- | --- | --- |
+| `programs/` | `1c3d2411…` | `1c3d2411…` | `1c3d2411…` |
+| `sdk/` | `b258cc9f…` | `b258cc9f…` | `b258cc9f…` |
+| `indexer/` | `e2697bd3…` | `e2697bd3…` | `e2697bd3…` |
+| `tests/` | `84ee8932…` | `84ee8932…` | `84ee8932…` |
+| `scripts/` | `4bb1de53…` | `4bb1de53…` | `4bb1de53…` |
+| `deployments/` | `f06ac1a8…` | `f06ac1a8…` | `f06ac1a8…` |
+
+`Anchor.toml`, `Cargo.toml`, `Cargo.lock`, `package.json`, `package-lock.json`
+and `rust-toolchain.toml` are likewise byte-identical across all three commits.
+
+`.claude/**` is listed as a **non-invalidating** path in
+[14-change-control](14-change-control.md), and the skill it carries is
+development tooling for this repository's own contributors. **It is not an
+audit, and nothing it produced substitutes for the independent review RR-13
+names.** Section [14-change-control](14-change-control.md) states what would
+invalidate the target.
 
 ## What is in scope
 

@@ -7,12 +7,41 @@ signer, no funder key and no private RPC credential**.
 
 ### 0. Clone the exact review target
 
+`main` is ahead of the frozen target. Check out the target explicitly — do not
+review `main`.
+
 ```bash
 git clone https://github.com/gwapupward-hub/ppv.git
 cd ppv
 git checkout 02b5b5286fab95ce68a4ca53d8b7768a738a1013
 git status --porcelain          # must print nothing
 ```
+
+If you prefer to work from a newer `main`, first satisfy yourself that nothing
+security-sensitive moved:
+
+```bash
+for t in programs sdk indexer tests scripts deployments; do
+  echo "$t $(git rev-parse 02b5b52:$t) $(git rev-parse main:$t)"
+done
+```
+
+Each line's two hashes must match. [00-scope.md](00-scope.md) records the
+expected values.
+
+### 0b. Verify this package against its manifest
+
+Run from the **repository root**, not from the package directory — every path
+in the manifest is repository-root-relative.
+
+```bash
+sha256sum -c docs/security/rr13/MANIFEST.sha256
+```
+
+All entries must report `OK`. The manifest covers the package documents, the
+reviewed program source, the build and identity configuration, the canonical
+evidence, the security documentation this package cites, and both mutation
+harnesses. It does not hash itself.
 
 ### 1. Toolchain
 

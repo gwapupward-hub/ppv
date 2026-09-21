@@ -1,6 +1,11 @@
 # RR-13 — Independent security review package
 
-**Review target:** `02b5b5286fab95ce68a4ca53d8b7768a738a1013` (branch `main`)
+**Frozen RR-13 security target:** `02b5b5286fab95ce68a4ca53d8b7768a738a1013`
+
+**Current repository head:** `bd99f2419ae0becdd52e5cb05d01cc79ce8dc26b` — two
+commits ahead, both non-invalidating (this package, and `.claude/skills/**`
+development tooling). Every security-sensitive subtree is identical across the
+two. See [00-scope.md](00-scope.md) for the tree-hash evidence.
 
 **Entry verdict:** `RR13_AUDIT_ENTRY=NOT_READY` — see
 [finding-register.md](finding-register.md).
@@ -33,7 +38,7 @@
 | [10-auditor-checklist.md](10-auditor-checklist.md) | ranked review targets |
 | [finding-register.md](finding-register.md) | internal pre-audit findings |
 | [14-change-control.md](14-change-control.md) | what invalidates the target |
-| [MANIFEST.sha256](MANIFEST.sha256) | hashes of this package and the source artifacts |
+| [MANIFEST.sha256](MANIFEST.sha256) | hashes of this package and the source artifacts; verify from the repository root |
 
 ## Mandatory disclosures
 
