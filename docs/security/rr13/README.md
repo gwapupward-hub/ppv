@@ -47,6 +47,8 @@ RR-13 closure and not a passed audit. See
 | [11-handoff.md](11-handoff.md) | independent-review handoff: the two SHAs, access, archive recipe |
 | [PPV-RR13-INDEPENDENT-REVIEW-BRIEF.md](PPV-RR13-INDEPENDENT-REVIEW-BRIEF.md) | the brief to send the reviewer |
 | [finding-register.md](finding-register.md) | internal pre-audit findings |
+| [15-rr13-001-remediation.md](15-rr13-001-remediation.md) | RR13-001: reproduction, chosen protocol rule, griefing analysis, fix, coverage — `REMEDIATED_PENDING_REVIEW` |
+| [16-rr13-002-disposition.md](16-rr13-002-disposition.md) | RR13-002: dependency advisories — `OPEN_INFORMATIONAL`, no remediation claimed |
 | [14-change-control.md](14-change-control.md) | what invalidates the target |
 | [MANIFEST.sha256](MANIFEST.sha256) | hashes of this package and the source artifacts; verify from the repository root |
 

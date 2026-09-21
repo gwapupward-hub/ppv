@@ -8,6 +8,7 @@ use crate::events::{
     SettlementExecuted,
 };
 use crate::instructions::custody::pay_out_of_vault;
+use crate::instructions::settlement_proof::require_cited_proof;
 use crate::state::{EscrowAgreement, Milestone, Proof, MILESTONE_SCHEMA_VERSION};
 
 #[event_cpi]
@@ -262,6 +263,10 @@ pub struct SettleMilestone<'info> {
     )]
     pub seller_token_account: Account<'info, TokenAccount>,
     pub settlement_proof: Option<Account<'info, Proof>>,
+    /// CHECK: as in `Settle` — the cited evidence's `ppv_core::ProofRecord`,
+    /// fully validated in `require_cited_proof` before its status decides
+    /// whether this tranche may be released.
+    pub core_proof: Option<UncheckedAccount<'info>>,
     pub token_program: Program<'info, Token>,
 }
 
@@ -273,18 +278,15 @@ pub fn handle_settle_milestone(ctx: Context<SettleMilestone>) -> Result<()> {
         .milestone
         .require_settleable(&ctx.accounts.agreement, &agreement_key, &signer)?;
 
-    let cited_proof = match &ctx.accounts.settlement_proof {
-        Some(proof) => {
-            require_keys_eq!(
-                proof.agreement,
-                agreement_key,
-                EscrowError::ProofAgreementMismatch
-            );
-            require!(proof.is_approved(), EscrowError::ProofNotApproved);
-            Some(proof.key())
-        }
-        None => None,
-    };
+    // The same citation rule single-payment settlement runs, from the same
+    // function: a tranche is money leaving the vault, and a revoked commitment
+    // is no more of a justification for the third tranche than for the only
+    // payment of a plain escrow.
+    let cited_proof = require_cited_proof(
+        &ctx.accounts.settlement_proof,
+        &ctx.accounts.core_proof,
+        &agreement_key,
+    )?;
 
     let amount = ctx.accounts.milestone.amount;
     // A tranche can never exceed what the vault still owes, whatever the

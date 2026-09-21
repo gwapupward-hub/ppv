@@ -92,6 +92,7 @@ const [vaultAuthority] = deriveVaultAuthority(agreement);
 const [vault] = deriveVault(agreement);
 const [milestone] = deriveMilestone(agreement, 0);
 const [proof] = deriveProof(agreement, 0);
+const [coreProof] = deriveCoreProof(counterparty, coreProofId(agreement, 0));
 const termsHash = Buffer.alloc(32, 9);
 
 /**
@@ -151,7 +152,9 @@ const CASES = [
         vaultAuthority,
         sellerTokenAccount: otherAccount,
       }),
-    // settlement_proof is None, which Anchor signals with the program's own id.
+    // settlement_proof and core_proof are both None, which Anchor signals with
+    // the program's own id. They are both-or-neither: the program refuses a
+    // citation without its ppv_core record, and a record without a citation.
     accounts: [
       creator,
       agreement,
@@ -160,6 +163,40 @@ const CASES = [
       vaultAuthority,
       otherAccount,
       ESCROW_PROGRAM_ID,
+      ESCROW_PROGRAM_ID,
+      TOKEN_PROGRAM_ID,
+    ],
+    signers: [creator],
+    writable: [agreement, vault, otherAccount],
+  },
+  {
+    name: "settle",
+    label: "settle (citing evidence)",
+    struct: "Settle",
+    instruction: () =>
+      settleInstruction({
+        signerKey: creator,
+        agreement,
+        mint,
+        vault,
+        vaultAuthority,
+        sellerTokenAccount: otherAccount,
+        settlementProof: proof,
+        coreProof,
+      }),
+    // A cited settlement carries the escrow decision *and* the ppv_core record
+    // it stands on. They are separate identities and stay separate: the first
+    // is a ppv_escrow PDA keyed by (agreement, index), the second a ppv_core
+    // PDA keyed by (submitter, derived proof id).
+    accounts: [
+      creator,
+      agreement,
+      mint,
+      vault,
+      vaultAuthority,
+      otherAccount,
+      proof,
+      coreProof,
       TOKEN_PROGRAM_ID,
     ],
     signers: [creator],
@@ -267,6 +304,38 @@ const CASES = [
       vaultAuthority,
       otherAccount,
       ESCROW_PROGRAM_ID,
+      ESCROW_PROGRAM_ID,
+      TOKEN_PROGRAM_ID,
+    ],
+    signers: [creator],
+    writable: [agreement, milestone, vault, otherAccount],
+  },
+  {
+    name: "settle_milestone",
+    label: "settle_milestone (citing evidence)",
+    struct: "SettleMilestone",
+    instruction: () =>
+      settleMilestoneInstruction({
+        signerKey: creator,
+        agreement,
+        milestone,
+        mint,
+        vault,
+        vaultAuthority,
+        sellerTokenAccount: otherAccount,
+        settlementProof: proof,
+        coreProof,
+      }),
+    accounts: [
+      creator,
+      agreement,
+      milestone,
+      mint,
+      vault,
+      vaultAuthority,
+      otherAccount,
+      proof,
+      coreProof,
       TOKEN_PROGRAM_ID,
     ],
     signers: [creator],
@@ -307,7 +376,11 @@ const CASES = [
 ];
 
 for (const kase of CASES) {
-  test(`${kase.name}: the account list matches ${kase.struct} field for field`, () => {
+  // `name` is the instruction, and two cases can share one: a settlement with
+  // and without a citation encode the same instruction with different optional
+  // slots. `label` names the case; `name` still derives the discriminator.
+  const label = kase.label ?? kase.name;
+  test(`${label}: the account list matches ${kase.struct} field for field`, () => {
     const order = expectedAccountOrder(kase.struct);
     const instruction = kase.instruction();
     const built = [
@@ -332,7 +405,7 @@ for (const kase of CASES) {
     );
   });
 
-  test(`${kase.name}: signers and writability match the struct's constraints`, () => {
+  test(`${label}: signers and writability match the struct's constraints`, () => {
     const instruction = kase.instruction();
     const signers = instruction.keys.filter((key) => key.isSigner).map((key) => key.pubkey.toBase58());
     assert.deepEqual(signers, kase.signers.map((key) => key.toBase58()));
@@ -347,7 +420,7 @@ for (const kase of CASES) {
     );
   });
 
-  test(`${kase.name}: the discriminator is Anchor's for that instruction name`, () => {
+  test(`${label}: the discriminator is Anchor's for that instruction name`, () => {
     const instruction = kase.instruction();
     assert.deepEqual(
       Array.from(instruction.data.subarray(0, 8)),

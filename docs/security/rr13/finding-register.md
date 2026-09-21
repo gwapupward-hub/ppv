@@ -30,6 +30,13 @@ mutation qualification — is the highest-value thing an independent reviewer
 can attack, and it was **not** closed by this remediation. Nothing here added
 property or fuzz infrastructure to make the package look cleaner than it is.
 
+> **2026-09-21.** The independent reviewer attacked F-06 and found
+> **RR13-001** (MEDIUM, proof-backed settlement did not check linked Core proof
+> status). Its remediation is recorded in
+> [15-rr13-001-remediation.md](15-rr13-001-remediation.md) and is
+> `REMEDIATED_PENDING_REVIEW`; the independent findings register is the
+> reviewer's, not this one. F-06 is narrowed, not closed.
+
 No exploitable defect was found in program logic. Every MEDIUM and LOW finding
 is a **documentation-integrity** defect: repository security documentation that
 contradicts the code or the committed evidence it describes. That class matters
@@ -314,6 +321,20 @@ Not a defect; a measured assurance gap, fully described in
 six mutation gaps. The path carries deterministic negative tests and live
 devnet evidence. Classification **RECOMMENDED_BEFORE_AUDIT**, and the highest-value
 item an independent reviewer can attack (checklist items 2 and 3).
+
+**Amendment, 2026-09-21.** The gap was attacked, and it held a real defect:
+the independent reviewer's **RR13-001** landed precisely here — proof-backed
+settlement did not validate the linked `ppv_core::ProofRecord` status. That is
+the assurance gap doing its job as a disclosure, and it is the argument against
+ever describing one as closed by writing about it.
+
+The remediation narrows F-06 and does not close it. Mutation qualification now
+covers the new cross-program guard (three permanent mutations in
+`scripts/mutation-qualify.sh`: `core-revocation`, `core-revocation-inverted`,
+`core-proof-binding`). The randomized property model still carries **no** proof
+lifecycle actions, by decision — see
+[15-rr13-001-remediation.md](15-rr13-001-remediation.md) §7. **F-06 remains
+OPEN.**
 
 ### F-07 — Donated surplus and vault rent are permanently stranded (RR-3)
 

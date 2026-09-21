@@ -112,10 +112,10 @@ Seventeen. Five move value; the rest move state or record facts.
 | Instruction | From | To | Signer | Amount | Destination constraint |
 | --- | --- | --- | --- | --- | --- |
 | `fund` | `Open` | `Funded` | buyer | exactly `amount`, credit re-read and asserted | vault PDA, re-derived from the agreement |
-| `settle` | `Completed` | `Settled` | either party | `remaining()` | `owner == counterparty`, `mint == agreement.mint` |
+| `settle` | `Completed` | `Settled` | either party | `remaining()` | `owner == counterparty`, `mint == agreement.mint`; a cited proof must be approved **and** its `ppv_core` commitment `Active` |
 | `refund` | `Funded`, `Completed` | `Refunded` | **seller only** | `remaining()` | `owner == creator` |
 | `resolve_dispute` | `Disputed` | `Settled` or `Refunded` | either party, never to itself | `remaining()` | owner must be a party, and not the signer |
-| `settle_milestone` | `Funded` (milestone) | `Funded` or `Settled` | either party | milestone `amount`, capped at `remaining()` | `owner == counterparty` |
+| `settle_milestone` | `Funded` (milestone) | `Funded` or `Settled` | either party | milestone `amount`, capped at `remaining()` | `owner == counterparty`; same citation rule as `settle` |
 
 All four payout paths go through one function, `pay_out_of_vault`, which signs
 with the per-agreement vault-authority PDA, uses `transfer_checked`, and re-reads
@@ -185,6 +185,19 @@ commitment. The callee is pinned by type (`Program<'info, PpvCore>`), the record
 address is derived by escrow from the agreement and the proof index and asserted
 before the call, and the submitter's own signature is forwarded rather than a
 program-owned authority manufactured.
+
+One cross-program **read**, in two instructions: `settle` and `settle_milestone`
+take the cited evidence's `ppv_core::ProofRecord` as an optional account and
+refuse the settlement unless it is `Active` (RR13-001). The account is optional
+in the same sense the citation is, and required in lockstep with it: cited
+evidence without its core record is `CoreProofRequired`, a core record with no
+citation is `UnexpectedCoreProof`. Nothing is taken on trust — the owner must be
+`ppv_core`, the discriminator must be `ProofRecord`'s, and the address must be
+both the one the escrow decision recorded and the one
+`(submitter, agreement, proof_index)` derives, so no caller-supplied account can
+stand in. The two identities stay distinct: the escrow `Proof` PDA is the
+decision, the `ppv_core::ProofRecord` is the commitment, and an indexer reads
+both.
 
 **`ppv_escrow` does not reference `ppv_commerce` anywhere.** It carries its own
 parties and its own `terms_hash`. An escrow that corresponds to a Commerce

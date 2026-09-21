@@ -64,4 +64,10 @@ pub enum EscrowError {
     Overflow,
     #[msg("Core proof account is not the address this agreement and index derive")]
     CoreProofMismatch,
+    #[msg("Settlement citing evidence must also present that evidence's ppv_core proof record")]
+    CoreProofRequired,
+    #[msg("Settlement citing no evidence must present no ppv_core proof record")]
+    UnexpectedCoreProof,
+    #[msg("The cited evidence's ppv_core commitment has been revoked")]
+    CoreProofRevoked,
 }

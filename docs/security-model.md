@@ -42,6 +42,66 @@ holding 100 USDC does not mean an agreement is funded — anyone can transfer
 tokens to a token account. Only an authorized `fund()` that actually moved
 exactly `amount` sets `Funded`.
 
+## Core revocation and settlement
+
+PPV has exactly one proof primitive, `ppv_core::ProofRecord`, and exactly one
+way to withdraw a commitment: `ppv_core::revoke_proof`, callable only by the
+wallet that made it. An escrow `Proof` account is not a second commitment. It
+records which agreement the evidence was offered under, who offered it, and
+what the counterparty decided about it.
+
+Two readings of that arrangement are possible, and they disagree about one
+moment: a settlement citing evidence whose core commitment has since been
+revoked.
+
+**Live core validity** (the rule this protocol enforces). A proof-backed payout
+is allowed only while the linked `ppv_core::ProofRecord` is `Active`. Approval
+is a decision *about* a commitment, not a replacement for it, so a revoked
+commitment is not evidence, however genuine the approval was.
+
+**Escrow approval snapshot** (rejected). Approval would be an irreversible
+acceptance, and a later revocation would not reach a decision already made.
+
+The repository settles this, and it settles it for live validity. The escrow
+`Proof` account is built around *not* being a second source of truth: it stores
+no content hash, and `state/proof.rs` says why — "one proof primitive, one
+place to revoke". A snapshot model would give the protocol the second source of
+truth it deliberately refused: `ppv_core` would say revoked, the chain's
+settlement record would say proof-backed, and an indexer would have to pick one.
+Nothing in the design treats an escrow decision as an independent artifact; the
+decision names a core record precisely because the core record is the evidence.
+
+**Why it costs no liveness.** Citing evidence is optional in both settlement
+paths, by design — a plain escrow settles on the parties' own signatures, and
+requiring a proof would fold approval into custody. So a revocation removes a
+*justification*, never a payment:
+
+| Path | If the cited commitment is revoked |
+| --- | --- |
+| `settle` (escrow, bounty) | Refused while cited. The same signer settles with no citation, or cites other approved evidence, and is paid `remaining()` in full. |
+| `settle_milestone` | Refused while cited. The tranche is released uncited; the milestone's own submit/approve lifecycle is independent of proofs. |
+| Repeated tranche payouts | Each tranche is a separate citation. One revoked commitment blocks the citations naming it, not the schedule. |
+| `resolve_dispute`, `refund` | Unaffected — neither cites evidence. |
+
+This is what makes the rule safe to state absolutely. Only the submitter can
+revoke, so the worst either party can do is withdraw its *own* evidence; and
+because the payout does not depend on the citation, withdrawing it cannot hold
+the vault hostage. There is no unilateral griefing path, and no custody
+deadlock is introduced in exchange for the integrity guarantee.
+
+**What is given up.** A settlement made after a revocation records
+`settlement_proof = Pubkey::default()` rather than a citation. That is the
+intended outcome: the chain declines to record a payment as proof-backed when
+the proof no longer stands, and the loss is to the record's richness, never to
+custody.
+
+Enforced at the custody boundary, not by clients: `settle` and
+`settle_milestone` both take the cited evidence's `ppv_core::ProofRecord`,
+require it both-or-neither with the citation, check its owner, discriminator,
+recorded address, derived address and authority, and refuse the settlement
+unless its status is `Active`. See `instructions/settlement_proof.rs`,
+`Proof::require_live_core_commitment`, and invariant 12l.
+
 ## Attack matrix
 
 Run by `tests/escrow.ts` against a local validator, plus the pure state-machine
