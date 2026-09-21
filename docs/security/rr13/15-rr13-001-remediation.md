@@ -108,12 +108,28 @@ existed:
 * Host-level: `programs/ppv_escrow/src/state/proof.rs` →
   `a_revoked_core_commitment_cannot_back_a_payout`.
 
-`REGRESSION_FAILS_BEFORE_FIX = YES (BY CONSTRUCTION, NOT EXECUTED IN THIS
-ENVIRONMENT)`. Against the frozen target the settlement path takes no core
-proof account and performs no status check, so the assertion cannot hold there;
-the failure is structural rather than a matter of a check being ordered wrongly.
-This is stated rather than demonstrated because the remediation environment has
-no Anchor or Solana toolchain — see §9.
+`REGRESSION_FAILS_BEFORE_FIX = YES`, with two different strengths of evidence,
+stated separately because they are not the same claim.
+
+**Demonstrated, executed.** `./scripts/mutation-qualify.sh core-revocation`
+deletes the status guard — which is, for the purposes of that check, the
+frozen target's behaviour — and requires the suite to fail. It does:
+
+```text
+  core-revocation  a settlement may cite a revoked ppv_core commitment
+                   detected [cross-program evidence validity (RR13-001)]
+                     state::proof::tests::a_revoked_core_commitment_cannot_back_a_payout
+```
+
+`core-revocation-inverted` and `core-proof-binding` are detected in the same
+run. Full result: `MUTATION_QUALIFICATION_PASSED (10 mutations, all detected)`.
+
+**Structural, not executed.** The local-validator regression in `tests/escrow.ts`
+cannot run in this environment (§9). It does not need to be run to know it fails
+against the frozen target: there, `Settle` and `SettleMilestone` take no core
+proof account, so the test cannot even build its transaction, let alone reach an
+`Active` check. The failure is structural rather than a matter of a check being
+ordered wrongly. It is listed as **unrun** in §9, and CI executes it.
 
 ## 5. The fix
 
@@ -247,7 +263,7 @@ EXECUTABLE HERE`
 | `npm ci` | **PASS** |
 | `npm test` (typecheck, SDK, indexer, release guards, generators) | **PASS** — 818 pass, 1 skipped, 0 fail |
 | `npm run build` | **PASS** |
-| `./scripts/mutation-qualify.sh` | **PASS** — 10 mutations, all detected |
+| `./scripts/mutation-qualify.sh` | **PASS** — 10 mutations, all detected, including the three new RR13-001 ones |
 | Anchor local-validator suite (`tests/escrow.ts`, PPV-P1…P10, proof lifecycle properties) | **NOT EXECUTED** |
 | `./scripts/mutation-qualify-property.sh` | **NOT EXECUTED** |
 | `anchor build` / IDL verification | **NOT EXECUTED** |
