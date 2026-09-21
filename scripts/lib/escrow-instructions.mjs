@@ -190,6 +190,13 @@ function escrowIx(name, keys, data = Buffer.alloc(0), programId = ESCROW_PROGRAM
  * what makes it worth stating: it would have diverged from the generated
  * client without ever failing, and the divergence is the thing this file exists
  * to avoid.
+ *
+ * Both settlement instructions carry two of these, and the program requires
+ * them both-or-neither (RR13-001): evidence may only be cited together with the
+ * `ppv_core::ProofRecord` it stands on, whose status is re-read at the moment
+ * custody moves. `deriveCoreProof(submitter, coreProofId(agreement, index))` is
+ * the only address the program accepts, so a caller that cites a proof derives
+ * the record rather than choosing it.
  */
 function optionalAccount(account, programId = ESCROW_PROGRAM_ID) {
   return ro(account ?? programId);
@@ -269,6 +276,7 @@ export function settleInstruction({
   vaultAuthority,
   sellerTokenAccount,
   settlementProof = null,
+  coreProof = null,
   programId = ESCROW_PROGRAM_ID,
   tokenProgram = TOKEN_PROGRAM_ID,
 }) {
@@ -282,6 +290,7 @@ export function settleInstruction({
       ro(vaultAuthority),
       rw(sellerTokenAccount),
       optionalAccount(settlementProof, programId),
+      optionalAccount(coreProof, programId),
       ro(tokenProgram),
     ],
     Buffer.alloc(0),
@@ -417,6 +426,7 @@ export function settleMilestoneInstruction({
   vaultAuthority,
   sellerTokenAccount,
   settlementProof = null,
+  coreProof = null,
   programId = ESCROW_PROGRAM_ID,
   tokenProgram = TOKEN_PROGRAM_ID,
 }) {
@@ -431,6 +441,7 @@ export function settleMilestoneInstruction({
       ro(vaultAuthority),
       rw(sellerTokenAccount),
       optionalAccount(settlementProof, programId),
+      optionalAccount(coreProof, programId),
       ro(tokenProgram),
     ],
     Buffer.alloc(0),

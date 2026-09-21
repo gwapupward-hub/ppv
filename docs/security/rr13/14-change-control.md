@@ -48,7 +48,40 @@ moved silently while review is underway.
 | 2026-09-20 | — | `02b5b5286fab95ce68a4ca53d8b7768a738a1013` | initial freeze | — |
 | 2026-09-20 | `02b5b528…` | **unchanged** | `main` advanced to `bd99f2419ae0becdd52e5cb05d01cc79ce8dc26b` via #45 (this package) and #44 (`.claude/skills/**`). Both are non-invalidating paths. Verified by tree hash: `programs/`, `sdk/`, `indexer/`, `tests/`, `scripts/` and `deployments/` are identical across `02b5b52`, `1c24aaa` and `bd99f24`, as are all six root build/identity files. CI green on the combined head (run 35498756470, four of four jobs). **The target was not moved.** | `docs/security/rr13/**`, `.claude/skills/**` |
 | 2026-09-20 | `02b5b528…` | **unchanged** | Package reconciliation: `00-scope.md` now distinguishes `FROZEN_RR13_SECURITY_TARGET` from `CURRENT_REPOSITORY_HEAD`; `MANIFEST.sha256` re-rooted (see below). Documentation only; no claim about the target changed meaning. | `docs/security/rr13/**` |
+| 2026-09-21 | `0190248f6199398dfe4ce632e513123cb00b0cb0` | **`PENDING_MERGE`** | Remediation of **RR13-001**, the first independent finding: proof-backed settlement did not validate the linked `ppv_core::ProofRecord` status. `SECURITY_BEHAVIOR_CHANGED=**YES**` — see [15-rr13-001-remediation.md](15-rr13-001-remediation.md) and the evidence block below. The new target SHA is not predicted; it exists only after merge. | invalidating: `programs/ppv_escrow/{errors.rs,state/proof.rs,instructions/{settle.rs,milestone.rs,settlement_proof.rs,mod.rs}}`, `scripts/devnet-escrow-custody.mjs`, `scripts/lib/escrow-instructions.mjs`. non-invalidating: `docs/**`, `tests/escrow.ts`, `scripts/test/escrow-instructions.test.mjs`, `scripts/mutation-qualify.sh` |
 | 2026-09-21 | `02b5b5286fab95ce68a4ca53d8b7768a738a1013` | **`0190248f6199398dfe4ce632e513123cb00b0cb0`** | Pre-audit remediation of internal findings F-01 through F-05 (#47, squash-merged). `scripts/lib/identity.mjs` is a target-invalidating path and its commentary changed, so the target is **re-frozen** at the merge commit. `SECURITY_BEHAVIOR_CHANGED=NO` — evidence below. | invalidating: `scripts/lib/identity.mjs` (commentary only). non-invalidating: `docs/**`, `scripts/test/attack-matrix.test.mjs`, `scripts/test/escrow-current-state-docs.test.mjs`, `scripts/test/coverage-docs.test.mjs` (new, additive) |
+
+### RR13-001 remediation of 2026-09-21 — the evidence
+
+| Field | Value |
+| --- | --- |
+| `FINDING` | RR13-001 (independent, MEDIUM) |
+| `OLD_REVIEW_TARGET` | `0190248f6199398dfe4ce632e513123cb00b0cb0` |
+| `REMEDIATION_TARGET` | `PENDING_MERGE` |
+| `SECURITY_BEHAVIOR_CHANGED` | **YES** — `settle` and `settle_milestone` now refuse a citation whose `ppv_core` commitment is revoked, and take one new optional account each |
+| `IDL_CHANGED` | **YES** — one optional account added to two instructions; no argument, layout, discriminator, event or existing error code changed |
+| `RR13_001_STATUS` | `REMEDIATED_PENDING_REVIEW` — `VERIFIED_FIXED` is the reviewer's to assign |
+| `RR_13` | OPEN |
+
+**The old target is not overwritten.** `0190248f…` remains the SHA the
+independent review was conducted against, and `MANIFEST.sha256` remains its
+attestation. That manifest will therefore **not** verify against this
+remediation branch, by design: re-hashing the package and issuing a new
+`AUDIT_TARGET_SHA` happens at re-freeze, after merge, per the procedure above.
+
+**Disclosed deviation from the `tests/**` rule.** That rule is "additive only".
+`tests/escrow.ts` was *modified*: the `settle` and `settleMilestone` helpers
+gained the new optional account, because the instruction interface changed and
+every existing caller would otherwise fail to build a valid transaction. No
+assertion was weakened or removed, and every pre-existing test still asserts
+what it asserted before.
+
+**Not executed in the remediation environment**, and therefore not claimed:
+the Anchor local-validator suite, the randomized property suite and its
+mutation qualification, and `anchor build` / IDL verification. The environment
+has no `anchor` or `solana` binary and its network policy refuses the installer
+host. CI runs these on the pull request; the remediation is not complete until
+they are green there.
 
 ### Re-freeze of 2026-09-21 — the evidence
 

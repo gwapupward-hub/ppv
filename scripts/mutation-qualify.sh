@@ -22,8 +22,9 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 AGREEMENT="programs/ppv_escrow/src/state/agreement.rs"
 ENUMS="programs/ppv_escrow/src/state/enums.rs"
+PROOF="programs/ppv_escrow/src/state/proof.rs"
 
-if ! git diff --quiet -- "${AGREEMENT}" "${ENUMS}"; then
+if ! git diff --quiet -- "${AGREEMENT}" "${ENUMS}" "${PROOF}"; then
   echo "The files this script mutates already have uncommitted changes." >&2
   echo "Commit or stash them first: a mutation run must start from a known tree." >&2
   exit 1
@@ -39,6 +40,7 @@ import sys, pathlib
 
 AGREEMENT = pathlib.Path("programs/ppv_escrow/src/state/agreement.rs")
 ENUMS = pathlib.Path("programs/ppv_escrow/src/state/enums.rs")
+PROOF = pathlib.Path("programs/ppv_escrow/src/state/proof.rs")
 
 # id -> (file, old, new)
 MUTATIONS = {
@@ -102,6 +104,44 @@ MUTATIONS = {
         "        require!(total <= self.amount, EscrowError::MilestoneTotalMismatch);",
         "",
     ),
+    # Cross-program evidence validity (RR13-001): a settlement may cite a
+    # ppv_core commitment its own author has revoked. This is the finding
+    # itself, kept as a permanent mutation so the suite cannot lose the ability
+    # to detect it.
+    "core-revocation": (
+        PROOF,
+        """        require!(
+            core.status == CoreProofStatus::Active,
+            EscrowError::CoreProofRevoked
+        );
+        Ok(())""",
+        """        Ok(())""",
+    ),
+    # The same guard inverted rather than deleted — a defect a careless edit
+    # produces far more easily than a deletion, and one that a suite testing
+    # only the rejection path would pass.
+    "core-revocation-inverted": (
+        PROOF,
+        "            core.status == CoreProofStatus::Active,",
+        "            core.status != CoreProofStatus::Active,",
+    ),
+    # Account substitution: the status is read off whatever core record the
+    # caller passed, because nothing binds it to this piece of evidence. A
+    # live record of another proof would then satisfy the check above.
+    "core-proof-binding": (
+        PROOF,
+        """        require_keys_eq!(core.key, self.core_proof, EscrowError::CoreProofMismatch);
+
+        let (derived, _) = core_proof_address(&self.submitter, &self.agreement, self.proof_index);
+        require_keys_eq!(core.key, derived, EscrowError::CoreProofMismatch);
+        require_keys_eq!(
+            core.authority,
+            self.submitter,
+            EscrowError::CoreProofMismatch
+        );
+""",
+        "",
+    ),
     # State machine: settlement no longer requires completion.
     "state-machine": (
         AGREEMENT,
@@ -127,7 +167,8 @@ path.write_text(text.replace(old, new, 1))
 PY
 }
 
-ALL_IDS=(authorization custody destination terminal identity milestone state-machine)
+ALL_IDS=(authorization custody destination terminal identity milestone state-machine \
+  core-revocation core-revocation-inverted core-proof-binding)
 declare -A CLASS=(
   [authorization]="authorization"
   [custody]="custody conservation"
@@ -136,6 +177,9 @@ declare -A CLASS=(
   [identity]="party identity / cross-program binding"
   [milestone]="milestone allocation"
   [state-machine]="state-machine legality"
+  [core-revocation]="cross-program evidence validity (RR13-001)"
+  [core-revocation-inverted]="cross-program evidence validity (RR13-001)"
+  [core-proof-binding]="cross-program account binding (RR13-001)"
 )
 declare -A DESCRIPTION=(
   [authorization]="any signer may open a dispute over an agreement it is not party to"
@@ -145,6 +189,9 @@ declare -A DESCRIPTION=(
   [identity]="the default address counts as a party when no payee is assigned"
   [milestone]="a milestone schedule may promise more than the escrow holds"
   [state-machine]="settlement no longer requires Completed"
+  [core-revocation]="a settlement may cite a revoked ppv_core commitment"
+  [core-revocation-inverted]="only a revoked ppv_core commitment may back a payout"
+  [core-proof-binding]="any ppv_core record may stand in for this proof's commitment"
 )
 
 requested=("$@")
@@ -153,7 +200,7 @@ if [[ ${#requested[@]} -eq 0 ]]; then
 fi
 
 restore() {
-  git checkout -- "${AGREEMENT}" "${ENUMS}"
+  git checkout -- "${AGREEMENT}" "${ENUMS}" "${PROOF}"
 }
 trap restore EXIT
 

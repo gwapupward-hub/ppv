@@ -2027,6 +2027,10 @@ export async function scenarioProofs(ctx) {
           vaultAuthority: handle.vaultAuthority,
           sellerTokenAccount: ctx.ata.seller,
           settlementProof: one.proof,
+          // The rejected proof's own core record, so this negative still
+          // fails for the reason it names. Omitting it would make the run
+          // refuse on CoreProofRequired and quietly stop testing approval.
+          coreProof: one.coreProof,
         }),
       ],
       signers: [ctx.buyer],
@@ -2045,6 +2049,9 @@ export async function scenarioProofs(ctx) {
         vaultAuthority: handle.vaultAuthority,
         sellerTokenAccount: ctx.ata.seller,
         settlementProof: zero.proof,
+        // A citation carries the ppv_core record it stands on, whose status
+        // is re-read at the moment custody moves (RR13-001).
+        coreProof: zero.coreProof,
       }),
     ],
     signers: [ctx.buyer],

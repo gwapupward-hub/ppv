@@ -5,6 +5,7 @@ use crate::constants::{AGREEMENT_SEED, VAULT_AUTHORITY_SEED, VAULT_TOKEN_SEED};
 use crate::errors::EscrowError;
 use crate::events::SettlementExecuted;
 use crate::instructions::custody::pay_out_of_vault;
+use crate::instructions::settlement_proof::require_cited_proof;
 use crate::state::{EscrowAgreement, Proof};
 
 #[event_cpi]
@@ -52,6 +53,16 @@ pub struct Settle<'info> {
     /// custody. When one is cited it is checked, recorded on the agreement, and
     /// named in the event, so the payment and its justification are one record.
     pub settlement_proof: Option<Account<'info, Proof>>,
+    /// CHECK: the `ppv_core::ProofRecord` the cited evidence stands on. Owner,
+    /// discriminator, address and authority are all established in
+    /// `require_cited_proof` before its status is read; see
+    /// `instructions::settlement_proof`. Left unchecked as to type here so
+    /// `ppv_core`'s account types do not enter this program's IDL build.
+    ///
+    /// Required exactly when `settlement_proof` is present, and refused when it
+    /// is not: an optional account with no stated reason to be here is an
+    /// account nobody checks.
+    pub core_proof: Option<UncheckedAccount<'info>>,
     pub token_program: Program<'info, Token>,
 }
 
@@ -66,19 +77,13 @@ pub fn handle_settle(ctx: Context<Settle>) -> Result<()> {
     let agreement_key = ctx.accounts.agreement.key();
 
     // Checked before any custody moves: a settlement that cites evidence must
-    // cite this agreement's evidence, and evidence the other party accepted.
-    let cited_proof = match &ctx.accounts.settlement_proof {
-        Some(proof) => {
-            require_keys_eq!(
-                proof.agreement,
-                agreement_key,
-                EscrowError::ProofAgreementMismatch
-            );
-            require!(proof.is_approved(), EscrowError::ProofNotApproved);
-            Some(proof.key())
-        }
-        None => None,
-    };
+    // cite this agreement's evidence, evidence the other party accepted, and a
+    // `ppv_core` commitment that still stands (RR13-001).
+    let cited_proof = require_cited_proof(
+        &ctx.accounts.settlement_proof,
+        &ctx.accounts.core_proof,
+        &agreement_key,
+    )?;
 
     pay_out_of_vault(
         &ctx.accounts.token_program,

@@ -319,9 +319,13 @@ describe("PPV escrow kernel", () => {
       vaultAuthority?: PublicKey;
       mint?: PublicKey;
       settlementProof?: PublicKey | null;
+      coreProof?: PublicKey | null;
+      submitter?: PublicKey;
+      proofIndex?: number;
     },
   ) {
     const signer = overrides?.signer ?? seller;
+    const settlementProof = overrides?.settlementProof ?? null;
     return escrow.methods
       .settle()
       .accounts({
@@ -331,10 +335,44 @@ describe("PPV escrow kernel", () => {
         vault: overrides?.vault ?? agreement.vault,
         vaultAuthority: overrides?.vaultAuthority ?? agreement.vaultAuthority,
         sellerTokenAccount: overrides?.destination ?? sellerTokens,
-        settlementProof: overrides?.settlementProof ?? null,
+        settlementProof,
+        coreProof: citedCoreProof(agreement.agreement, settlementProof, overrides),
         tokenProgram: TOKEN_PROGRAM_ID,
       })
       .signers([signer])
+      .rpc();
+  }
+
+  /**
+   * The `ppv_core::ProofRecord` a settlement must present alongside the
+   * evidence it cites (RR13-001).
+   *
+   * Both accounts are optional and the program requires them both-or-neither,
+   * so the default follows the citation: no proof cited, no core record. When
+   * one is cited the address is *derived*, never chosen — an override exists
+   * only so the substitution tests can choose one and be refused.
+   */
+  function citedCoreProof(
+    agreement: PublicKey,
+    settlementProof: PublicKey | null,
+    overrides?: { coreProof?: PublicKey | null; submitter?: PublicKey; proofIndex?: number },
+  ): PublicKey | null {
+    if (overrides && "coreProof" in overrides) return overrides.coreProof ?? null;
+    if (!settlementProof) return null;
+    return coreProofAddress(
+      core.programId,
+      overrides?.submitter ?? seller.publicKey,
+      agreement,
+      overrides?.proofIndex ?? 0,
+    );
+  }
+
+  /** `ppv_core::revoke_proof`, callable only by the wallet that committed. */
+  function revokeCoreProof(coreProof: PublicKey, authority: Keypair) {
+    return core.methods
+      .revokeProof()
+      .accounts({ authority: authority.publicKey, proof: coreProof })
+      .signers([authority])
       .rpc();
   }
 
@@ -1133,6 +1171,356 @@ describe("PPV escrow kernel", () => {
     });
   });
 
+  describe("core proof revocation at settlement (RR13-001)", () => {
+    /**
+     * The finding, and the rule that answers it.
+     *
+     * RR13-001: escrow approval was treated as the whole of a citation's
+     * validity, so a settlement could pay out against a `ppv_core` commitment
+     * whose own author had already revoked it. The escrow decision is genuine
+     * — the counterparty really did accept that evidence — but the thing it
+     * accepted no longer stands, and the chain would still record the payment
+     * as proof-backed.
+     *
+     * The rule is live core validity: a proof-backed payout is allowed only
+     * while the linked `ppv_core::ProofRecord` is `Active`. It costs no
+     * liveness, and that is why it can be absolute rather than a policy —
+     * citing evidence is optional in both settlement paths, so a revocation
+     * removes a justification and never the payment. Every test below that
+     * refuses a settlement is paired with one that shows the money can still
+     * move.
+     */
+
+    function submitProofFor(
+      agreement: Awaited<ReturnType<typeof initialize>>,
+      signer: Keypair = seller,
+      index = 0,
+    ) {
+      return escrow.methods
+        .submitProof(hash32(12), hash32(0))
+        .accounts(submitProofAccounts(agreement.agreement, signer.publicKey, index))
+        .signers([signer])
+        .rpc();
+    }
+
+    function approve(
+      agreement: Awaited<ReturnType<typeof initialize>>,
+      index = 0,
+      signer: Keypair = buyer,
+    ) {
+      return escrow.methods
+        .approveProof()
+        .accounts({
+          decider: signer.publicKey,
+          agreement: agreement.agreement,
+          proof: proofAddress(escrow.programId, agreement.agreement, index),
+        })
+        .signers([signer])
+        .rpc();
+    }
+
+    /**
+     * `settle_milestone`, built here rather than reused from the milestone
+     * suite: that helper is scoped to its own block, and this one exists to
+     * exercise the optional citation pair the milestone suite never passes.
+     */
+    function settleTranche(
+      agreement: Awaited<ReturnType<typeof initialize>>,
+      index: number,
+      overrides?: { settlementProof?: PublicKey | null; coreProof?: PublicKey | null },
+    ) {
+      const settlementProof = overrides?.settlementProof ?? null;
+      return escrow.methods
+        .settleMilestone()
+        .accounts({
+          signer: seller.publicKey,
+          agreement: agreement.agreement,
+          milestone: milestoneAddress(escrow.programId, agreement.agreement, index),
+          mint: agreement.mint,
+          vault: agreement.vault,
+          vaultAuthority: agreement.vaultAuthority,
+          sellerTokenAccount: sellerTokens,
+          settlementProof,
+          coreProof: citedCoreProof(agreement.agreement, settlementProof, overrides),
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([seller])
+        .rpc();
+    }
+
+    /** Evidence submitted by the seller and accepted by the buyer. */
+    async function approvedEvidence(
+      agreement: Awaited<ReturnType<typeof initialize>>,
+      index = 0,
+      submitter: Keypair = seller,
+    ) {
+      await submitProofFor(agreement, submitter, index);
+      await approve(agreement, index, submitter === seller ? buyer : seller);
+      return {
+        proof: proofAddress(escrow.programId, agreement.agreement, index),
+        coreProof: coreProofAddress(
+          core.programId,
+          submitter.publicKey,
+          agreement.agreement,
+          index,
+        ),
+      };
+    }
+
+    it("reproduces the finding: a revoked core commitment cannot back a payout", async () => {
+      const agreement = await fundedAgreement();
+      const evidence = await approvedEvidence(agreement);
+      await markCompleted(agreement);
+
+      // The exact sequence the reviewer reported, step by step.
+      const before = await core.account.proofRecord.fetch(evidence.coreProof);
+      assert.ok("active" in before.status, "the commitment starts Active");
+      const decision = await escrow.account.proof.fetch(evidence.proof);
+      assert.ok("approved" in decision.status, "the counterparty accepted it");
+
+      await revokeCoreProof(evidence.coreProof, seller);
+
+      const after = await core.account.proofRecord.fetch(evidence.coreProof);
+      assert.ok("revoked" in after.status);
+      // The escrow decision is untouched. Approval is not withdrawn by a
+      // revocation, and this remediation does not rewrite it: what changed is
+      // the commitment that approval was about.
+      const stillApproved = await escrow.account.proof.fetch(evidence.proof);
+      assert.ok("approved" in stillApproved.status);
+
+      await expectAnchorError(
+        settle(agreement, { settlementProof: evidence.proof }),
+        "CoreProofRevoked",
+      );
+
+      const vault = await getAccount(connection, agreement.vault);
+      assert.equal(vault.amount, AMOUNT, "a refused settlement moves nothing");
+      const account = await escrow.account.escrowAgreement.fetch(agreement.agreement);
+      assert.ok("completed" in account.state, "and leaves the agreement where it was");
+    });
+
+    it("leaves the payment reachable, so revocation cannot strand custody", async () => {
+      // The other half of the rule. If a revocation could block the payout,
+      // either party could approve evidence and then revoke it to hold the
+      // vault hostage — an integrity fix that bought a custody deadlock. It
+      // cannot, because citing evidence is optional: the seller settles
+      // without a citation and is paid in full.
+      const agreement = await fundedAgreement();
+      const evidence = await approvedEvidence(agreement);
+      await markCompleted(agreement);
+      await revokeCoreProof(evidence.coreProof, seller);
+
+      const before = await getAccount(connection, sellerTokens);
+      await settle(agreement);
+      const after = await getAccount(connection, sellerTokens);
+
+      assert.equal(after.amount - before.amount, AMOUNT);
+      const account = await escrow.account.escrowAgreement.fetch(agreement.agreement);
+      assert.ok("settled" in account.state);
+      // And the record says what happened: no citation, rather than a citation
+      // the chain can no longer stand behind.
+      assert.equal(account.settlementProof.toBase58(), PublicKey.default.toBase58());
+    });
+
+    it("pays out against evidence whose commitment still stands", async () => {
+      const agreement = await fundedAgreement();
+      const evidence = await approvedEvidence(agreement);
+      await markCompleted(agreement);
+
+      const signature = await settle(agreement, { settlementProof: evidence.proof });
+
+      const account = await escrow.account.escrowAgreement.fetch(agreement.agreement);
+      assert.equal(account.settlementProof.toBase58(), evidence.proof.toBase58());
+      const event = eventNamed(await eventsOf(signature), "settlementExecuted");
+      assert.equal(event.proof?.toBase58(), evidence.proof.toBase58());
+      // The two identities stay separate, which an indexer depends on: the
+      // event names the escrow decision, and the core record it stands on is
+      // reachable from that decision, not conflated with it.
+      assert.notEqual(evidence.proof.toBase58(), evidence.coreProof.toBase58());
+      const decision = await escrow.account.proof.fetch(evidence.proof);
+      assert.equal(decision.coreProof.toBase58(), evidence.coreProof.toBase58());
+    });
+
+    it("refuses a tranche backed by a revoked commitment, and still pays it without one", async () => {
+      // settle_milestone runs the same citation rule, from the same function.
+      // A tranche is money leaving the vault, and a repeated tranche payout
+      // would otherwise let one revoked commitment justify several.
+      const agreement = await initialize({ agreementType: { milestoneContract: {} } });
+      await escrow.methods
+        .createMilestone(new BN((AMOUNT / 2n).toString()), hash32(31))
+        .accounts({
+          creator: buyer.publicKey,
+          agreement: agreement.agreement,
+          milestone: milestoneAddress(escrow.programId, agreement.agreement, 0),
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([buyer])
+        .rpc();
+      await escrow.methods
+        .createMilestone(new BN((AMOUNT / 2n).toString()), hash32(32))
+        .accounts({
+          creator: buyer.publicKey,
+          agreement: agreement.agreement,
+          milestone: milestoneAddress(escrow.programId, agreement.agreement, 1),
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([buyer])
+        .rpc();
+      await fund(agreement);
+
+      const evidence = await approvedEvidence(agreement);
+      for (const method of ["submitMilestone", "approveMilestone"] as const) {
+        await escrow.methods[method]()
+          .accounts({
+            signer: (method === "submitMilestone" ? seller : buyer).publicKey,
+            agreement: agreement.agreement,
+            milestone: milestoneAddress(escrow.programId, agreement.agreement, 0),
+          })
+          .signers([method === "submitMilestone" ? seller : buyer])
+          .rpc();
+      }
+
+      await revokeCoreProof(evidence.coreProof, seller);
+
+      await expectAnchorError(
+        settleTranche(agreement, 0, { settlementProof: evidence.proof }),
+        "CoreProofRevoked",
+      );
+      const held = await getAccount(connection, agreement.vault);
+      assert.equal(held.amount, AMOUNT, "the refused tranche moved nothing");
+
+      // Liveness, per tranche: the work was approved, so it is still paid.
+      const before = await getAccount(connection, sellerTokens);
+      await settleTranche(agreement, 0);
+      const after = await getAccount(connection, sellerTokens);
+      assert.equal(after.amount - before.amount, AMOUNT / 2n);
+    });
+
+    it("requires the core record with a citation, and refuses one without", async () => {
+      // Both-or-neither. Letting a citation through without its core record
+      // would restore the finding exactly; accepting a core record nobody
+      // cites would put an unexamined account on a custody path.
+      const agreement = await fundedAgreement();
+      const evidence = await approvedEvidence(agreement);
+      await markCompleted(agreement);
+
+      await expectAnchorError(
+        settle(agreement, { settlementProof: evidence.proof, coreProof: null }),
+        "CoreProofRequired",
+      );
+      await expectAnchorError(
+        settle(agreement, { settlementProof: null, coreProof: evidence.coreProof }),
+        "UnexpectedCoreProof",
+      );
+
+      const vault = await getAccount(connection, agreement.vault);
+      assert.equal(vault.amount, AMOUNT);
+    });
+
+    it("refuses every core record but this evidence's own", async () => {
+      const agreement = await fundedAgreement();
+      const evidence = await approvedEvidence(agreement);
+
+      // A second piece of evidence on the same agreement, from the other
+      // party: a live core record under a different index and a different
+      // submitter.
+      const theirIndex = await approvedEvidence(agreement, 1, buyer);
+
+      // Another agreement's live evidence.
+      const elsewhere = await fundedAgreement();
+      const elsewhereEvidence = await approvedEvidence(elsewhere);
+
+      // A ppv_core record the attacker minted for itself, with an id of its
+      // own choosing: a genuine, Active `ProofRecord` that this agreement
+      // never asked for.
+      const foreignId = Array<number>(16).fill(3);
+      const [foreignRecord] = PublicKey.findProgramAddressSync(
+        [CORE_PROOF_SEED, attacker.publicKey.toBytes(), Buffer.from(foreignId)],
+        core.programId,
+      );
+      await core.methods
+        .createProof(foreignId, hash32(12), hash32(0), { deliverable: {} })
+        .accounts({
+          authority: attacker.publicKey,
+          proof: foreignRecord,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([attacker])
+        .rpc();
+
+      await markCompleted(agreement);
+
+      const substitutions: Array<[string, PublicKey]> = [
+        // Another proof of this same agreement — live, and not this one.
+        ["another proof of this agreement", theirIndex.coreProof],
+        // Another agreement's evidence entirely.
+        ["another agreement's core record", elsewhereEvidence.coreProof],
+        // The right index under the wrong submitter: ppv_core keys records by
+        // authority, so this is a different address, and an empty one.
+        [
+          "the wrong submitter's derivation",
+          coreProofAddress(core.programId, buyer.publicKey, agreement.agreement, 0),
+        ],
+        // The wrong index under the right submitter.
+        [
+          "the wrong proof index",
+          coreProofAddress(core.programId, seller.publicKey, agreement.agreement, 5),
+        ],
+        // A live ppv_core record belonging to nobody in this agreement.
+        ["a foreign core record", foreignRecord],
+        // The escrow decision offered as its own commitment. Owned by
+        // ppv_escrow, so it is not a ProofRecord whatever its bytes say.
+        ["the escrow proof itself", evidence.proof],
+        // Not an account of any program.
+        ["a wallet", attacker.publicKey],
+        // The agreement account, to cover an owned-but-wrong-type account of
+        // this program.
+        ["the agreement account", agreement.agreement],
+      ];
+
+      for (const [what, substitute] of substitutions) {
+        try {
+          await expectAnchorError(
+            settle(agreement, {
+              settlementProof: evidence.proof,
+              coreProof: substitute,
+            }),
+            "CoreProofMismatch",
+          );
+        } catch (error) {
+          assert.fail(`${what} was not refused with CoreProofMismatch: ${String(error)}`);
+        }
+      }
+
+      const vault = await getAccount(connection, agreement.vault);
+      assert.equal(vault.amount, AMOUNT, "no substitution moved anything");
+
+      // The honest citation still works, so none of the above is a false
+      // rejection of the real record.
+      await settle(agreement, { settlementProof: evidence.proof });
+      const account = await escrow.account.escrowAgreement.fetch(agreement.agreement);
+      assert.equal(account.settlementProof.toBase58(), evidence.proof.toBase58());
+    });
+
+    it("refuses a citation whose core record was revoked by its own author only", async () => {
+      // Who may revoke is ppv_core's rule, not escrow's, and it matters to the
+      // griefing analysis: only the wallet that made a commitment can withdraw
+      // it. A counterparty cannot revoke the other side's evidence to spoil a
+      // citation, and an outsider cannot touch it at all.
+      const agreement = await fundedAgreement();
+      const evidence = await approvedEvidence(agreement);
+
+      await assert.rejects(revokeCoreProof(evidence.coreProof, buyer));
+      await assert.rejects(revokeCoreProof(evidence.coreProof, attacker));
+
+      const record = await core.account.proofRecord.fetch(evidence.coreProof);
+      assert.ok("active" in record.status, "nobody else could revoke it");
+
+      await markCompleted(agreement);
+      await settle(agreement, { settlementProof: evidence.proof });
+    });
+  });
+
   describe("cancellation, disputes and refunds", () => {
     function cancel(agreement: Awaited<ReturnType<typeof initialize>>, signer: Keypair = buyer) {
       return escrow.methods
@@ -1440,9 +1828,17 @@ describe("PPV escrow kernel", () => {
     function settleMilestone(
       agreement: Awaited<ReturnType<typeof initialize>>,
       index: number,
-      overrides?: { signer?: Keypair; destination?: PublicKey },
+      overrides?: {
+        signer?: Keypair;
+        destination?: PublicKey;
+        settlementProof?: PublicKey | null;
+        coreProof?: PublicKey | null;
+        submitter?: PublicKey;
+        proofIndex?: number;
+      },
     ) {
       const signer = overrides?.signer ?? seller;
+      const settlementProof = overrides?.settlementProof ?? null;
       return escrow.methods
         .settleMilestone()
         .accounts({
@@ -1453,7 +1849,8 @@ describe("PPV escrow kernel", () => {
           vault: agreement.vault,
           vaultAuthority: agreement.vaultAuthority,
           sellerTokenAccount: overrides?.destination ?? sellerTokens,
-          settlementProof: null,
+          settlementProof,
+          coreProof: citedCoreProof(agreement.agreement, settlementProof, overrides),
           tokenProgram: TOKEN_PROGRAM_ID,
         })
         .signers([signer])
