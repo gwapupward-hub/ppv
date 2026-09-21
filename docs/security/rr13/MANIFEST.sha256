@@ -1,10 +1,12 @@
 # RR-13 audit package manifest
 #
-# Frozen RR-13 security target: 0190248f6199398dfe4ce632e513123cb00b0cb0
-#   Re-frozen 2026-09-21 from 02b5b5286fab95ce68a4ca53d8b7768a738a1013.
-#   SECURITY_BEHAVIOR_CHANGED=NO; see 14-change-control.md for the evidence.
-#   Post-merge CI on the target: run 35560538644, four of four jobs green.
-# Generated:                    2026-09-21T05:34:39Z
+# Frozen RR-13 security target: e574c69570979081e34e0358673c62f87ba9220d
+#   RR13-001=VERIFIED_FIXED by independent review.
+#   Package reconciliation commit: 54af83c405873eadf9ea24d0165e70312fff535f
+#   Post-merge CI: run 35630872920 (CI #194), four of four jobs green.
+#   SECURITY_TREE_DRIFT=NO
+#   RE_FREEZE_FINAL=YES
+# Generated: 2026-09-21
 #
 # Every path below is relative to the REPOSITORY ROOT.
 # Verify from the repository root:
@@ -13,8 +15,9 @@
 #
 # This file does not hash itself.
 #
+#
 # --- RR-13 package documents ---
-5639e4e695e5e6aa2f3373569c48e5728c61866b548ffbf5b00995b27798d71e  docs/security/rr13/00-scope.md
+08b33db5d70d70f39878f08efef4460673abff71556202dfe9b03e77986e92e2  docs/security/rr13/00-scope.md
 be30bd6d1b24224a20d68e5d9e41cb76ec97d660ed80b9b585c1d8df8b26e586  docs/security/rr13/01-architecture.md
 b127da07428159ab9574cb6c2da32588800213cbb50fb2d84cb39f87ddcd15c2  docs/security/rr13/02-program-identities.md
 7739288299b8f56dc8b4a252f37d88fc192e8dfaa61b66fc13cc1dee4396f767  docs/security/rr13/03-trust-boundaries.md
@@ -23,13 +26,13 @@ abb6af831594418af6fd2ecf13d1f142a9bff82ce1cdee8d68f6800574c4ea7b  docs/security/
 156136b7df8cd3c54264c02ad2fe94693f442ba79d5890f9aa87f8b053a1f592  docs/security/rr13/06-test-and-evidence-map.md
 eb0d83783fb201c3db59c4752161cb868afd7c8573eb1e3bbddd300262aa36e9  docs/security/rr13/07-known-risks.md
 465adbabf780ab272dcb5771a6a9ac0703461604a88b28545780c4b473ee1ce9  docs/security/rr13/08-deployment-governance.md
-d42ab511ca4d9ebfa3c0320b6c15ee4bb0b7c13ffb1a2ea4287a0e2173fef543  docs/security/rr13/09-reproduction.md
+60de794f50c31d05d56401d19a3cde80ec2866db6ca1976ee15e7930d039adbf  docs/security/rr13/09-reproduction.md
 77e4eacb05617811d1670f51cb8e7b172d8fbf9d9d4e33acebc71839ccb99e07  docs/security/rr13/10-auditor-checklist.md
-930e52db44a9fd5ba630e437193cd69443212a165b8049245d5b0e64523a7372  docs/security/rr13/11-handoff.md
-387bebd944679fdd76266797982aaf0c8ae88a7bd891c23819bd8365a72fc5e0  docs/security/rr13/14-change-control.md
-b38d42b411382f07355ec62141447c4888409969724df22b5d62d9f2a40c2737  docs/security/rr13/PPV-RR13-INDEPENDENT-REVIEW-BRIEF.md
-a67ef7682b57127f56ac7966dae41a5171717f629cf39645d5885fef11820bf2  docs/security/rr13/README.md
-42022314c54c7c504479c3a233b99c00ca8e942e4b8e76b486d11c81255b564a  docs/security/rr13/finding-register.md
+dea5d056462e6b68ff0fe5d70395246d4afea5408ea3449b93756ba5238f7a2a  docs/security/rr13/11-handoff.md
+a99ab833f2c763cb2c9b3a9ad417c792c3ba263ba9b7a8dc0de919384c1f0963  docs/security/rr13/14-change-control.md
+e6be1e7e03c0c3471248cd88d2062f372516316be862bc1a10c36a2bdadccc8c  docs/security/rr13/PPV-RR13-INDEPENDENT-REVIEW-BRIEF.md
+132ac6c071b20ac628fa54c37e633f3b8d0e62cf1a9da3ef7284c98c8a60eb6b  docs/security/rr13/README.md
+343d6e4cfe210a0cd9281b37ebda912077415d7ef541b9f2310b6178d7cbe7b7  docs/security/rr13/finding-register.md
 #
 # --- reviewed program source ---
 211aebac07193647e2fb960c501dc8aa017d04c8487bd3e1d67b369297ba5f2a  programs/ppv_commerce/src/errors.rs
@@ -41,7 +44,7 @@ f94d11e4fb8f47c8fd61765dd4eb1116ab10f1407895c6d30c60dd005efd720f  programs/ppv_c
 61847461ae4939575931b9e0408bcc645bc18bc58143ee2020bbe831f8a5f6a9  programs/ppv_core/src/lib.rs
 ead4f4933cc0376b39b835905bd5cf724c3fee6342d77b2feb214a23c3000b4d  programs/ppv_core/src/state.rs
 c4343adb3dbd049c25c080a7f41bb275d24eb2bdada3ea45327911c8afd47a02  programs/ppv_escrow/src/constants.rs
-1ad24b9d04dc6f7d3eec8365c52e016561074ae2e956832b83da50f38f7627d2  programs/ppv_escrow/src/errors.rs
+fbb33293f1387d93188787dc4e06562e3c70cee77ffed2c74a4fa10f9ca7ab3f  programs/ppv_escrow/src/errors.rs
 e7347303e39a2c3b9a618ba866275ce6ef6179dbe0cfa52cbf0a2e5711ff34c5  programs/ppv_escrow/src/events/agreement.rs
 95747d227b325f5ec4264c4c5b1e4d6da5eed9561d88047001eb3d4c3235a5c5  programs/ppv_escrow/src/events/dispute.rs
 8913017556f8542c95a175f44a9ad823baaecc02eb45f0762b41a35f34c4ad4a  programs/ppv_escrow/src/events/milestone.rs
@@ -54,13 +57,13 @@ e7347303e39a2c3b9a618ba866275ce6ef6179dbe0cfa52cbf0a2e5711ff34c5  programs/ppv_e
 c9890035dfd2c4d692cc7cfb2437754b260ba49bd779f6c91ad98713fa0fa857  programs/ppv_escrow/src/instructions/fund.rs
 2aec7d3ec4120e5bbf8d0064d1512abf4d82b2c0351658ce0997c25f9c67bf19  programs/ppv_escrow/src/instructions/initialize_agreement.rs
 e70ae5bed7644ecebe4c6b858c4b1d50e11467161f2d7ececbd8729c7bb73aa5  programs/ppv_escrow/src/instructions/mark_completed.rs
-cca56a34dd5a9c77719c294a42b5a164238b01557bdbb2fd0ef7a35dc4473199  programs/ppv_escrow/src/instructions/milestone.rs
-7f628648f84cdc085495f4f86bb7804db08f66e730ba28185ee05f89451d559b  programs/ppv_escrow/src/instructions/mod.rs
+be46eb51be0eade0be527984d9e59d42a3e003b0b43e838b910d4368317044d7  programs/ppv_escrow/src/instructions/milestone.rs
+d89cce720d4e94f4d46d5ab18719700b08c3c338203ef6feabd998f380f8ee49  programs/ppv_escrow/src/instructions/mod.rs
 113a343c1dace7e8f27103d2412a67aa4e5c437b29d8d93e29f2ec774cc938a9  programs/ppv_escrow/src/instructions/open_dispute.rs
 4f44cbd7a4ef9c6c5c8f7e71c08d798f97905ef66790cb6b5b256f2d8186c118  programs/ppv_escrow/src/instructions/refund.rs
 308096349e4d661d076687e040fccfeb016dc7fd99d04fe783665d83114be01a  programs/ppv_escrow/src/instructions/resolve_dispute.rs
 df36ff8af812ef9030be0e0f81690a5d3a1638abc3f7831ca67bf6a2b951f314  programs/ppv_escrow/src/instructions/select_counterparty.rs
-1e476b2ebac645d97572830a55f2778eba8d09ce405192afe6e05b6006bf789b  programs/ppv_escrow/src/instructions/settle.rs
+dc6a03ccdb75ec6d1994b403e4ce6ff1d52a7a6bcffbd38f4de7737f63423c53  programs/ppv_escrow/src/instructions/settle.rs
 281325e648344a5a0238dc627124f486096fcbd55257573d15abee570bc80257  programs/ppv_escrow/src/instructions/submit_proof.rs
 f4126794fb9c4026d747ed805de8ddb69a2c7c902f0e220ef991fa76b8add2b4  programs/ppv_escrow/src/lib.rs
 8917ad040fbd082d9d84e910d80fbb86cd3ad4b3825705acde3ba7ffcde498b8  programs/ppv_escrow/src/state/agreement.rs
@@ -68,7 +71,7 @@ f4126794fb9c4026d747ed805de8ddb69a2c7c902f0e220ef991fa76b8add2b4  programs/ppv_e
 b5e4db6a13f24168e47f78bc4669f245ce232733a37d226769f4ab5144556c0c  programs/ppv_escrow/src/state/lifecycle_model.rs
 d7e7f170292e1fcfe83c76ecf3bca62f9c5b700b590863c6d2671b67ed4d33de  programs/ppv_escrow/src/state/milestone.rs
 29bd5f0b53073b3cbfcf582bdde882dce62167c14fb99b9ded183acbc8ed47a7  programs/ppv_escrow/src/state/mod.rs
-a70a5c6a7497edcc5c83f33c3a9887f9fed2b66882421522d309e3dd160c7fe5  programs/ppv_escrow/src/state/proof.rs
+d973314e27f1aff519f9d98836a0dbd0b58da74c102605bc89d027df7efcbcf4  programs/ppv_escrow/src/state/proof.rs
 #
 # --- build and identity configuration ---
 1c77b8166fda119dfb89d13b53f4533be72c0a9b24b4f47499c0d8ee37d7916a  Anchor.toml
@@ -85,18 +88,31 @@ e23f6ad5d5f94634eb90ba73fbc3c66b3f3d81fff32c5990dac3432d5623103c  deployments/ev
 c95943d6a658ee7723c18b5696f543fe98e0a49ad9b4a57269ca3a0b8411ad3c  deployments/validation/ppv-escrow-devnet-live-custody-35465469908.json
 #
 # --- security documentation referenced by this package ---
-09765ea57d0653d1edb03289fe04f88cf1bb87d830bd8c99d91b2acd7a3e0bdc  docs/invariants.md
+c48cdcbafa1c39510ad610f93234632d69aac69d43035d402590f9a691c00306  docs/invariants.md
 0e0f04bf6c69a16cea24ba51d84d618d790f9353dfc6a8a92b6aaccd8ea74301  docs/property-testing.md
 7a96b411d1a3ea9fbbb1ef4a25f29af2d931621f85ea51988de4d2ea178363e7  docs/deployment-gates.md
-843520ab8dc0f98744175a97938f47d7adacde3ba14e369e7644f1470f4b4188  docs/security/ppv-escrow-attack-matrix.md
+d3c64d313aefc5fddb76cd6814e2a848acdc6eec2673198cca63355a46d564a1  docs/security/ppv-escrow-attack-matrix.md
 b82dc78293bd847280ed938d4bdb88b2f204e36451ea41c53d9b1f991e815970  docs/security/ppv-escrow-residual-risk.md
 2a44ec6248bfcb13b425cb26704b227ebf0c83c1f99dbe0b9c9f8c7188a6e464  docs/security/ppv-escrow-readiness-verdict.md
-61743429c158ad46374d328615e6e48efa6ccfe8146b53888ceef3c75eb104f5  docs/security/ppv-escrow-surface.md
+4af29e9098d304f953009f67166f5f5fd45a3e632f1991678b8f1281b45f9923  docs/security/ppv-escrow-surface.md
 #
 # --- documentation and tamper guards this package's claims rest on ---
-ae49d27bdff9d24700b1be8b7f125b0393a45d5f8db7092679b0769672756d54  scripts/mutation-qualify.sh
+f00457ff9ae8a94edd709f1af83c504d8b5f858754972eb07dd543a41b710441  scripts/mutation-qualify.sh
 4975edeb15e503f8b91a0b206e0c30a7e9d9b22215da3f97077612ed20eb4089  scripts/mutation-qualify-property.sh
 ba8e6a48f8812c8c85b732bf514debf98421738ee6ff59b914c2c92cf956396e  scripts/test/escrow-freeze-tampering.test.mjs
 3e488f75db74a31d420c5464c1d531db80046073ce79db56d0ecfe30cc28c2e2  scripts/test/escrow-current-state-docs.test.mjs
 e01415e4770bbdf4f050103949322e647b0876037b91683071cbbae1221deb08  scripts/test/attack-matrix.test.mjs
 98e53daa37e9f97fa7e2cb18e5788591fcf0c93b5a9d9bb2ba791ad5ce5f8fc6  scripts/test/coverage-docs.test.mjs
+#
+# --- RR13-001 re-freeze additions ---
+8537c615923e91c0a264c7c85257a3e70541fe2c1bffa86cc2150006e9fec2ef  docs/security-model.md
+ab2f65fd9987571102a37228233f87ecc4a4c501241ccd71c690974e80ad871a  docs/security/rr13/15-rr13-001-remediation.md
+de6096a46f0247870137b849e4bd9e2abbf3f2ee5197321dc8c52d3b5bb01853  docs/security/rr13/16-rr13-002-disposition.md
+a81f7fd43886ad9e0f819050d83beefe87b3d5e5354c0c0bf7f26ba450dbe270  docs/security/rr13/17-rr13-001-independent-review.md
+447b2e3b8e80559d68f27e2d36a6d4ef6c4e9b46b220e07a970ec060ab0e0476  docs/security/rr13/18-rr13-001-post-merge-refreeze.md
+bbf5738b4fd0f6d594ce41f55a8369027cb973e2ceb7d57bd86b21128cb6a5b7  programs/ppv_escrow/src/instructions/settlement_proof.rs
+aee7894e05def04a5104ef7326a796431410bb0e7e1ced8aff421cfbec368bdc  scripts/devnet-escrow-custody.mjs
+70b4b70e39b643b02f2208b35620eb41acf66178869b630d4fd410702adfa39c  scripts/lib/escrow-instructions.mjs
+c4d45bee51e3b1a2ce4612c77f076975e4c5a7c77d48b785e82bef995a85c460  scripts/test/escrow-instructions.test.mjs
+009a40c76524bf140aa15395f686ec0de816fb63ef15a699e33ade573d3fd058  tests/escrow.ts
+4d29162bd175f1fc0d62d914a72c5e1cd4971dec5ff59f066b3581976a55d9e6  tests/invariants/execute.ts
