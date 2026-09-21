@@ -111,3 +111,21 @@ names.**
 Core and Commerce are non-custodial. Escrow is the custody boundary. Escrow
 interacts with Core for agreement-bound proofs; it has no on-chain relationship
 with Commerce.
+
+## Post-RR13-001 scope amendment — 2026-09-21
+
+The `0190248f…` target documented above remains the historical target against
+which RR13-001 was raised. After independent verification and squash merge of
+PR #49, the current frozen security target for subsequent RR-13 review is:
+
+`FROZEN_RR13_SECURITY_TARGET=e574c69570979081e34e0358673c62f87ba9220d`
+
+The independently reviewed remediation head
+`a43dd0074a707b16117480a2871a4ef578edd07d` and the merge commit share the
+identical Git tree
+`c224791e4468b75a5cc2e89fb1da3e7c325b8c95`.
+
+This amendment changes the review target because security behavior changed; it
+does not change the existing gate states. See
+[17-rr13-001-independent-review.md](17-rr13-001-independent-review.md) and
+[18-rr13-001-post-merge-refreeze.md](18-rr13-001-post-merge-refreeze.md).
