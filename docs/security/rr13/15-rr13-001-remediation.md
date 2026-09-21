@@ -305,3 +305,37 @@ per [14-change-control.md](14-change-control.md) § "Procedure".
 instruction interface changed. That is disclosed here because the change-control
 rule for `tests/**` is "additive only", and a helper signature change is not
 additive. No assertion was weakened or removed.
+
+## 11. Independent disposition and merge — 2026-09-21
+
+The independent remediation reviewer assigned:
+
+`RR13_001_STATUS=VERIFIED_FIXED`
+
+at PR head `a43dd0074a707b16117480a2871a4ef578edd07d`. The signed review record is
+preserved in
+[17-rr13-001-independent-review.md](17-rr13-001-independent-review.md).
+
+PR #49 was then squash-merged to `main` as:
+
+`e574c69570979081e34e0358673c62f87ba9220d`
+
+The reviewed PR head and merged commit have the identical Git tree
+`c224791e4468b75a5cc2e89fb1da3e7c325b8c95`, so the merge introduced no
+source drift.
+
+The historical `PENDING_MERGE` and `REMEDIATED_PENDING_REVIEW` values above
+describe the remediation sprint before independent disposition. They are not
+rewritten. For the post-merge state:
+
+```text
+REMEDIATION_TARGET=e574c69570979081e34e0358673c62f87ba9220d
+RR13_001_STATUS=VERIFIED_FIXED
+F06=OPEN_NARROWED
+RR_13=OPEN
+MAINNET_AUTHORIZED=NO
+```
+
+Final package re-freeze remains subject to exact-target post-merge CI and
+manifest regeneration; see
+[18-rr13-001-post-merge-refreeze.md](18-rr13-001-post-merge-refreeze.md).
