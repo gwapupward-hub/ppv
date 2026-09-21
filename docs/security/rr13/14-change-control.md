@@ -197,3 +197,26 @@ The first Anchor-local-validator attempt in post-merge CI did not reach protocol
 tests: `cargo_build_sbf` received HTTP 504 while fetching Solana
 `platform-tools`. No code change is attributed to that infrastructure event.
 The exact-target retry must complete before the package is marked re-frozen.
+
+## Final RR13-001 re-freeze evidence — 2026-09-21
+
+| Field | Value |
+| --- | --- |
+| `FROZEN_AUDIT_TARGET_SHA` | `e574c69570979081e34e0358673c62f87ba9220d` |
+| `PACKAGE_RECONCILIATION_COMMIT` | `54af83c405873eadf9ea24d0165e70312fff535f` |
+| `PACKAGE_RECONCILIATION_PR` | #50 |
+| `POST_MERGE_CI_RUN` | `35630872920` — SUCCESS |
+| `POST_MERGE_CI_JOBS` | 4/4 green: host, SDK, Anchor local validator, property mutation |
+| `SECURITY_TREE_DRIFT` | **NO** |
+| `MANIFEST_REGENERATED` | **YES** |
+| `RE_FREEZE_FINAL` | **YES** |
+| `RR13_001_STATUS` | `VERIFIED_FIXED` |
+
+The package reconciliation commit changes only the non-invalidating
+`docs/security/rr13/**` package. The security-sensitive trees and root
+build/config files listed in the re-freeze record are identical to the frozen
+target, so the target does not move from `e574c695…`.
+
+RR-13 remains OPEN because RR13-001 closure is not equivalent to full audit
+closure. RR13-002, F-06, legal review, and mainnet authorization remain separate
+gates.

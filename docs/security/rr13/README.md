@@ -76,3 +76,20 @@ the re-freeze reconciliation is
 
 Broader status is unchanged: RR-13 OPEN, RR13-002 OPEN_INFORMATIONAL, F-06
 OPEN_NARROWED, legal review OPEN, custody gate CLOSED, mainnet NOT authorized.
+
+## Final RR13-001 re-freeze status — 2026-09-21
+
+```text
+FROZEN_RR13_SECURITY_TARGET=e574c69570979081e34e0358673c62f87ba9220d
+RR13_001=VERIFIED_FIXED
+RE_FREEZE_FINAL=YES
+POST_MERGE_CI_RUN=35630872920
+POST_MERGE_CI=SUCCESS
+F06=OPEN_NARROWED
+RR13_002=OPEN_INFORMATIONAL
+RR_13=OPEN
+LEGAL_REVIEW=OPEN
+MAINNET_AUTHORIZED=NO
+```
+
+The current `MANIFEST.sha256` is the attestation for this reconciled package.
