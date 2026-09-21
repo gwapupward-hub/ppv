@@ -60,3 +60,19 @@ RR-13 closure and not a passed audit. See
 * **One devnet Escrow custody signer overlaps Core/Commerce governance**;
   the exception is devnet-only and below the 2-of-3 threshold.
 * **Legal review remains OPEN. Mainnet is NOT authorized.**
+
+## Current amendment — RR13-001 post-merge re-freeze (2026-09-21)
+
+The original package text above is preserved as the historical handoff for the
+target where RR13-001 was discovered. For subsequent RR-13 review activity, the
+new security target is the squash-merge commit:
+
+`e574c69570979081e34e0358673c62f87ba9220d`
+
+RR13-001 has been independently assigned `VERIFIED_FIXED`. The reviewer report
+is [17-rr13-001-independent-review.md](17-rr13-001-independent-review.md), and
+the re-freeze reconciliation is
+[18-rr13-001-post-merge-refreeze.md](18-rr13-001-post-merge-refreeze.md).
+
+Broader status is unchanged: RR-13 OPEN, RR13-002 OPEN_INFORMATIONAL, F-06
+OPEN_NARROWED, legal review OPEN, custody gate CLOSED, mainnet NOT authorized.

@@ -186,3 +186,21 @@ is in
 No independent reviewer has yet examined this code. Nothing in this repository,
 including the repository-local engineering skill under `.claude/skills/`, is an
 independent review or a substitute for one.
+
+## Post-remediation handoff amendment — 2026-09-21
+
+The initial handoff above is preserved as the record of the review that produced
+RR13-001. For subsequent review:
+
+| | Value |
+| --- | --- |
+| `FROZEN_AUDIT_TARGET_SHA` | `e574c69570979081e34e0358673c62f87ba9220d` |
+| RR13-001 disposition | `VERIFIED_FIXED` |
+| Independent review record | [17-rr13-001-independent-review.md](17-rr13-001-independent-review.md) |
+| Re-freeze record | [18-rr13-001-post-merge-refreeze.md](18-rr13-001-post-merge-refreeze.md) |
+
+The earlier statement that no independent reviewer had examined the code is
+historical to the initial handoff and is superseded for RR13-001 by the signed
+review record above. It does not imply that the broader RR-13 review is complete.
+
+RR-13 remains OPEN. Legal review remains OPEN. Mainnet remains NOT authorized.

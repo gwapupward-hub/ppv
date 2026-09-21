@@ -400,3 +400,19 @@ qualification, and that is the first thing worth attacking.
 **What a reviewer should read first.**
 [10-auditor-checklist](10-auditor-checklist.md), items 1 through 3 — dependency
 advisory status, the `ppv_core` CPI boundary, and proof-backed settlement.
+
+## Independent-review amendment — 2026-09-21
+
+RR13-001, which landed in the disclosed F-06 assurance gap, has now been
+independently re-reviewed and assigned `VERIFIED_FIXED` at PR head
+`a43dd0074a707b16117480a2871a4ef578edd07d`. PR #49 was squash-merged as
+`e574c69570979081e34e0358673c62f87ba9220d`.
+
+This does **not** close F-06. The direct regression and mutation coverage narrow
+the gap, but proof-lifecycle actions are still absent from the randomized
+property model. Therefore:
+
+`F06=OPEN_NARROWED`
+
+See [17-rr13-001-independent-review.md](17-rr13-001-independent-review.md) and
+[18-rr13-001-post-merge-refreeze.md](18-rr13-001-post-merge-refreeze.md).

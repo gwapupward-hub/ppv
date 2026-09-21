@@ -151,3 +151,21 @@ bounded run of HTTP 429 (initial + 4 retries, 500/1000/2000/4000 ms, jittered,
 * Rerun custody recovery.
 * Hold any signer, deployer, funder or custody key.
 * Supply a private RPC credential for Part 1.
+
+## Current target amendment — 2026-09-21
+
+The checkout commands earlier in this document reproduce the **original**
+RR13-001 finding target. For review work after the independently verified
+remediation, use the new frozen target:
+
+```bash
+git clone https://github.com/gwapupward-hub/ppv.git
+cd ppv
+git checkout e574c69570979081e34e0358673c62f87ba9220d
+git status --porcelain
+sha256sum -c docs/security/rr13/MANIFEST.sha256
+```
+
+The manifest command is authoritative only after the post-merge re-freeze
+reconciliation is finalized; see
+[18-rr13-001-post-merge-refreeze.md](18-rr13-001-post-merge-refreeze.md).
