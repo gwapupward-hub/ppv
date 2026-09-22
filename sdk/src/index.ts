@@ -15,5 +15,6 @@ export * from "./commerce/index.js";
 export * from "./core/index.js";
 export * from "./compositions/index.js";
 export * from "./escrow/index.js";
+export * from "./instructions.js";
 export * from "./programs.js";
 export * from "./reputation/index.js";
