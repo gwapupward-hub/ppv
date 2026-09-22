@@ -30,7 +30,7 @@ export type InstructionSpec = Readonly<{
   data: Uint8Array;
 }>;
 
-export type CoreProofKind =
+export type CoreProofInstructionKind =
   | "creation"
   | "document"
   | "agreement"
@@ -38,7 +38,7 @@ export type CoreProofKind =
   | "deliverable"
   | "other";
 
-const CORE_PROOF_KINDS: readonly CoreProofKind[] = [
+const CORE_PROOF_KINDS: readonly CoreProofInstructionKind[] = [
   "creation",
   "document",
   "agreement",
@@ -183,7 +183,7 @@ export function buildCreateProofInstruction(input: {
   proofId: Uint8Array;
   contentHash: Uint8Array;
   contextHash: Uint8Array;
-  kind: CoreProofKind;
+  kind: CoreProofInstructionKind;
 }): InstructionSpec {
   const kind = CORE_PROOF_KINDS.indexOf(input.kind);
   if (kind < 0) throw new RangeError(`unknown proof kind: ${input.kind}`);
