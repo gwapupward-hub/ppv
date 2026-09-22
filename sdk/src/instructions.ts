@@ -82,6 +82,12 @@ function u64(value: bigint | string, label = "u64"): Uint8Array {
   return out;
 }
 
+function positiveU64(value: bigint | string, label: string): Uint8Array {
+  const encoded = u64(value, label);
+  if (exactInteger(value, label) === 0n) throw new RangeError(`${label} must be greater than zero`);
+  return encoded;
+}
+
 function i64(value: bigint | string, label = "i64"): Uint8Array {
   const parsed = exactInteger(value, label);
   if (parsed < MIN_I64 || parsed > MAX_I64) throw new RangeError(`${label} is out of i64 range`);
@@ -213,7 +219,9 @@ export function buildCreateCommerceAgreementInstruction(input: {
   termsHash: Uint8Array;
   expiresAt: bigint | string;
 }): InstructionSpec {
-  if (input.partyA === input.partyB) throw new RangeError("partyB must differ from partyA");
+  if (input.partyA === input.partyB || input.partyB === SYSTEM_PROGRAM_ID) {
+    throw new RangeError("partyB must be a distinct non-default wallet");
+  }
   fixed(addressBytes(input.partyB), 32, "partyB");
   const agreementId = fixed(input.agreementId, 16, "agreementId");
   const agreement = deriveCommerceAgreement(input.programId, input.partyA, agreementId);
@@ -321,6 +329,12 @@ export function buildInitializeEscrowInstruction(input: {
   const agreementType = input.agreementType ?? "Escrow";
   const agreementTypeIndex = ESCROW_AGREEMENT_TYPES[agreementType];
   if (agreementTypeIndex === undefined) throw new RangeError(`unknown agreement type: ${agreementType}`);
+  if (!["Escrow", "MilestoneContract", "Bounty"].includes(agreementType)) {
+    throw new RangeError(`${agreementType} is reserved and not currently supported by ppv_escrow`);
+  }
+  if (input.counterparty === input.creator || (agreementType !== "Bounty" && input.counterparty === SYSTEM_PROGRAM_ID)) {
+    throw new RangeError("counterparty is not valid for this agreement type");
+  }
   const agreement = deriveEscrowAgreement(input.programId, input.creator, exactInteger(input.agreementId, "agreementId")).address;
   const vaultAuthority = deriveVaultAuthority(input.programId, agreement).address;
   const vault = deriveVault(input.programId, agreement).address;
@@ -340,7 +354,7 @@ export function buildInitializeEscrowInstruction(input: {
       u64(input.agreementId, "agreementId"),
       addressBytes(input.counterparty),
       Uint8Array.of(agreementTypeIndex),
-      u64(input.amountBaseUnits, "amountBaseUnits"),
+      positiveU64(input.amountBaseUnits, "amountBaseUnits"),
       fixed(input.termsHash, 32, "termsHash", true),
     ],
   );
@@ -489,7 +503,7 @@ export function buildCreateMilestoneEscrowInstruction(input: {
     input.programId,
     "create_milestone",
     [signer(input.creator, true), rw(input.agreement), rw(milestone), ro(SYSTEM_PROGRAM_ID)],
-    [u64(input.amountBaseUnits, "amountBaseUnits"), fixed(input.termsHash, 32, "termsHash", true)],
+    [positiveU64(input.amountBaseUnits, "amountBaseUnits"), fixed(input.termsHash, 32, "termsHash", true)],
   );
 }
 
