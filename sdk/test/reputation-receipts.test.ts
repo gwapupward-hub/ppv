@@ -145,3 +145,27 @@ test("refreshing state never touches identity or chain coordinates", () => {
   assert.deepEqual(refreshed.holderGnsRecord, receipt?.holderGnsRecord);
   assert.equal(refreshed.transactionSignature, receipt?.transactionSignature);
 });
+
+test("receipt validation rejects GNS snapshots bound to the wrong participant wallet", () => {
+  const [receipt] = projectReceipts(
+    event({ counterpartyGnsRecord: snapshot("onyx", WALLET_B) }),
+    context,
+  );
+  assert.ok(receipt);
+  assert.equal(isPpvReceiptV1(receipt), true);
+
+  assert.equal(
+    isPpvReceiptV1({
+      ...receipt,
+      holderGnsRecord: snapshot("emerald", WALLET_B),
+    }),
+    false,
+  );
+  assert.equal(
+    isPpvReceiptV1({
+      ...receipt,
+      counterpartyGnsRecords: [snapshot("onyx", WALLET_A)],
+    }),
+    false,
+  );
+});
