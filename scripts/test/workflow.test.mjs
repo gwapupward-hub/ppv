@@ -57,7 +57,11 @@ test("committed identity is asserted against the permanent keypair before buildi
   assert.match(WORKFLOW, /keypair_id="\$\(solana-keygen pubkey "target\/deploy\/\$\{program\}-keypair\.json"\)"/);
   assert.match(WORKFLOW, /declared_id="\$\(sed -n 's\/\^declare_id!/);
   assert.match(WORKFLOW, /anchor_ids\[0\]/);
-  assert.match(WORKFLOW, /Permanent keypair \$\{keypair_id\} does not match committed/);
+  assert.match(WORKFLOW, /PERMANENT_PROGRAM_IDS/);
+  assert.match(WORKFLOW, /SECURITY: committed \$\{program\} identity drifted from frozen permanent id/);
+  assert.match(WORKFLOW, /WRONG DEVNET PROGRAM KEYPAIR SECRET/);
+  assert.match(WORKFLOW, /Replace the devnet environment secret \$\{secret_name\}/);
+  assert.match(WORKFLOW, /Do NOT run anchor keys sync/);
   // The built IDL must name the same id, or the artifact and the address differ.
   assert.match(WORKFLOW, /Built IDL id \$\{idl_id\} does not match keypair/);
   // And the build must not have rewritten either committed identity file.
@@ -382,4 +386,21 @@ test("verification reports the live state of every permanent program", () => {
   assert.match(VERIFY_WORKFLOW, /9cWE41ZDNQChvFrRoVuPQDeoVLg46ACTiZRCZaBZzfwU/);
   assert.match(VERIFY_WORKFLOW, /GmRDoFuPrBrsxnvTX751WK5rLu14JXe4sgjh6vNwHzr3/);
   assert.match(VERIFY_WORKFLOW, /--inspect/);
+});
+
+test("a bad deployment secret can never be repaired by changing the permanent program identity", () => {
+  const identityStep = WORKFLOW.slice(
+    WORKFLOW.indexOf("- name: Assert committed identity and build"),
+    WORKFLOW.indexOf("- name: Verify independent devnet release approvals"),
+  );
+  assert.match(identityStep, /PERMANENT_PROGRAM_IDS/);
+  assert.match(identityStep, /declared_id.*permanent_id/s);
+  assert.match(identityStep, /anchor_ids\[0\].*permanent_id/s);
+  assert.match(identityStep, /keypair_id.*permanent_id/s);
+  assert.match(identityStep, /WRONG DEVNET PROGRAM KEYPAIR SECRET/);
+  assert.match(identityStep, /Do NOT change Anchor\.toml or declare_id!/);
+  assert.doesNotMatch(
+    identityStep,
+    /Synchronize and commit the public program IDs before deployment/,
+  );
 });
