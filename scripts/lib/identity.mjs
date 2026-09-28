@@ -23,8 +23,9 @@ export const PROGRAM_NAMES = Object.freeze(Object.keys(PERMANENT_PROGRAM_IDS));
  * Deliberately not the same list as `PERMANENT_PROGRAM_IDS`. That table says a
  * program has a permanent identity; this one says the identity is occupied on
  * devnet. A permanent id must never be interpreted as deployment evidence.
- * `ppv_commerce` is the concrete counterexample: its identity is frozen, while
- * its initial devnet release remains pending.
+ * A frozen identity becomes a deployed-program claim only after the chain and a
+ * committed evidence record agree. Commerce now has both; future initial-deploy
+ * attempts must refuse it just like Core and Escrow.
  *
  * Membership here is a claim about the chain, never a way to quiet a failing
  * check — and it now carries a second duty. An address on this list has had its
@@ -37,9 +38,11 @@ export const PROGRAM_NAMES = Object.freeze(Object.keys(PERMANENT_PROGRAM_IDS));
  */
 export const DEVNET_DEPLOYED_PROGRAMS = Object.freeze([
   "ppv_core",
-  // ppv_commerce is intentionally absent until its first devnet deployment
-  // completes. The scheduled verifier confirmed its permanent address did not
-  // exist on devnet on 2026-09-21, and the release candidate remains pending.
+  // Deployed 2026-09-28 by workflow run 36495813224 at release commit
+  // 83b5e8843b5492f4c1b596cb5d4be5d997eb87e4. The canonical evidence record
+  // verifies the executable upgradeable-loader program, byte-identical binary,
+  // and final 2-of-3 Squads upgrade authority.
+  "ppv_commerce",
   // Deployed 2026-09-15 by workflow run 34940712181: program deployed, upgrade
   // authority transferred to the custody vault, and the run's own JSON-RPC read
   // confirmed the authority, `executable` and the upgradeable-loader owner
