@@ -18,6 +18,10 @@ import { REPO } from "./helpers.mjs";
  */
 
 const WORKFLOW = readFileSync(join(REPO, ".github", "workflows", "deploy-devnet.yml"), "utf8");
+const DIAGNOSE_WORKFLOW = readFileSync(
+  join(REPO, ".github", "workflows", "diagnose-devnet-release.yml"),
+  "utf8",
+);
 const lines = WORKFLOW.split("\n");
 
 /** The index of a step's `- name:` line, for ordering assertions. */
@@ -403,4 +407,38 @@ test("a bad deployment secret can never be repaired by changing the permanent pr
     identityStep,
     /Synchronize and commit the public program IDs before deployment/,
   );
+});
+
+test("read-only release diagnostics distinguish source drift from a bad environment secret", () => {
+  assert.match(DIAGNOSE_WORKFLOW, /PERMANENT_PROGRAM_IDS/);
+  assert.match(
+    DIAGNOSE_WORKFLOW,
+    /Frozen permanent program address: \$\{permanent_id\}/,
+  );
+  assert.match(
+    DIAGNOSE_WORKFLOW,
+    /SECURITY: declare_id! \$\{declared_id\} drifted from frozen permanent id/,
+  );
+  assert.match(
+    DIAGNOSE_WORKFLOW,
+    /SECURITY: Anchor\.toml \$\{anchor_ids\[0\]\} drifted from frozen permanent id/,
+  );
+  assert.match(DIAGNOSE_WORKFLOW, /WRONG DEVNET PROGRAM KEYPAIR SECRET/);
+  assert.match(
+    DIAGNOSE_WORKFLOW,
+    /Replace the devnet environment secret \$\{secret_name\}/,
+  );
+});
+
+test("diagnose-devnet-release remains non-deploying after identity diagnostics hardening", () => {
+  const executableDiagnose = DIAGNOSE_WORKFLOW
+    .split("\n")
+    .filter((line) => !/^\s*#/.test(line))
+    .join("\n");
+  assert.doesNotMatch(
+    executableDiagnose,
+    /solana\s+program\s+(deploy|write|upgrade|set-upgrade-authority)/,
+  );
+  assert.doesNotMatch(executableDiagnose, /anchor\s+deploy/);
+  assert.doesNotMatch(executableDiagnose, /solana\s+transfer/);
 });
