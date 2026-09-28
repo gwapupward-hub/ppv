@@ -96,12 +96,23 @@ jobs:
 
           # Public address only. Never print private key material.
           keypair_id="$(solana-keygen pubkey "${work}/${program}-keypair.json")"
+          permanent_id="$(node --input-type=module -e '
+            import { PERMANENT_PROGRAM_IDS } from "./scripts/lib/identity.mjs";
+            process.stdout.write(PERMANENT_PROGRAM_IDS[process.argv[1]] ?? "");
+          ' -- "${program}")"
+          if [[ -z "${permanent_id}" ]]; then
+            echo "FAIL: no frozen permanent identity exists for ${program}." >&2
+            exit 1
+          fi
           echo "program_id=${keypair_id}" >> "${GITHUB_OUTPUT}"
-          echo "Recovered permanent program address: ${keypair_id}"
+          echo "permanent_id=${permanent_id}" >> "${GITHUB_OUTPUT}"
+          echo "Recovered program-keypair address: ${keypair_id}"
+          echo "Frozen permanent program address: ${permanent_id}"
 
       - name: Assert Rust declare_id identity
         env:
           KEYPAIR_ID: ${{ steps.keypair.outputs.program_id }}
+          PERMANENT_ID: ${{ steps.keypair.outputs.permanent_id }}
         run: |
           set -euo pipefail
           program="${{ inputs.program }}"
@@ -112,15 +123,25 @@ jobs:
             exit 1
           fi
           echo "declare_id!: ${declared_id}"
-          if [[ "${KEYPAIR_ID}" != "${declared_id}" ]]; then
-            echo "WRONG PERMANENT KEYPAIR: recovered address ${KEYPAIR_ID} does not match declare_id! ${declared_id}." >&2
+          if [[ "${declared_id}" != "${PERMANENT_ID}" ]]; then
+            echo "SECURITY: declare_id! ${declared_id} drifted from frozen permanent id ${PERMANENT_ID}." >&2
+            echo "Restore the committed source identity; do not change the permanent id." >&2
             exit 1
           fi
-          echo "PASS: permanent keypair matches declare_id!."
+          if [[ "${KEYPAIR_ID}" != "${PERMANENT_ID}" ]]; then
+            case "${program}" in
+              ppv_core) secret_name="PPV_CORE_PROGRAM_KEYPAIR" ;;
+              ppv_commerce) secret_name="PPV_COMMERCE_PROGRAM_KEYPAIR" ;;
+            esac
+            echo "WRONG DEVNET PROGRAM KEYPAIR SECRET: recovered address ${KEYPAIR_ID}; frozen permanent id is ${PERMANENT_ID}." >&2
+            echo "Replace the devnet environment secret ${secret_name}; do not change declare_id!." >&2
+            exit 1
+          fi
+          echo "PASS: keypair secret and declare_id! match the frozen permanent identity."
 
       - name: Assert Anchor.toml identity
         env:
-          KEYPAIR_ID: ${{ steps.keypair.outputs.program_id }}
+          PERMANENT_ID: ${{ steps.keypair.outputs.permanent_id }}
         run: |
           set -euo pipefail
           program="${{ inputs.program }}"
@@ -131,11 +152,12 @@ jobs:
             exit 1
           fi
           echo "Anchor.toml: ${anchor_ids[0]}"
-          if [[ "${KEYPAIR_ID}" != "${anchor_ids[0]}" ]]; then
-            echo "WRONG PERMANENT KEYPAIR: recovered address ${KEYPAIR_ID} does not match Anchor.toml ${anchor_ids[0]}." >&2
+          if [[ "${anchor_ids[0]}" != "${PERMANENT_ID}" ]]; then
+            echo "SECURITY: Anchor.toml ${anchor_ids[0]} drifted from frozen permanent id ${PERMANENT_ID}." >&2
+            echo "Restore Anchor.toml; do not change the permanent id to match a keypair secret." >&2
             exit 1
           fi
-          echo "PASS: permanent keypair matches Anchor.toml."
+          echo "PASS: Anchor.toml matches the frozen permanent identity."
 
       - name: Stage permanent keypair for Anchor build
         run: |

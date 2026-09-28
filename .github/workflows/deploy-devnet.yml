@@ -295,11 +295,34 @@ jobs:
             echo "Could not resolve one committed identity for ${program}." >&2
             exit 1
           fi
-          if [[ "${keypair_id}" != "${declared_id}" || "${keypair_id}" != "${anchor_ids[0]}" ]]; then
-            echo "Permanent keypair ${keypair_id} does not match committed ${program} identity." >&2
+
+          permanent_id="$(node --input-type=module -e '
+            import { PERMANENT_PROGRAM_IDS } from "./scripts/lib/identity.mjs";
+            process.stdout.write(PERMANENT_PROGRAM_IDS[process.argv[1]] ?? "");
+          ' -- "${program}")"
+          if [[ -z "${permanent_id}" ]]; then
+            echo "No frozen permanent identity exists for ${program}. Refusing to deploy." >&2
+            exit 1
+          fi
+
+          if [[ "${declared_id}" != "${permanent_id}" || "${anchor_ids[0]}" != "${permanent_id}" ]]; then
+            echo "SECURITY: committed ${program} identity drifted from frozen permanent id ${permanent_id}." >&2
             echo "declare_id!: ${declared_id}" >&2
             echo "Anchor.toml: ${anchor_ids[0]}" >&2
-            echo "Synchronize and commit the public program IDs before deployment." >&2
+            echo "Restore the committed identity sources. Do NOT change the permanent id to match a keypair secret." >&2
+            exit 1
+          fi
+
+          if [[ "${keypair_id}" != "${permanent_id}" ]]; then
+            case "${program}" in
+              ppv_core) secret_name="PPV_CORE_PROGRAM_KEYPAIR" ;;
+              ppv_commerce) secret_name="PPV_COMMERCE_PROGRAM_KEYPAIR" ;;
+              ppv_escrow) secret_name="PPV_ESCROW_PROGRAM_KEYPAIR" ;;
+              *) secret_name="program keypair secret" ;;
+            esac
+            echo "WRONG DEVNET PROGRAM KEYPAIR SECRET: ${program} resolves to ${keypair_id}; frozen permanent id is ${permanent_id}." >&2
+            echo "Replace the devnet environment secret ${secret_name} with the backed-up permanent keypair for ${permanent_id}." >&2
+            echo "Do NOT run anchor keys sync and do NOT change Anchor.toml or declare_id! to match this secret." >&2
             exit 1
           fi
 

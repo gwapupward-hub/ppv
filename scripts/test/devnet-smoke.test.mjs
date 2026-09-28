@@ -61,7 +61,6 @@ const CORE_DATA = "6ASf5EcmiEXZoc4LGdxHTqLA1ykMuVjNoJDbNSuGf5Nr";
 /** Escrow's real ProgramData address and its dedicated custody vault. */
 const ESCROW_DATA = "2bWfopyJ8LxJ6azd9ZhaGmfs9S2gGRQKx6TX88ddULAa";
 const CUSTODY_VAULT = "FD2spnsMVgsuddPSRWAe3ee4DMbgDx5ivpvVfvKcNrLE";
-const COMMERCE_DATA = "DyqdftdT3vo2SMvHaKVU2Pmb1zBfJ8wCpYYJQ7idnoAR";
 
 let server;
 let endpoint;
@@ -72,15 +71,11 @@ function defaultState() {
     genesis: DEVNET_GENESIS,
     accounts: {
       [PERMANENT_PROGRAM_IDS.ppv_core]: programAccount(CORE_DATA),
-      [PERMANENT_PROGRAM_IDS.ppv_commerce]: programAccount(COMMERCE_DATA),
-      // Escrow joined DEVNET_DEPLOYED_PROGRAMS when it was deployed, so the
-      // identity phase demands it on chain like the other two. Its authority is
-      // the dedicated custody vault, not the vault holding Core and Commerce —
-      // a fixture that reused VAULT here would let a smoke suite pass while the
-      // escrow authority was wrong, which is the one thing it must catch.
+      // Commerce has a frozen identity but no devnet release record yet, so the
+      // default live fixture deliberately does not create its program account.
+      // Escrow is deployed under the dedicated custody vault.
       [PERMANENT_PROGRAM_IDS.ppv_escrow]: programAccount(ESCROW_DATA),
       [CORE_DATA]: programDataAccount(VAULT),
-      [COMMERCE_DATA]: programDataAccount(VAULT),
       [ESCROW_DATA]: programDataAccount(CUSTODY_VAULT),
     },
   };
@@ -143,18 +138,20 @@ test("a healthy devnet deployment passes the identity phase", async () => {
   });
   assert.equal(result.genesis, DEVNET_GENESIS);
   assert.equal(result.programs.ppv_core.authorityAddress, VAULT);
-  assert.equal(result.programs.ppv_commerce.authorityAddress, VAULT);
+  assert.equal(result.programs.ppv_escrow.authorityAddress, CUSTODY_VAULT);
+  assert.equal(result.programs.ppv_commerce, undefined);
+  assert.ok(result.notReleased.includes("ppv_commerce"));
 });
 
-test("an undeployed program stops the suite", async () => {
-  delete state.accounts[PERMANENT_PROGRAM_IDS.ppv_commerce];
+test("a missing program that is recorded as deployed stops the suite", async () => {
+  delete state.accounts[PERMANENT_PROGRAM_IDS.ppv_core];
   await assert.rejects(
     runIdentityPhase(rpc(endpoint), {
       expectedAuthority: VAULT,
       expectedGenesis: DEVNET_GENESIS,
       encodeBase58: encodeBase58Sdk,
     }),
-    /ppv_commerce is not deployed/,
+    /ppv_core is not deployed/,
   );
   state = defaultState();
 });
@@ -388,9 +385,8 @@ test("a program with no release record is not demanded on chain", async () => {
     encodeBase58: encodeBase58Sdk,
     released: { ppv_core: {} },
   });
-  // ppv_escrow joins the list for a different reason than ppv_commerce: it has
-  // a permanent identity and is deliberately undeployed, so it is never
-  // expected on chain until the custody gate opens.
+  // This explicit release map simulates the earlier Core-only phase. It proves
+  // a frozen identity is not enough to make a program mandatory on chain.
   assert.deepEqual(result.notReleased, ["ppv_commerce", "ppv_escrow"]);
   assert.equal(result.programs.ppv_core.authorityAddress, VAULT);
   assert.equal(result.programs.ppv_commerce, undefined);

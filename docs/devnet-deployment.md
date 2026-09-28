@@ -99,40 +99,35 @@ applies exactly that rule and is the only supported way to move the lockfile.
 Core and Commerce are independently deployable and have separate keypairs and
 separate upgrade authorities.
 
-Program keypairs live in the **cloud secret manager** (Vault / AWS Secrets
-Manager / GCP Secret Manager). They are generated on the operator machine,
-written straight into the secret store, and pulled back only for the duration of
-a build. They never enter Git, CI logs, build artifacts, an application bundle,
-or a chat message.
+Program identities are **already frozen**. Do not generate replacement program
+keypairs and do not run `anchor keys sync` as a recovery step. A new keypair
+would create a different protocol namespace rather than repair the existing one.
+
+The permanent public identities are:
+
+- `ppv_core`: `9cWE41ZDNQChvFrRoVuPQDeoVLg46ACTiZRCZaBZzfwU`
+- `ppv_commerce`: `GmRDoFuPrBrsxnvTX751WK5rLu14JXe4sgjh6vNwHzr3`
+- `ppv_escrow`: `7U1bCHQcr8Jg6J8G69JGaAWCRtsrZB1RYx4zo1sNEVF4`
+
+The corresponding backed-up program keypairs live only in the operator secret
+store / protected GitHub `devnet` environment. They never enter Git, CI
+artifacts, application bundles, or chat messages.
+
+When recovering a deployment secret, materialize the backed-up keypair outside
+the repository and verify its public address before updating the environment
+secret:
 
 ```bash
-# Generate into a directory that is not inside any repository.
-work="$(mktemp -d)"
-trap 'rm -rf "${work}"' EXIT
-
-solana-keygen new --no-bip39-passphrase --outfile "${work}/ppv_core-keypair.json"
-solana-keygen new --no-bip39-passphrase --outfile "${work}/ppv_commerce-keypair.json"
-
-# Push to the secret store, then record the public keys for the manifest.
-# (Substitute your provider's CLI; the point is that the file is stored once and
-# the local copy is destroyed by the trap above.)
-vault kv put secret/ppv/devnet/ppv_core     keypair=@"${work}/ppv_core-keypair.json"
-vault kv put secret/ppv/devnet/ppv_commerce keypair=@"${work}/ppv_commerce-keypair.json"
-
-solana-keygen pubkey "${work}/ppv_core-keypair.json"
-solana-keygen pubkey "${work}/ppv_commerce-keypair.json"
+solana-keygen pubkey /secure/path/ppv_commerce-keypair.json
+# Must print:
+# GmRDoFuPrBrsxnvTX751WK5rLu14JXe4sgjh6vNwHzr3
 ```
 
-Copy the keypairs into `target/deploy/` only for the duration of the build, then
-run:
-
-```bash
-anchor keys sync
-```
-
-`anchor keys sync` rewrites `declare_id!` in both programs and the `[programs.*]`
-tables in `Anchor.toml`. Commit those public IDs. Then rebuild and re-run the
-full F1 suite against the synchronized IDs before deploying.
+If the backup does not derive to the frozen identity, stop. Do not edit
+`Anchor.toml`, `declare_id!`, `scripts/lib/identity.mjs`, or the SDK to make
+them match a different keypair. If the backed-up keypair is unavailable, the
+initial deployment is blocked until the original key material is recovered; a
+public program ID cannot be used to reconstruct its private key.
 
 ## Upgrade authority
 
@@ -394,6 +389,7 @@ incident, not configuration drift — and so is a binary that no longer matches.
 | `anchor build` output differs between runs | Toolchain mismatch | Confirm `anchor --version` and `solana --version` match the table above. |
 | Deploy fails with insufficient funds | Deployer under-funded | Devnet deploys need roughly 2-4 SOL per program; top up and retry. Partial deploys resume via the write buffer. |
 | Deploy fails mid-upload | Transient RPC | Retry the same command; `solana program deploy` resumes from the existing buffer. Do not generate a new program keypair. |
+| `WRONG DEVNET PROGRAM KEYPAIR SECRET` | The protected environment secret derives to a different public key than the frozen permanent program ID | Restore the backed-up permanent keypair into the named `devnet` environment secret. Verify its public key first. Do not run `anchor keys sync` or change any committed program ID. |
 
 ## Known limitations
 
