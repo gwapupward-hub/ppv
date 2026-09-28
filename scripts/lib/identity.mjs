@@ -38,7 +38,9 @@ export const PROGRAM_NAMES = Object.freeze(Object.keys(PERMANENT_PROGRAM_IDS));
  */
 export const DEVNET_DEPLOYED_PROGRAMS = Object.freeze([
   "ppv_core",
-  "ppv_commerce",
+  // ppv_commerce is intentionally absent until its first devnet deployment
+  // completes. The scheduled verifier confirmed its permanent address did not
+  // exist on devnet on 2026-09-21, and the release candidate remains pending.
   // Deployed 2026-09-15 by workflow run 34940712181: program deployed, upgrade
   // authority transferred to the custody vault, and the run's own JSON-RPC read
   // confirmed the authority, `executable` and the upgradeable-loader owner
