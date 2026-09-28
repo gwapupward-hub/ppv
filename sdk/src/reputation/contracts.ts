@@ -305,6 +305,31 @@ function nullableSnapshot(value: unknown) {
   return value === null || isGnsRecordSnapshot(value);
 }
 
+function snapshotMatchesWallet(
+  snapshot: GnsRecordSnapshotV1 | null | undefined,
+  wallet: string | null | undefined,
+) {
+  return snapshot === null || snapshot === undefined
+    ? true
+    : typeof wallet === "string" &&
+        isSolanaAddress(wallet) &&
+        isGnsRecordSnapshot(snapshot) &&
+        snapshot.owner === wallet;
+}
+
+function snapshotListMatchesWallets(
+  snapshots: Array<GnsRecordSnapshotV1 | null> | undefined,
+  wallets: string[] | undefined,
+) {
+  if (!Array.isArray(snapshots) || !Array.isArray(wallets)) return false;
+  return (
+    snapshots.length === wallets.length &&
+    snapshots.every((snapshot, index) =>
+      snapshotMatchesWallet(snapshot, wallets[index]),
+    )
+  );
+}
+
 function isAmount(value: unknown) {
   return value === null || (typeof value === "string" && /^(0|[1-9]\d{0,38})$/.test(value));
 }
@@ -329,8 +354,10 @@ export function isReputationEventV1(value: unknown): value is ReputationEventV1 
     (event.eventSource === "chain" || event.eventSource === "product") &&
     isSolanaAddress(event.actorWallet) &&
     nullableSnapshot(event.actorGnsRecord) &&
+    snapshotMatchesWallet(event.actorGnsRecord, event.actorWallet) &&
     nullableAddress(event.counterpartyWallet) &&
     nullableSnapshot(event.counterpartyGnsRecord) &&
+    snapshotMatchesWallet(event.counterpartyGnsRecord, event.counterpartyWallet) &&
     nullableAddress(event.ppvProofId) &&
     (event.proofHash === null || isSha256Hex(event.proofHash)) &&
     nullableAddress(event.agreementId) &&
@@ -362,6 +389,7 @@ export function isGwapDeliverableReferenceV1(value: unknown): value is GwapDeliv
     /^[A-Za-z0-9:_.-]{1,120}$/.test(reference.deliverableId) &&
     isSolanaAddress(reference.creatorWallet) &&
     nullableSnapshot(reference.creatorGnsRecord) &&
+    snapshotMatchesWallet(reference.creatorGnsRecord, reference.creatorWallet) &&
     isSolanaAddress(reference.ppvProofId) &&
     isSha256Hex(reference.proofHash) &&
     isIsoTimestamp(reference.createdAt) &&
@@ -385,12 +413,16 @@ export function isPpvReceiptV1(value: unknown): value is PpvReceiptV1 {
     nullableAddress(receipt.agreementId) &&
     isSolanaAddress(receipt.holderWallet) &&
     nullableSnapshot(receipt.holderGnsRecord) &&
+    snapshotMatchesWallet(receipt.holderGnsRecord, receipt.holderWallet) &&
     isParticipantRole(receipt.role) &&
     Array.isArray(receipt.counterpartyWallets) &&
     receipt.counterpartyWallets.every(isSolanaAddress) &&
     Array.isArray(receipt.counterpartyGnsRecords) &&
-    receipt.counterpartyGnsRecords.length === receipt.counterpartyWallets.length &&
     receipt.counterpartyGnsRecords.every(nullableSnapshot) &&
+    snapshotListMatchesWallets(
+      receipt.counterpartyGnsRecords,
+      receipt.counterpartyWallets,
+    ) &&
     (receipt.sourceProduct === null || isSourceProduct(receipt.sourceProduct)) &&
     nullableString(receipt.sourceObjectId) &&
     nullableString(receipt.deliverableId) &&

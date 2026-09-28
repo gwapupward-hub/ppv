@@ -238,3 +238,26 @@ test("proof.submitted borrows the proof's chain coordinates and is deterministic
     /must reference a proof.created/,
   );
 });
+
+test("structural validation rejects GNS snapshots bound to the wrong wallet", async () => {
+  const valid = await normalizeChainEvent(envelope(FIXTURES.agreementExecuted), {
+    resolveGns,
+    expectedProgramIds: PROGRAM_IDS,
+  });
+  assert.equal(isReputationEventV1(valid), true);
+
+  assert.equal(
+    isReputationEventV1({
+      ...valid,
+      actorGnsRecord: snapshot("emerald", WALLET_B),
+    }),
+    false,
+  );
+  assert.equal(
+    isReputationEventV1({
+      ...valid,
+      counterpartyGnsRecord: snapshot("onyx", WALLET_A),
+    }),
+    false,
+  );
+});
