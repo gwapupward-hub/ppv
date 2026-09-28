@@ -402,7 +402,7 @@ test("a bad deployment secret can never be repaired by changing the permanent pr
   assert.match(identityStep, /anchor_ids\[0\].*permanent_id/s);
   assert.match(identityStep, /keypair_id.*permanent_id/s);
   assert.match(identityStep, /WRONG DEVNET PROGRAM KEYPAIR SECRET/);
-  assert.match(identityStep, /Do NOT change Anchor\.toml or declare_id!/);
+  assert.match(identityStep, /do NOT change Anchor\.toml or declare_id!/i);
   assert.doesNotMatch(
     identityStep,
     /Synchronize and commit the public program IDs before deployment/,
