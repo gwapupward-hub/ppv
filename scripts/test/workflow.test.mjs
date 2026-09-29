@@ -442,3 +442,71 @@ test("diagnose-devnet-release remains non-deploying after identity diagnostics h
   assert.doesNotMatch(executableDiagnose, /anchor\s+deploy/);
   assert.doesNotMatch(executableDiagnose, /solana\s+transfer/);
 });
+
+
+/**
+ * Static invariants of the manual Core + Commerce lifecycle smoke workflow.
+ *
+ * This workflow is intentionally allowed to sign devnet transactions, but only
+ * through the existing smoke harness and only with a disposable test wallet.
+ * It must never gain deployment, upgrade, custody, or mainnet capabilities.
+ */
+const LIFECYCLE_WORKFLOW_RAW = readFileSync(
+  join(REPO, ".github", "workflows", "devnet-core-commerce-lifecycle-smoke.yml"),
+  "utf8",
+);
+const LIFECYCLE_WORKFLOW = executable(LIFECYCLE_WORKFLOW_RAW);
+
+test("Core and Commerce lifecycle smoke is manual, protected, and devnet-only", () => {
+  assert.match(LIFECYCLE_WORKFLOW_RAW, /^on:\n\s+workflow_dispatch:/m);
+  const triggers = LIFECYCLE_WORKFLOW_RAW.slice(
+    LIFECYCLE_WORKFLOW_RAW.indexOf("\non:"),
+    LIFECYCLE_WORKFLOW_RAW.indexOf("\npermissions:"),
+  );
+  for (const forbidden of ["push:", "pull_request:", "schedule:", "release:", "repository_dispatch:"]) {
+    assert.doesNotMatch(triggers, new RegExp(`\\n\\s+${forbidden}`));
+  }
+  assert.match(LIFECYCLE_WORKFLOW_RAW, /^\s+environment: devnet$/m);
+  assert.match(LIFECYCLE_WORKFLOW_RAW, /^permissions:\n\s+contents: read$/m);
+  assert.match(LIFECYCLE_WORKFLOW_RAW, /RUN_CORE_COMMERCE_LIFECYCLE/);
+  assert.match(LIFECYCLE_WORKFLOW_RAW, /https:\/\/api\.devnet\.solana\.com/);
+  assert.match(LIFECYCLE_WORKFLOW_RAW, /EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG/);
+});
+
+test("Core and Commerce lifecycle smoke cannot deploy, upgrade, or invoke Escrow custody", () => {
+  for (const pattern of [
+    /solana\s+program\s+(deploy|write|upgrade|close|set-upgrade-authority|extend)/,
+    /anchor\s+(deploy|upgrade)/,
+    /set-upgrade-authority/,
+    /devnet-escrow-custody\.mjs/,
+    /program=ppv_escrow/,
+  ]) {
+    assert.doesNotMatch(LIFECYCLE_WORKFLOW, pattern, `lifecycle smoke must not contain ${pattern}`);
+  }
+  assert.match(LIFECYCLE_WORKFLOW_RAW, /node scripts\/devnet-smoke\.mjs --identity-only/);
+  assert.match(LIFECYCLE_WORKFLOW_RAW, /node scripts\/devnet-smoke\.mjs/);
+});
+
+test("lifecycle smoke keypair exists only as a masked environment secret and temporary file", () => {
+  const lifecycleLines = LIFECYCLE_WORKFLOW_RAW.split("\n");
+  const offenders = lifecycleLines
+    .map((line, index) => ({ line, index }))
+    .filter(({ line }) => line.includes("${{ secrets."))
+    .filter(({ line }) => !/^\s+[A-Z_]+: \$\{\{ secrets\.[A-Z_]+ \}\}$/.test(line));
+  assert.deepEqual(
+    offenders.map((o) => `${o.index + 1}: ${o.line.trim()}`),
+    [],
+  );
+  assert.match(LIFECYCLE_WORKFLOW_RAW, /SMOKE_WALLET_SECRET: \$\{\{ secrets\.PPV_SMOKE_WALLET \}\}/);
+  assert.match(LIFECYCLE_WORKFLOW_RAW, /umask 077/);
+  assert.match(LIFECYCLE_WORKFLOW_RAW, /rm -rf/);
+  assert.match(LIFECYCLE_WORKFLOW_RAW, /if: always\(\)/);
+  assert.doesNotMatch(LIFECYCLE_WORKFLOW_RAW, /PPV_DEPLOYER_KEYPAIR/);
+});
+
+test("lifecycle smoke uses a run-scoped marker and requires a funded disposable wallet", () => {
+  assert.match(LIFECYCLE_WORKFLOW_RAW, /PPV_SMOKE_RUN_ID: github-\$\{\{ github\.run_id \}\}-\$\{\{ github\.run_attempt \}\}/);
+  assert.match(LIFECYCLE_WORKFLOW_RAW, /MIN_LAMPORTS: "100000000"/);
+  assert.match(LIFECYCLE_WORKFLOW_RAW, /dedicated disposable devnet-only keypair/);
+  assert.match(LIFECYCLE_WORKFLOW_RAW, /do not reuse the deployer or a governance signer/);
+});
