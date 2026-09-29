@@ -17,6 +17,7 @@ import {
   cancelAgreementInstruction,
   createAgreementInstruction,
   createProofInstruction,
+  devnetFixtures,
   eventCpiAccounts,
   instructionDiscriminator,
   proofAddress,
@@ -225,6 +226,17 @@ function accountsStructOrder(program, structName) {
   const body = source.slice(start, source.indexOf("\n}", start));
   return [...body.matchAll(/^\s+pub (\w+):/gm)].map((match) => match[1]);
 }
+
+test("run-scoped devnet fixtures are deterministic within a run and unique across runs", () => {
+  const first = devnetFixtures("ppv-devnet-smoke-fixture:run-100");
+  const again = devnetFixtures("ppv-devnet-smoke-fixture:run-100");
+  const second = devnetFixtures("ppv-devnet-smoke-fixture:run-101");
+
+  assert.deepEqual(first, again);
+  assert.notDeepEqual(first.agreementId, second.agreementId);
+  assert.notDeepEqual(first.proofId, second.proofId);
+  assert.notDeepEqual(first.termsHash, second.termsHash);
+});
 
 test("instruction discriminators are Anchor's, derived from the instruction name", () => {
   for (const name of ["create_proof", "create_agreement", "sign_agreement", "cancel_agreement"]) {
