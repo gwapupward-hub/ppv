@@ -492,8 +492,8 @@ test("coverage never reports a devnet claim for something only a validator prove
   const classes = new Set(LIFECYCLE_COVERAGE.map((entry) => entry.coverage));
   assert.deepEqual(
     [...classes].sort(),
-    ["live", "validator"],
-    "every step must declare a live or validator coverage class",
+    ["live"],
+    "every reported lifecycle row is now grounded in live devnet or live-deployment state",
   );
   for (const entry of LIFECYCLE_COVERAGE) {
     assert.ok(entry.how.length > 0, `${entry.step} must say how it is covered`);
@@ -649,21 +649,24 @@ test("a custody row goes green only for the exact step the run executed", () => 
 
 test("Core and Commerce smoke rows go green only when that exact live step ran", () => {
   const smokeRows = LIFECYCLE_COVERAGE.filter((entry) => entry.executes === "smoke");
-  const executed = new Set([
-    "agreement creation",
-    "independent two-party acceptance",
-    "proof creation",
-    "cancellation",
-  ]);
+  const executed = new Set(smokeRows.map((entry) => entry.step));
 
   for (const entry of smokeRows) {
-    const label = coverageLabel(entry, RELEASED_ALL, executed);
-    if (entry.step === "proof revocation") {
-      assert.equal(label, "NOT RUN — REQUIRES FUNDED DEVNET TEST WALLET");
-    } else {
-      assert.equal(label, "LIVE VERIFIED", `${entry.step} should reflect the live smoke run`);
-    }
+    assert.equal(
+      coverageLabel(entry, RELEASED_ALL, executed),
+      "LIVE VERIFIED",
+      `${entry.step} should reflect the live smoke run`,
+    );
   }
+
+  const withoutRevocation = new Set(
+    [...executed].filter((step) => step !== "proof revocation"),
+  );
+  const revocation = smokeRows.find((entry) => entry.step === "proof revocation");
+  assert.equal(
+    coverageLabel(revocation, RELEASED_ALL, withoutRevocation),
+    "NOT RUN — REQUIRES FUNDED DEVNET TEST WALLET",
+  );
 });
 
 test("a custody row is still untestable when escrow has no release record", () => {
