@@ -86,6 +86,18 @@ export function createProofInstruction({ authority, proofId, contentHash, contex
   });
 }
 
+export function revokeProofInstruction({ authority, proof }) {
+  return new TransactionInstruction({
+    programId: CORE,
+    keys: [
+      { pubkey: authority, isSigner: true, isWritable: false },
+      { pubkey: proof, isSigner: false, isWritable: true },
+      ...eventCpiAccounts(CORE),
+    ],
+    data: instructionDiscriminator("revoke_proof"),
+  });
+}
+
 export function createAgreementInstruction({
   partyA,
   partyB,
@@ -325,6 +337,7 @@ export async function runLifecyclePhase({ endpoint, walletPath, record, runMarke
     throw new Error("on-chain terms hash does not match the committed terms hash");
   }
   record("contract binding: on-chain hashes match the canonical document hashes", true);
+  executedSteps.push("canonical terms-hash binding");
 
   const signASignature = await send(
     connection,
@@ -421,6 +434,7 @@ export async function runLifecyclePhase({ endpoint, walletPath, record, runMarke
     true,
     `${bindingProof.toBase58()} -> ${agreement.toBase58()}`,
   );
+  executedSteps.push("Core proof bound to a Commerce agreement");
 
   // Neither account decodes as the other. Distinct programs, distinct accounts.
   let separated = false;
@@ -438,6 +452,7 @@ export async function runLifecyclePhase({ endpoint, walletPath, record, runMarke
   }
   if (!separated) throw new Error("SECURITY: a Core proof decoded as a Commerce agreement");
   record("Core and Commerce accounts do not decode as each other", true);
+  executedSteps.push("cross-program account decoding separation");
 
   // ------------------------------------------------------- cancellation path
   // A separate agreement, because executed is terminal: the cancellation path
@@ -473,6 +488,39 @@ export async function runLifecyclePhase({ endpoint, walletPath, record, runMarke
   record("cancellation path reaches a terminal state", true, cancelSignature);
   executedSteps.push("cancellation");
 
+  // ------------------------------------------------------------- revocation
+  // Revoke the same Core proof after all binding assertions have passed. The
+  // proof remains on chain as an immutable historical record, but its current
+  // state and emitted facts must make the revocation unambiguous.
+  const revokeSignature = await send(
+    connection,
+    wallet,
+    revokeProofInstruction({ authority: wallet.publicKey, proof: bindingProof }),
+  );
+  const revokeEvents = await eventsOf(
+    connection,
+    revokeSignature,
+    CORE,
+    sdk.decodePpvEventData,
+  );
+  const revoked = revokeEvents.find((e) => e.name === "ProofRevoked");
+  if (!revoked) throw new Error("ProofRevoked was not emitted");
+
+  const revokedInfo = await connection.getAccountInfo(bindingProof, "confirmed");
+  if (!revokedInfo) throw new Error(`revoked proof ${bindingProof.toBase58()} disappeared`);
+  const revokedProof = sdk.decodeCoreProofAccount(new Uint8Array(revokedInfo.data));
+  if (revokedProof.status !== "Revoked") {
+    throw new Error(`proof status after revoke is ${revokedProof.status}`);
+  }
+  if (!(revokedProof.revokedAt > 0)) {
+    throw new Error("revoked proof has no revokedAt timestamp");
+  }
+  if (revokedProof.authority !== wallet.publicKey.toBase58()) {
+    throw new Error("revoked proof authority changed");
+  }
+  record("Core proof revocation emits ProofRevoked and persists Revoked state", true, revokeSignature);
+  executedSteps.push("proof revocation");
+
   // ------------------------------------------------ combined reconstruction
   // The history, rebuilt from transactions alone through the indexer's
   // extraction path: correct program attribution, and the same result under
@@ -481,7 +529,13 @@ export async function runLifecyclePhase({ endpoint, walletPath, record, runMarke
     ppv_core: PERMANENT_PROGRAM_IDS.ppv_core,
     ppv_commerce: PERMANENT_PROGRAM_IDS.ppv_commerce,
   };
-  const signatures = [agreementSignature, signASignature, signBSignature, proofSignature];
+  const signatures = [
+    agreementSignature,
+    signASignature,
+    signBSignature,
+    proofSignature,
+    revokeSignature,
+  ];
   const transactions = [];
   for (const signature of signatures) {
     transactions.push(await rawTransaction(connection, signature, sdk.encodeBase58));
@@ -512,11 +566,14 @@ export async function runLifecyclePhase({ endpoint, walletPath, record, runMarke
     "ppv_commerce:AgreementSigned",
     "ppv_commerce:AgreementExecuted",
     "ppv_core:ProofCreated",
+    "ppv_core:ProofRevoked",
   ];
   if (JSON.stringify([...history].sort()) !== JSON.stringify([...expected].sort())) {
     throw new Error(`reconstructed history was ${JSON.stringify(history)}`);
   }
   record("combined Core + Commerce history reconstructs from the chain", true, history.join(", "));
+  executedSteps.push("cross-program event attribution");
+  executedSteps.push("combined history reconstruction");
 
   if (JSON.stringify(reconstruct([...transactions, ...transactions])) !== JSON.stringify(history)) {
     throw new Error("duplicate delivery changed the reconstructed history");
@@ -525,10 +582,18 @@ export async function runLifecyclePhase({ endpoint, walletPath, record, runMarke
     throw new Error("delivery order changed the reconstructed history");
   }
   record("replay is idempotent and order-independent", true);
+  executedSteps.push("idempotent and order-independent replay");
 
   // ------------------------------------------------------------- reputation
   // Normalized reputation event, then receipt and seal derivation — all from
   // the events just read back off the chain, with no database in the path.
+  const normalizeOptions = {
+    resolveGns: async () => null,
+    expectedProgramIds: {
+      ppvCore: PERMANENT_PROGRAM_IDS.ppv_core,
+      ppvCommerce: PERMANENT_PROGRAM_IDS.ppv_commerce,
+    },
+  };
   const normalized = await sdk.normalizeChainEvent(
     {
       event: created,
@@ -538,22 +603,47 @@ export async function runLifecyclePhase({ endpoint, walletPath, record, runMarke
       innerInstructionIndex: 0,
       blockTime: created.createdAt,
     },
+    normalizeOptions,
+  );
+  const normalizedRevoked = await sdk.normalizeChainEvent(
     {
-      resolveGns: async () => null,
-      expectedProgramIds: {
-        ppvCore: PERMANENT_PROGRAM_IDS.ppv_core,
-        ppvCommerce: PERMANENT_PROGRAM_IDS.ppv_commerce,
-      },
+      event: revoked,
+      programId: PERMANENT_PROGRAM_IDS.ppv_core,
+      transactionSignature: revokeSignature,
+      instructionIndex: 0,
+      innerInstructionIndex: 0,
+      blockTime: revoked.revokedAt,
     },
+    normalizeOptions,
   );
   if (normalized.eventType !== "proof.created") {
     throw new Error(`unexpected normalized event type ${normalized.eventType}`);
   }
-  record("normalized reputation event derives from the chain event", true, normalized.eventId);
+  if (normalizedRevoked.eventType !== "proof.revoked") {
+    throw new Error(`unexpected normalized event type ${normalizedRevoked.eventType}`);
+  }
+  record(
+    "normalized reputation events derive from live create + revoke events",
+    true,
+    `${normalized.eventId} / ${normalizedRevoked.eventId}`,
+  );
+  executedSteps.push("normalized reputation event");
 
-  const facts = sdk.deriveSealFacts([normalized], { chainVerified: true });
+  const facts = sdk.deriveSealFacts([normalized, normalizedRevoked], { chainVerified: true });
   const seal = sdk.resolveSealState(facts);
-  record("credential seal derives from chain facts", true, seal);
+  if (seal !== "revoked") throw new Error(`revoked proof resolved to seal state ${seal}`);
+  const receipts = sdk.projectReceipts(normalizedRevoked, {
+    sealState: seal,
+    disputeOpen: facts.disputeOpen,
+  });
+  if (receipts.length !== 1 || receipts[0].holderWallet !== wallet.publicKey.toBase58()) {
+    throw new Error("revocation receipt did not project to the proof authority");
+  }
+  if (receipts[0].sealState !== "revoked") {
+    throw new Error(`revocation receipt seal state is ${receipts[0].sealState}`);
+  }
+  record("receipt and credential seal derive from revoked live chain facts", true, seal);
+  executedSteps.push("receipt / credential derivation");
 
   return {
     agreement: agreement.toBase58(),
@@ -569,6 +659,7 @@ export async function runLifecyclePhase({ endpoint, walletPath, record, runMarke
       partyBSignedAndExecuted: signBSignature,
       coreProofCreated: proofSignature,
       agreementCancelled: cancelSignature,
+      coreProofRevoked: revokeSignature,
     },
     history,
     seal,
