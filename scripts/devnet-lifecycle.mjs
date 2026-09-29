@@ -148,8 +148,7 @@ export function cancelAgreementInstruction({ signer, agreement }) {
 }
 
 /** Devnet fixture material. Labelled so nothing here is mistaken for real data. */
-export function devnetFixtures() {
-  const marker = "ppv-devnet-smoke-fixture";
+export function devnetFixtures(marker = "ppv-devnet-smoke-fixture") {
   const hash = (suffix) => [...createHash("sha256").update(`${marker}:${suffix}`).digest()];
   return {
     marker,
@@ -258,14 +257,16 @@ async function rawTransaction(connection, signature, encodeBase58Sdk) {
   };
 }
 
-export async function runLifecyclePhase({ endpoint, walletPath, record }) {
+export async function runLifecyclePhase({ endpoint, walletPath, record, runMarker = "" }) {
   const sdk = await import("@gwap/ppv-sdk");
   const { extractPpvEvents } = await import("@gwap/ppv-indexer");
   const connection = new Connection(endpoint, "confirmed");
   const wallet = Keypair.fromSecretKey(
     Uint8Array.from(JSON.parse(readFileSync(walletPath, "utf8"))),
   );
-  const fixtures = devnetFixtures();
+  const fixtures = devnetFixtures(
+    runMarker ? `ppv-devnet-smoke-fixture:${runMarker}` : undefined,
+  );
 
   /**
    * A disposable counterparty, generated per run.
@@ -275,6 +276,7 @@ export async function runLifecyclePhase({ endpoint, walletPath, record }) {
    * signing authority, and who paid for the transaction is a separate question.
    */
   const partyB = Keypair.generate();
+  const executedSteps = [];
 
   process.stdout.write("\nLifecycle (devnet fixtures)\n");
 
@@ -310,6 +312,7 @@ export async function runLifecyclePhase({ endpoint, walletPath, record }) {
   const agreementCreated = agreementEvents.find((e) => e.name === "AgreementCreated");
   if (!agreementCreated) throw new Error("AgreementCreated was not emitted");
   record("agreement creation emits a decodable AgreementCreated", true, agreementSignature);
+  executedSteps.push("agreement creation");
 
   // Contract/proof binding: the hashes on chain are the canonical hashes of the
   // documents, not values a client asserted.
@@ -353,6 +356,7 @@ export async function runLifecyclePhase({ endpoint, walletPath, record }) {
     throw new Error("AgreementExecuted was not emitted after the second party accepted");
   }
   record("party B accepts and the agreement executes", true, signBSignature);
+  executedSteps.push("independent two-party acceptance");
 
   // Read the account back and check the property that makes an executed
   // agreement mean anything: two *distinct* signers on the *same* terms.
@@ -399,6 +403,7 @@ export async function runLifecyclePhase({ endpoint, walletPath, record }) {
   const created = proofEvents.find((e) => e.name === "ProofCreated");
   if (!created) throw new Error("ProofCreated was not emitted");
   record("Core proof created over the agreement terms", true, proofSignature);
+  executedSteps.push("proof creation");
 
   const proofInfo = await connection.getAccountInfo(bindingProof, "confirmed");
   const proof = sdk.decodeCoreProofAccount(new Uint8Array(proofInfo.data));
@@ -466,6 +471,7 @@ export async function runLifecyclePhase({ endpoint, walletPath, record }) {
     throw new Error("AgreementCancelled was not emitted");
   }
   record("cancellation path reaches a terminal state", true, cancelSignature);
+  executedSteps.push("cancellation");
 
   // ------------------------------------------------ combined reconstruction
   // The history, rebuilt from transactions alone through the indexer's
@@ -566,5 +572,6 @@ export async function runLifecyclePhase({ endpoint, walletPath, record }) {
     },
     history,
     seal,
+    executedSteps,
   };
 }

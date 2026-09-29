@@ -1,0 +1,146 @@
+name: Core + Commerce devnet lifecycle smoke
+
+# Manual only. This workflow sends real transactions to Solana devnet.
+# It never targets mainnet and it never invokes ppv_escrow.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Type RUN_CORE_COMMERCE_LIFECYCLE to confirm real devnet transactions
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ppv-devnet-core-commerce-lifecycle
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    name: Run Core + Commerce lifecycle on devnet
+    runs-on: ubuntu-latest
+    environment: devnet
+    timeout-minutes: 30
+    env:
+      PPV_SMOKE_RPC_URL: https://api.devnet.solana.com
+      PPV_SQUADS_VAULT_PDA: ${{ vars.PPV_SQUADS_VAULT_PDA }}
+      PPV_DEVNET_GENESIS_HASH: ${{ vars.PPV_DEVNET_GENESIS_HASH }}
+
+    steps:
+      - name: Confirm scope and frozen public configuration
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if [[ "${CONFIRM}" != "RUN_CORE_COMMERCE_LIFECYCLE" ]]; then
+            echo "Confirmation must be RUN_CORE_COMMERCE_LIFECYCLE." >&2
+            exit 1
+          fi
+
+          if [[ "${PPV_SQUADS_VAULT_PDA}" != "B6tcsTrMCKTZV5vi3rRCnA3FMPeeWACSHuuTSz5XQgnX" ]]; then
+            echo "devnet PPV_SQUADS_VAULT_PDA does not match the frozen Core/Commerce vault." >&2
+            exit 1
+          fi
+
+          if [[ "${PPV_DEVNET_GENESIS_HASH}" != "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG" ]]; then
+            echo "devnet genesis variable does not match Solana devnet." >&2
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies and build SDK + indexer
+        run: |
+          npm ci
+          npm run build --silent
+
+      - name: Read-only identity gate
+        run: node scripts/devnet-smoke.mjs --identity-only
+
+      - name: Materialize disposable devnet smoke wallet
+        id: wallet
+        env:
+          SMOKE_WALLET_SECRET: ${{ secrets.PPV_SMOKE_WALLET }}
+        run: |
+          if [[ -z "${SMOKE_WALLET_SECRET}" ]]; then
+            echo "PPV_SMOKE_WALLET must be set on the devnet environment." >&2
+            echo "Use a dedicated disposable devnet-only keypair; do not reuse the deployer or a governance signer." >&2
+            exit 1
+          fi
+
+          work="$(mktemp -d)"
+          wallet_path="${work}/smoke-wallet.json"
+          umask 077
+          printf '%s' "${SMOKE_WALLET_SECRET}" > "${wallet_path}"
+          echo "work=${work}" >> "${GITHUB_OUTPUT}"
+          echo "wallet_path=${wallet_path}" >> "${GITHUB_OUTPUT}"
+
+          node --input-type=module - "${wallet_path}" <<'NODE'
+          import { readFileSync } from "node:fs";
+          import { Keypair } from "@solana/web3.js";
+
+          const path = process.argv[2];
+          let raw;
+          try {
+            raw = JSON.parse(readFileSync(path, "utf8"));
+          } catch {
+            console.error("PPV_SMOKE_WALLET is not valid JSON.");
+            process.exit(1);
+          }
+          if (
+            !Array.isArray(raw) ||
+            raw.length !== 64 ||
+            raw.some((value) => !Number.isInteger(value) || value < 0 || value > 255)
+          ) {
+            console.error("PPV_SMOKE_WALLET must be a 64-byte Solana keypair JSON array.");
+            process.exit(1);
+          }
+          const wallet = Keypair.fromSecretKey(Uint8Array.from(raw));
+          console.log("smoke wallet:", wallet.publicKey.toBase58());
+          NODE
+
+      - name: Require enough devnet SOL for the lifecycle
+        env:
+          WALLET_PATH: ${{ steps.wallet.outputs.wallet_path }}
+          MIN_LAMPORTS: "100000000"
+        run: |
+          node --input-type=module - "${WALLET_PATH}" "${MIN_LAMPORTS}" <<'NODE'
+          import { readFileSync } from "node:fs";
+          import { Connection, Keypair } from "@solana/web3.js";
+
+          const wallet = Keypair.fromSecretKey(
+            Uint8Array.from(JSON.parse(readFileSync(process.argv[2], "utf8"))),
+          );
+          const minimum = Number(process.argv[3]);
+          const connection = new Connection("https://api.devnet.solana.com", "confirmed");
+          const balance = await connection.getBalance(wallet.publicKey, "confirmed");
+          console.log(
+            `smoke wallet balance: ${wallet.publicKey.toBase58()} (${balance} lamports)`,
+          );
+          if (!Number.isSafeInteger(balance) || balance < minimum) {
+            console.error(
+              `Smoke wallet needs at least ${minimum} lamports (0.1 devnet SOL); current balance is ${balance}.`,
+            );
+            process.exit(1);
+          }
+          NODE
+
+      - name: Run live Core + Commerce lifecycle
+        env:
+          PPV_SMOKE_WALLET: ${{ steps.wallet.outputs.wallet_path }}
+          PPV_SMOKE_RUN_ID: github-${{ github.run_id }}-${{ github.run_attempt }}
+        run: node scripts/devnet-smoke.mjs
+
+      - name: Destroy disposable wallet material
+        if: always()
+        run: |
+          work="${{ steps.wallet.outputs.work }}"
+          if [[ -n "${work}" && -d "${work}" ]]; then
+            rm -rf "${work}"
+          fi
