@@ -480,8 +480,8 @@ test("coverage never reports a devnet claim for something only a validator prove
   const classes = new Set(LIFECYCLE_COVERAGE.map((entry) => entry.coverage));
   assert.deepEqual(
     [...classes].sort(),
-    ["live", "need-wallet", "validator"],
-    "every step must declare exactly one of the known coverage classes",
+    ["live", "validator"],
+    "every step must declare a live or validator coverage class",
   );
   for (const entry of LIFECYCLE_COVERAGE) {
     assert.ok(entry.how.length > 0, `${entry.step} must say how it is covered`);
@@ -522,9 +522,16 @@ test("a step's label follows what is released, so it cannot go stale", () => {
     assert.equal(coverageLabel(entry, both), "NOT TESTABLE UNTIL ESCROW");
   }
 
-  // A funded-wallet step is reported as not run, never as verified.
-  const walletStep = LIFECYCLE_COVERAGE.find((e) => e.coverage === "need-wallet");
-  assert.match(coverageLabel(walletStep, both), /NOT RUN — REQUIRES FUNDED DEVNET TEST WALLET/);
+  // A funded-wallet step is reported as not run until this run actually executes it.
+  const walletStep = LIFECYCLE_COVERAGE.find((e) => e.executes === "smoke");
+  assert.match(
+    coverageLabel(walletStep, both),
+    /NOT RUN — REQUIRES FUNDED DEVNET TEST WALLET/,
+  );
+  assert.equal(
+    coverageLabel(walletStep, both, new Set([walletStep.step])),
+    "LIVE VERIFIED",
+  );
 });
 
 test("the deployed bytes are checked against the release record, not assumed", async () => {
@@ -628,6 +635,25 @@ test("a custody row goes green only for the exact step the run executed", () => 
   }
 });
 
+test("Core and Commerce smoke rows go green only when that exact live step ran", () => {
+  const smokeRows = LIFECYCLE_COVERAGE.filter((entry) => entry.executes === "smoke");
+  const executed = new Set([
+    "agreement creation",
+    "independent two-party acceptance",
+    "proof creation",
+    "cancellation",
+  ]);
+
+  for (const entry of smokeRows) {
+    const label = coverageLabel(entry, RELEASED_ALL, executed);
+    if (entry.step === "proof revocation") {
+      assert.equal(label, "NOT RUN — REQUIRES FUNDED DEVNET TEST WALLET");
+    } else {
+      assert.equal(label, "LIVE VERIFIED", `${entry.step} should reflect the live smoke run`);
+    }
+  }
+});
+
 test("a custody row is still untestable when escrow has no release record", () => {
   const coreCommerce = new Set(["ppv_core", "ppv_commerce"]);
   const everyCustodyStep = new Set(
@@ -657,7 +683,7 @@ test("the smoke suite reports no custody execution, because it performs none", (
   assert.match(
     source,
     /reportCoverage\(notReleased, Object\.keys\(released\), \[\]\)/,
-    "devnet-smoke.mjs must pass an explicitly empty executed set; it sends no escrow instruction",
+    "identity-only reporting must pass an explicitly empty executed set",
   );
   assert.equal(
     /devnet-escrow-custody/.test(source) ? "referenced" : "unreferenced",
