@@ -21,23 +21,39 @@ function evidencePrograms() {
   );
 }
 
-test("Commerce has a frozen identity but is not recorded as deployed before its first release", () => {
+test("Commerce is recorded as deployed only with committed release evidence", () => {
   assert.equal(
     PERMANENT_PROGRAM_IDS.ppv_commerce,
     "GmRDoFuPrBrsxnvTX751WK5rLu14JXe4sgjh6vNwHzr3",
   );
-  assert.equal(DEVNET_DEPLOYED_PROGRAMS.includes("ppv_commerce"), false);
-  assert.equal(evidencePrograms().has("ppv_commerce"), false);
-
-  const candidate = JSON.parse(
-    readFileSync(
+  assert.equal(DEVNET_DEPLOYED_PROGRAMS.includes("ppv_commerce"), true);
+  assert.equal(evidencePrograms().has("ppv_commerce"), true);
+  assert.equal(
+    existsSync(
       join(REPO, "deployments", "release-candidates", "ppv_commerce.json"),
+    ),
+    false,
+  );
+
+  const evidence = JSON.parse(
+    readFileSync(
+      join(
+        REPO,
+        "deployments",
+        "evidence",
+        "ppv-commerce-devnet-83b5e88.json",
+      ),
       "utf8",
     ),
   );
-  assert.equal(candidate.program, "ppv_commerce");
-  assert.equal(candidate.programId, PERMANENT_PROGRAM_IDS.ppv_commerce);
-  assert.equal(candidate.status, "awaiting-approvals");
+  assert.equal(evidence.releaseCommit, "83b5e8843b5492f4c1b596cb5d4be5d997eb87e4");
+  assert.equal(evidence.programId, PERMANENT_PROGRAM_IDS.ppv_commerce);
+  assert.equal(evidence.binaryHashesMatch, true);
+  assert.equal(
+    evidence.upgradeAuthority,
+    "B6tcsTrMCKTZV5vi3rRCnA3FMPeeWACSHuuTSz5XQgnX",
+  );
+  assert.equal(evidence.upgradeAuthorityThreshold, 2);
 });
 
 test("every program currently recorded as deployed has committed devnet evidence", () => {

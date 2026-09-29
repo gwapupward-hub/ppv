@@ -58,6 +58,7 @@ function programDataAccount(authority) {
 }
 
 const CORE_DATA = "6ASf5EcmiEXZoc4LGdxHTqLA1ykMuVjNoJDbNSuGf5Nr";
+const COMMERCE_DATA = "G8XpcqxCRyuASXwsE2yevjMn398f4E8Mg5ZArUg2qCT7";
 /** Escrow's real ProgramData address and its dedicated custody vault. */
 const ESCROW_DATA = "2bWfopyJ8LxJ6azd9ZhaGmfs9S2gGRQKx6TX88ddULAa";
 const CUSTODY_VAULT = "FD2spnsMVgsuddPSRWAe3ee4DMbgDx5ivpvVfvKcNrLE";
@@ -71,11 +72,11 @@ function defaultState() {
     genesis: DEVNET_GENESIS,
     accounts: {
       [PERMANENT_PROGRAM_IDS.ppv_core]: programAccount(CORE_DATA),
-      // Commerce has a frozen identity but no devnet release record yet, so the
-      // default live fixture deliberately does not create its program account.
+      [PERMANENT_PROGRAM_IDS.ppv_commerce]: programAccount(COMMERCE_DATA),
       // Escrow is deployed under the dedicated custody vault.
       [PERMANENT_PROGRAM_IDS.ppv_escrow]: programAccount(ESCROW_DATA),
       [CORE_DATA]: programDataAccount(VAULT),
+      [COMMERCE_DATA]: programDataAccount(VAULT),
       [ESCROW_DATA]: programDataAccount(CUSTODY_VAULT),
     },
   };
@@ -138,9 +139,9 @@ test("a healthy devnet deployment passes the identity phase", async () => {
   });
   assert.equal(result.genesis, DEVNET_GENESIS);
   assert.equal(result.programs.ppv_core.authorityAddress, VAULT);
+  assert.equal(result.programs.ppv_commerce.authorityAddress, VAULT);
   assert.equal(result.programs.ppv_escrow.authorityAddress, CUSTODY_VAULT);
-  assert.equal(result.programs.ppv_commerce, undefined);
-  assert.ok(result.notReleased.includes("ppv_commerce"));
+  assert.equal(result.notReleased.includes("ppv_commerce"), false);
 });
 
 test("a missing program that is recorded as deployed stops the suite", async () => {
@@ -377,7 +378,7 @@ function proofRecordBytes({ authority, proofId = 7, contentHash = 9, kind = 0, s
 }
 
 test("a program with no release record is not demanded on chain", async () => {
-  // The state this release is actually in: Core is live, Commerce is not.
+  // Historical Core-only state: Commerce has no release record in this explicit map.
   delete state.accounts[PERMANENT_PROGRAM_IDS.ppv_commerce];
   const result = await runIdentityPhase(rpc(endpoint), {
     expectedAuthority: VAULT,
