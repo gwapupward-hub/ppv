@@ -84,8 +84,8 @@ export const LIFECYCLE_COVERAGE = [
   { step: "ppv_core account layout", requires: "ppv_core", coverage: "live", how: "ProofRecord discriminator and layout over live program accounts" },
   { step: "SDK PDA derivation for ppv_core", requires: "ppv_core", coverage: "live", how: "proof PDAs derived under the permanent Core id" },
   { step: "SDK ppv_core instruction targeting", requires: "ppv_core", coverage: "live", how: "built instructions address the permanent Core id" },
-  { step: "proof creation", requires: "ppv_core", coverage: "need-wallet", how: "ppv_core create_proof; needs PPV_SMOKE_WALLET" },
-  { step: "proof revocation", requires: "ppv_core", coverage: "need-wallet", how: "ppv_core revoke_proof; needs PPV_SMOKE_WALLET" },
+  { step: "proof creation", requires: "ppv_core", coverage: "live", executes: "smoke", how: "ppv_core create_proof; needs PPV_SMOKE_WALLET" },
+  { step: "proof revocation", requires: "ppv_core", coverage: "live", executes: "smoke", how: "ppv_core revoke_proof; needs PPV_SMOKE_WALLET" },
 
   { step: "ppv_commerce permanent identity", requires: "ppv_commerce", coverage: "live", how: "program account at the permanent id" },
   { step: "ppv_commerce executable + loader owner", requires: "ppv_commerce", coverage: "live", how: "account flags and owner read from chain" },
@@ -95,9 +95,9 @@ export const LIFECYCLE_COVERAGE = [
   { step: "ppv_commerce account layout", requires: "ppv_commerce", coverage: "live", how: "Agreement discriminator and layout over live program accounts" },
   { step: "SDK PDA derivation for ppv_commerce", requires: "ppv_commerce", coverage: "live", how: "agreement PDAs derived under the permanent Commerce id" },
   { step: "SDK ppv_commerce instruction targeting", requires: "ppv_commerce", coverage: "live", how: "built instructions address the permanent Commerce id" },
-  { step: "agreement creation", requires: "ppv_commerce", coverage: "need-wallet", how: "ppv_commerce create_agreement; needs PPV_SMOKE_WALLET" },
-  { step: "independent two-party acceptance", requires: "ppv_commerce", coverage: "need-wallet", how: "two ppv_commerce sign_agreement transactions from distinct wallets" },
-  { step: "cancellation", requires: "ppv_commerce", coverage: "need-wallet", how: "ppv_commerce cancel_agreement; needs PPV_SMOKE_WALLET" },
+  { step: "agreement creation", requires: "ppv_commerce", coverage: "live", executes: "smoke", how: "ppv_commerce create_agreement; needs PPV_SMOKE_WALLET" },
+  { step: "independent two-party acceptance", requires: "ppv_commerce", coverage: "live", executes: "smoke", how: "two ppv_commerce sign_agreement transactions from distinct wallets" },
+  { step: "cancellation", requires: "ppv_commerce", coverage: "live", executes: "smoke", how: "ppv_commerce cancel_agreement; needs PPV_SMOKE_WALLET" },
 
   { step: "Core/Commerce identity separation", coverage: "live", how: "distinct permanent ids, distinct loader-owned accounts, distinct event authorities" },
   { step: "cross-program account decoding separation", coverage: "validator", how: "each decoder refuses the other program's bytes" },
@@ -141,6 +141,7 @@ const COVERAGE_LABELS = Object.freeze({
  * been established live at all.
  */
 export const EXECUTION_PENDING_LABELS = Object.freeze({
+  smoke: "NOT RUN — REQUIRES FUNDED DEVNET TEST WALLET",
   custody: "LIVE PROGRAM VERIFIED — CUSTODY LIFECYCLE NOT RUN",
 });
 
@@ -620,10 +621,18 @@ export function reportCoverage(notReleased = [], released = [], executed = []) {
       !executedSet.has(entry.step) &&
       (!entry.requires || releasedSet.has(entry.requires)),
   );
-  if (pending.length > 0) {
+  const pendingSmoke = pending.filter((entry) => entry.executes === "smoke");
+  const pendingCustody = pending.filter((entry) => entry.executes === "custody");
+  if (pendingSmoke.length > 0) {
     process.stdout.write(
-      `\n  ${pending.length} custody row(s) describe behaviour this run did not execute. ` +
-        "The deployed program was read and matched; its custody behaviour was not tested here.\n" +
+      `\n  ${pendingSmoke.length} Core/Commerce transaction row(s) were not executed by this run. ` +
+        "Use a funded disposable devnet smoke wallet to establish them.\n",
+    );
+  }
+  if (pendingCustody.length > 0) {
+    process.stdout.write(
+      `\n  ${pendingCustody.length} custody row(s) describe behaviour this run did not execute. ` +
+        "The deployed Escrow program was read and matched; custody behaviour was not tested here.\n" +
         "  Run scripts/devnet-escrow-custody.mjs against devnet to establish them.\n",
     );
   }
@@ -659,13 +668,10 @@ async function main() {
   }
   await runSeparationPhase(encodeBase58Sdk);
 
-  // Explicitly empty. This suite sends Core and Commerce transactions and no
-  // escrow instruction at all, so it has executed no custody step and must not
-  // report one. The custody harness reports its own.
-  reportCoverage(notReleased, Object.keys(released), []);
-
   if (identityOnly) {
-    process.stdout.write("\nLive Core verification passed. No transaction was sent (--identity-only).\n");
+    // No transaction path ran, so every execution-gated row must remain pending.
+    reportCoverage(notReleased, Object.keys(released), []);
+    process.stdout.write("\nLive PPV identity verification passed. No transaction was sent (--identity-only).\n");
     return;
   }
 
@@ -678,7 +684,17 @@ async function main() {
   }
   readFileSync(wallet); // fail early and loudly if the path is wrong
   const { runLifecyclePhase } = await import("./devnet-lifecycle.mjs");
-  await runLifecyclePhase({ endpoint, walletPath: wallet, record, encoder: ENCODER });
+  const lifecycle = await runLifecyclePhase({
+    endpoint,
+    walletPath: wallet,
+    record,
+    encoder: ENCODER,
+    runMarker: process.env.PPV_SMOKE_RUN_ID || "",
+  });
+
+  // Report only the transaction steps this run actually completed. The
+  // lifecycle does not revoke a proof, and it sends no Escrow instruction.
+  reportCoverage(notReleased, Object.keys(released), lifecycle.executedSteps);
 }
 
 // Only run when invoked directly; the tests import the phases above.
