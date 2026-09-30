@@ -66,3 +66,10 @@ security property. The eligibility gate for one already exists in
 facts; nothing a browser sends about eligibility is trusted. Minting itself is
 Phase 12 and waits on a deployed program with a permanent id — there is nothing
 worth pointing an NFT at until then.
+
+
+Metaplex Inscriptions are tracked as a separate future representation/archive
+option. They may package finalized PPV facts, deterministic receipt identifiers,
+and explicitly public credential media directly on Solana, but they do not
+become a source of PPV truth and are never required for verification. See
+[metaplex-inscriptions-intake.md](metaplex-inscriptions-intake.md).
