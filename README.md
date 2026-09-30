@@ -139,3 +139,4 @@ manifest. Never deploy these placeholder IDs.
 - [Release records](deployments/evidence/README.md)
 - [Future arbiter policy gate](docs/arbiter-policy.md)
 - [Security policy](SECURITY.md)
+- [GWAP MASTER cross-system integration contract](docs/gwap-master.md)
