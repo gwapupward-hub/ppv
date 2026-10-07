@@ -1,0 +1,16 @@
+{
+  "oar": "0.1",
+  "app_id": "GhKo1epBh7xn5iZpHYt7Mh6bzRAMo4bpd43zu9HL5gyb",
+  "cluster": "solana:devnet",
+  "name": "GwapSpot OS",
+  "categories": [
+    "identity",
+    "infrastructure"
+  ],
+  "repositories": [
+    {
+      "url": "https://github.com/gwapupward-hub/ppv",
+      "role": "app"
+    }
+  ]
+}
